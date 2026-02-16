@@ -83,14 +83,15 @@ class SharedGroupStream:
                 async with self._lock:
                     self.buffer.append(chunk)
 
-                    if not self.started.is_set():
-                        self.started.set()
-                        logger.debug(
-                            "[SharedStream:%s] First chunk received, signaling started",
-                            self.group_id,
-                        )
+                if not self.started.is_set():
+                    self.started.set()
+                    logger.debug(
+                        "[SharedStream:%s] First chunk received, signaling started",
+                        self.group_id,
+                    )
 
-                    # Distribute to all active subscribers
+                # Distribute to all active subscribers
+                async with self._lock:
                     for player_id, q in list(self.subscribers.items()):
                         try:
                             q.put_nowait(chunk)
@@ -250,7 +251,7 @@ class MSXBridgeProvider(PlayerProvider):
         """Handle async initialization — start embedded HTTP server."""
         raw_port = self.config.get_value(CONF_HTTP_PORT, DEFAULT_HTTP_PORT)
         try:
-            port = int(raw_port)  # type: ignore[arg-type]
+            port = int(raw_port)
         except (TypeError, ValueError):
             port = DEFAULT_HTTP_PORT
         if port < 1 or port > 65535:
@@ -506,7 +507,7 @@ class MSXBridgeProvider(PlayerProvider):
             CONF_PLAYER_IDLE_TIMEOUT, DEFAULT_PLAYER_IDLE_TIMEOUT
         )
         try:
-            timeout_minutes = int(raw_timeout)  # type: ignore[arg-type]
+            timeout_minutes = int(raw_timeout)
         except (TypeError, ValueError):
             timeout_minutes = DEFAULT_PLAYER_IDLE_TIMEOUT
         interval_seconds = 60
