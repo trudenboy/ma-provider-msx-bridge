@@ -135,7 +135,8 @@ async def get_config_entries(
             description=(
                 "How to stream audio to grouped players. "
                 "'Independent' creates separate streams per TV (more CPU, no sync). "
-                "'Shared Buffer' uses one ffmpeg process for all group members (less CPU, better sync)."
+                "'Shared Buffer' uses one ffmpeg process for all group members "
+                "(less CPU, better sync)."
             ),
         ),
     )
