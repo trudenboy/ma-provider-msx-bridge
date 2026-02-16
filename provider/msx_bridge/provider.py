@@ -121,10 +121,8 @@ class SharedGroupStream:
             # Signal EOF to all subscribers
             async with self._lock:
                 for player_id, q in list(self.subscribers.items()):
-                    try:
+                    with contextlib.suppress(asyncio.QueueFull):
                         q.put_nowait(None)
-                    except asyncio.QueueFull:
-                        pass
                     logger.debug(
                         "[SharedStream:%s] Sent EOF to subscriber %s",
                         self.group_id,
@@ -158,7 +156,7 @@ class SharedGroupStream:
             # Wait for stream to start (with timeout)
             try:
                 await asyncio.wait_for(self.started.wait(), timeout=15.0)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 logger.error(
                     "[SharedStream:%s] Timeout waiting for stream start for %s",
                     self.group_id,
