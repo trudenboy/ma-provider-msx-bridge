@@ -99,6 +99,11 @@ class MSXHTTPServer:
 
     def _setup_routes(self) -> None:
         """Register all HTTP routes."""
+        self._setup_msx_routes()
+        self._setup_api_routes()
+
+    def _setup_msx_routes(self) -> None:
+        """Register MSX bootstrap, content, and playback routes."""
         # MSX bootstrap
         self.app.router.add_get("/", self._handle_root)
         self.app.router.add_get("/msx/start.json", self._handle_start_json)
@@ -178,6 +183,8 @@ class MSXHTTPServer:
         self.app.router.add_get("/stream/{player_id}", self._handle_stream)
         self.app.router.add_get("/stream/{player_id}.mp3", self._handle_stream)
 
+    def _setup_api_routes(self) -> None:
+        """Register Library and Playback API routes."""
         # Library API
         self.app.router.add_get("/api/albums", self._handle_albums)
         self.app.router.add_get(

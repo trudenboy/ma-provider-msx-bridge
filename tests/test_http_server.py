@@ -1034,7 +1034,7 @@ async def test_queue_with_items(
 
     # Mock get_player to return our player
     mass_mock.players.get_player = Mock(
-        side_effect=lambda pid, **kw: player if pid == "msx_queue_test" else None
+        side_effect=lambda pid, **_kw: player if pid == "msx_queue_test" else None
     )
 
     # Create mock queue items
