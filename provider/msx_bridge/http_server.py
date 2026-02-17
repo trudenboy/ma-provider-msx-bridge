@@ -195,6 +195,7 @@ class MSXHTTPServer:
         self.app.router.add_get("/api/search", self._handle_search)
         self.app.router.add_get("/api/recently-played", self._handle_recently_played)
         self.app.router.add_get("/api/lyrics/{player_id}", self._handle_lyrics)
+        self.app.router.add_get("/api/queue/{player_id}", self._handle_queue)
 
         # Playback control
         self.app.router.add_post("/api/play", self._handle_play)
@@ -1946,6 +1947,57 @@ small {{ color: #666; display: block; margin-top: 4px; }}
                 "lyrics": lyrics,
                 "lrc_lyrics": lrc_lyrics,
             }
+        )
+
+    async def _handle_queue(self, request: web.Request) -> web.Response:
+        """Return the current playback queue for a given player."""
+        player_id = request.match_info["player_id"]
+
+        player = self.provider.mass.players.get_player(player_id)  # type: ignore[attr-defined]
+        if not player or not isinstance(player, MSXPlayer):
+            return web.json_response({"items": [], "current_index": -1})
+
+        queue_id = player_id
+        try:
+            queue_items = self.provider.mass.player_queues.items(queue_id)
+        except Exception:
+            queue_items = []
+
+        current_uri = None
+        media = player.current_media
+        if media and media.source_id and media.queue_item_id:
+            qi = self.provider.mass.player_queues.get_item(
+                media.source_id, media.queue_item_id
+            )
+            if qi and qi.media_item:
+                current_uri = getattr(qi.media_item, "uri", None)
+
+        items: list[dict[str, Any]] = []
+        current_index = -1
+        for i, qi in enumerate(queue_items):
+            mi = getattr(qi, "media_item", None)
+            uri = getattr(mi, "uri", None) or ""
+            img = None
+            if hasattr(qi, "image") and qi.image:
+                img = self.provider.mass.metadata.get_image_url(qi.image)
+            items.append(
+                {
+                    "title": getattr(mi, "name", None)
+                    or getattr(qi, "name", "")
+                    or "",
+                    "artist": getattr(mi, "artist_str", "") if mi else "",
+                    "duration": getattr(mi, "duration", None)
+                    or getattr(qi, "duration", 0)
+                    or 0,
+                    "image": img,
+                    "uri": uri,
+                }
+            )
+            if current_uri and uri == current_uri and current_index < 0:
+                current_index = i
+
+        return web.json_response(
+            {"items": items, "current_index": current_index}
         )
 
     # --- Playback Control ---
