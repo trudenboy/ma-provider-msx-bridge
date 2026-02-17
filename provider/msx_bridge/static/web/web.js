@@ -512,10 +512,15 @@ const SENDSPIN_URL_PARAM = urlParams.get('sendspin_url') || '';
         if (trackIdx < 0 || trackIdx >= playlist.length) return;
         var track = playlist[trackIdx];
         audio.src = track.url;
-        audio.play().catch(function (e) {
-            console.warn('Autoplay blocked:', e);
+        // Muted autoplay is always allowed; unmute immediately after play starts.
+        // This bypasses browser autoplay restrictions without requiring user interaction.
+        audio.muted = true;
+        audio.play().then(function () {
+            audio.muted = false;
+        }).catch(function (e) {
+            console.warn('Autoplay blocked even when muted:', e);
+            audio.muted = false;
             if (isKioskHtml5Mode()) {
-                // Browser blocked autoplay — show controls so user can tap play
                 showKioskControls();
                 cancelKioskHideTimer();
             }
