@@ -10,7 +10,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-MA_SERVER="${MA_SERVER:-$PROJECT_ROOT/../ma-server}"
+MA_SERVER="${MA_SERVER:-/tmp/ma-server}"
 DATA_DIR="${MA_DATA_DIR:-$HOME/.musicassistant}"
 PID_FILE="$PROJECT_ROOT/.test-server.pid"
 LOG_FILE="$PROJECT_ROOT/.test-server.log"

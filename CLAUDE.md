@@ -70,7 +70,8 @@ Smart TV (MSX App) --HTTP--> MSXBridgeProvider (inside MA, port 8099) --internal
 
 ```bash
 # Clone MA server fork alongside this project (if not already done)
-cd .. && git clone https://github.com/trudenboy/ma-server.git
+# Use the integration branch with pending upstream PRs for the test environment
+cd .. && git clone -b integration/pending-upstream-prs https://github.com/trudenboy/ma-server.git
 
 # Setup venv, install deps, symlink provider — one command does it all
 ./scripts/link-to-ma.sh
@@ -103,6 +104,7 @@ python -c "from music_assistant.providers.msx_bridge import setup; print('OK')"
 - **Commits**: `type(scope): description` — types: feat, fix, docs, style, refactor, test, chore
 - **Async**: All I/O uses async/await (aiohttp)
 - **MA conventions**: Follow patterns from `_demo_player_provider` and `sendspin` providers
+- **DO NOT use subagents (Task tool) without explicit user instruction or confirmation!**
 
 ## Key Files Reference (MA Server)
 
