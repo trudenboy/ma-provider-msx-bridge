@@ -88,6 +88,10 @@ const SENDSPIN_URL_PARAM = urlParams.get('sendspin_url') || '';
     var sendspinReady = false;
     var progressInterval = null;
 
+    // Kiosk auto-hide state
+    var kioskHideTimer = null;
+    var KIOSK_HIDE_DELAY = 3500;
+
     // --- DOM ---
     var audio = document.getElementById('audio');
 
@@ -227,22 +231,25 @@ const SENDSPIN_URL_PARAM = urlParams.get('sendspin_url') || '';
     }
 
     function updateKioskPlayer(track) {
-        var artEl = document.getElementById('kiosk-art');
+        var bgImg = document.getElementById('kiosk-bg-img');
         var titleEl = document.getElementById('kiosk-title');
         var artistEl = document.getElementById('kiosk-artist');
         var durEl = document.getElementById('kiosk-dur');
 
-        if (artEl) {
+        if (bgImg) {
             if (track.image) {
-                artEl.src = track.image;
-                artEl.style.display = '';
+                bgImg.src = track.image;
+                bgImg.style.opacity = '1';
             } else {
-                artEl.style.display = 'none';
+                bgImg.style.opacity = '0';
             }
         }
-        if (titleEl) titleEl.textContent = track.title || 'No track playing';
+        if (titleEl) titleEl.textContent = track.title || '';
         if (artistEl) artistEl.textContent = track.artist || '';
         if (durEl) durEl.textContent = track.duration ? fmtDur(track.duration) : '';
+
+        setKioskPlaying(true);
+        resetKioskHideTimer();
 
         // Also update full player
         updateFullPlayer(track);
@@ -658,16 +665,17 @@ const SENDSPIN_URL_PARAM = urlParams.get('sendspin_url') || '';
                 audio.pause();
                 audio.removeAttribute('src');
                 if (isKioskHtml5Mode()) {
-                    document.getElementById('kiosk-title').textContent = 'Waiting for playback...';
+                    document.getElementById('kiosk-title').textContent = '';
                     document.getElementById('kiosk-artist').textContent = '';
                     document.getElementById('kiosk-time').textContent = '0:00';
                     document.getElementById('kiosk-dur').textContent = '0:00';
                     document.getElementById('kiosk-seek').value = 0;
                     document.getElementById('kiosk-seek').disabled = true;
-                    var artEl = document.getElementById('kiosk-art');
-                    if (artEl) artEl.style.display = 'none';
-                    var placeholder = document.getElementById('kiosk-art-placeholder');
-                    if (placeholder) placeholder.style.display = '';
+                    var bgImg = document.getElementById('kiosk-bg-img');
+                    if (bgImg) bgImg.style.opacity = '0';
+                    setKioskPlaying(false);
+                    cancelKioskHideTimer();
+                    hideKioskControls();
                 } else {
                     document.getElementById('player-bar').classList.remove('active');
                 }
@@ -731,6 +739,28 @@ const SENDSPIN_URL_PARAM = urlParams.get('sendspin_url') || '';
         navStack = [];
         updateContentHeader();
         loadContent('/msx/search-input.json?q=' + encodeURIComponent(q), 'Search: ' + q, false);
+    }
+
+    // --- Kiosk Auto-Hide Controls ---
+    function showKioskControls() {
+        document.getElementById('kiosk-player')?.classList.remove('controls-hidden');
+        document.body.classList.add('controls-visible');
+    }
+    function hideKioskControls() {
+        document.getElementById('kiosk-player')?.classList.add('controls-hidden');
+        document.body.classList.remove('controls-visible');
+    }
+    function resetKioskHideTimer() {
+        showKioskControls();
+        clearTimeout(kioskHideTimer);
+        kioskHideTimer = setTimeout(hideKioskControls, KIOSK_HIDE_DELAY);
+    }
+    function cancelKioskHideTimer() {
+        clearTimeout(kioskHideTimer);
+        kioskHideTimer = null;
+    }
+    function setKioskPlaying(on) {
+        document.getElementById('kiosk-player')?.classList.toggle('playing', on);
     }
 
     // --- Player Mode ---
@@ -797,6 +827,15 @@ const SENDSPIN_URL_PARAM = urlParams.get('sendspin_url') || '';
             if (kioskSeek) {
                 kioskSeek.addEventListener('input', function (e) { seekTo(e.target.value); });
             }
+
+            // Auto-hide controls on inactivity
+            var kc = document.getElementById('kiosk-player');
+            if (kc) {
+                kc.addEventListener('mousemove', resetKioskHideTimer);
+                kc.addEventListener('touchstart', resetKioskHideTimer, { passive: true });
+                kc.addEventListener('click', resetKioskHideTimer);
+            }
+            hideKioskControls(); // start in hidden state
 
             console.log('[WebPlayer] Kiosk mode initialized with HTML5 streaming');
         } else {
