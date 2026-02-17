@@ -194,6 +194,7 @@ class MSXHTTPServer:
         self.app.router.add_get("/api/tracks", self._handle_tracks)
         self.app.router.add_get("/api/search", self._handle_search)
         self.app.router.add_get("/api/recently-played", self._handle_recently_played)
+        self.app.router.add_get("/api/lyrics/{player_id}", self._handle_lyrics)
 
         # Playback control
         self.app.router.add_post("/api/play", self._handle_play)
@@ -1477,7 +1478,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
         # We always use direct stream for maximum compatibility.
         play_path = f"/stream/{player_id}"
 
-        payload: dict[str, Any] = {"type": "play", "path": play_path}
+        payload: dict[str, Any] = {"type": "play", "path": play_path, "player_id": player_id}
         if title:
             payload["title"] = title
         if artist:
@@ -1910,6 +1911,40 @@ small {{ color: #666; display: block; margin-top: 4px; }}
         return web.json_response(
             {
                 "items": [self._format_track(track) for track in tracks],
+            }
+        )
+
+    async def _handle_lyrics(self, request: web.Request) -> web.Response:
+        """Return lyrics for the currently playing track on a given player."""
+        player_id = request.match_info["player_id"]
+        empty = web.json_response({"lyrics": None, "lrc_lyrics": None})
+
+        player = self.provider.mass.players.get(player_id)  # type: ignore[attr-defined]
+        if not player or not isinstance(player, MSXPlayer):
+            return empty
+
+        media = player.current_media
+        if not media or not media.source_id or not media.queue_item_id:
+            return empty
+
+        queue_item = self.provider.mass.player_queues.get_item(
+            media.source_id, media.queue_item_id
+        )
+        if not queue_item or not queue_item.media_item:
+            return empty
+
+        track = queue_item.media_item
+        try:
+            lyrics, lrc_lyrics = await self.provider.mass.metadata.get_track_lyrics(track)
+        except Exception:
+            lyrics, lrc_lyrics = None, None
+
+        return web.json_response(
+            {
+                "title": getattr(track, "name", ""),
+                "artist": getattr(track, "artist_str", ""),
+                "lyrics": lyrics,
+                "lrc_lyrics": lrc_lyrics,
             }
         )
 
