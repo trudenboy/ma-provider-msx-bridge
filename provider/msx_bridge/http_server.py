@@ -1512,7 +1512,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
             playlist_url,
             len(clients),
         )
-        payload: dict[str, Any] = {"type": "playlist", "url": playlist_url}
+        payload: dict[str, Any] = {"type": "playlist", "url": playlist_url, "player_id": player_id}
         msg = json.dumps(payload)
         for ws in list(clients):
             if not ws.closed:

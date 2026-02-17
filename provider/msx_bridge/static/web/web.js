@@ -97,6 +97,7 @@ const SENDSPIN_URL_PARAM = urlParams.get('sendspin_url') || '';
     var currentLyricIdx = -1;
     var lyricsMode = 'none';    // 'none' | 'lrc' | 'plain'
     var lyricsFetchTimer = null;
+    var currentPlayerId = '';   // player_id from last WS play/playlist message
 
     // --- DOM ---
     var audio = document.getElementById('audio');
@@ -262,8 +263,9 @@ const SENDSPIN_URL_PARAM = urlParams.get('sendspin_url') || '';
         resetKioskHideTimer();
 
         // Fetch lyrics for kiosk HTML5/Sendspin modes
-        if ((isKioskHtml5Mode() || isSendspinMode()) && track.player_id) {
-            fetchLyrics(track.player_id);
+        var pid = track.player_id || currentPlayerId;
+        if ((isKioskHtml5Mode() || isSendspinMode()) && pid) {
+            fetchLyrics(pid);
         }
 
         // Also update full player
@@ -510,7 +512,14 @@ const SENDSPIN_URL_PARAM = urlParams.get('sendspin_url') || '';
         if (trackIdx < 0 || trackIdx >= playlist.length) return;
         var track = playlist[trackIdx];
         audio.src = track.url;
-        audio.play().catch(function (e) { console.warn('Autoplay blocked:', e); });
+        audio.play().catch(function (e) {
+            console.warn('Autoplay blocked:', e);
+            if (isKioskHtml5Mode()) {
+                // Browser blocked autoplay — show controls so user can tap play
+                showKioskControls();
+                cancelKioskHideTimer();
+            }
+        });
 
         if (isKioskHtml5Mode()) {
             updateKioskPlayer(track);
@@ -664,6 +673,7 @@ const SENDSPIN_URL_PARAM = urlParams.get('sendspin_url') || '';
         switch (msg.type) {
             case 'play':
                 if (msg.path) {
+                    if (msg.player_id) currentPlayerId = msg.player_id;
                     var track = {
                         url: BASE + msg.path + '.mp3',
                         title: msg.title || '',
@@ -710,7 +720,10 @@ const SENDSPIN_URL_PARAM = urlParams.get('sendspin_url') || '';
                 audio.play();
                 break;
             case 'playlist':
-                if (msg.url) loadPlaylist(msg.url);
+                if (msg.url) {
+                    if (msg.player_id) currentPlayerId = msg.player_id;
+                    loadPlaylist(msg.url);
+                }
                 break;
             case 'goto_index':
                 if (msg.index != null && msg.index < playlist.length) {
