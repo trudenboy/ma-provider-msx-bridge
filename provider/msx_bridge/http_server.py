@@ -1012,13 +1012,13 @@ small {{ color: #666; display: block; margin-top: 4px; }}
             if from_playlist:
                 player._skip_ws_notify = True
 
-            await self.provider.mass.player_queues.play_media(
-                player_id, uri, username=await self.provider.get_owner_username()
-            )
-
-            # Reset skip flag after play_media
-            if from_playlist:
-                player._skip_ws_notify = False
+            try:
+                await self.provider.mass.player_queues.play_media(
+                    player_id, uri, username=await self.provider.get_owner_username()
+                )
+            finally:
+                if from_playlist:
+                    player._skip_ws_notify = False
 
             # Wait for play_media() to signal media is ready (replaces 10s polling loop)
             media = await player.wait_for_media(timeout=10.0)
