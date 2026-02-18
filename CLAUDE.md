@@ -71,7 +71,7 @@ Smart TV (MSX App) --HTTP--> MSXBridgeProvider (inside MA, port 8099) --internal
 ```bash
 # Clone MA server fork alongside this project (if not already done)
 # Use the integration branch with pending upstream PRs for the test environment
-cd .. && git clone -b integration/pending-upstream-prs https://github.com/trudenboy/ma-server.git
+cd /tmp/msx-ma-server && git clone https://github.com/trudenboy/ma-server.git
 
 # Setup venv, install deps, symlink provider — one command does it all
 ./scripts/link-to-ma.sh
@@ -83,16 +83,16 @@ All commands (server, tests, pre-commit, linting) must run inside the MA venv:
 
 ```bash
 # Activate the venv
-source ../ma-server/.venv/bin/activate
+source /tmp/msx-ma-server/ma-server/.venv/bin/activate
 
 # Start MA server (provider auto-loads)
-cd ../ma-server && python -m music_assistant --log-level debug
+cd /tmp/msx-ma-server/ma-server && python -m music_assistant --log-level debug
 
 # Run tests
-cd ../ma-server && pytest
+cd /tmp/msx-ma-server/ma-server && pytest
 
 # Pre-commit (linting, formatting)
-cd ../ma-server && pre-commit run --all-files
+cd /tmp/msx-ma-server/ma-server && pre-commit run --all-files
 
 # Verify provider imports
 python -c "from music_assistant.providers.msx_bridge import setup; print('OK')"
