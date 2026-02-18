@@ -80,7 +80,8 @@ class SharedGroupStream:
             async for chunk in audio_chunks:
                 chunk_count += 1
                 self._total_bytes += len(chunk)
-                self.buffer.append(chunk)
+                async with self._lock:
+                    self.buffer.append(chunk)
 
                 if not self.started.is_set():
                     # Signal that stream has started (first chunk received)
@@ -292,13 +293,15 @@ class MSXBridgeProvider(PlayerProvider):
         self.logger.info("MSX Bridge provider unloaded")
 
     async def get_owner_username(self) -> str | None:
-        """Resolve and cache the first non-system user's username for playlog attribution."""
+        """Resolve and cache the first enabled user's username for playlog attribution."""
         if self._owner_username is None:
             try:
                 users = await self.mass.webserver.auth.list_users()
-                if users:
-                    self._owner_username = users[0].username
-                    self.logger.debug("Resolved owner username: %s", self._owner_username)
+                for user in users:
+                    if user.enabled and user.username:
+                        self._owner_username = user.username
+                        self.logger.debug("Resolved owner username: %s", self._owner_username)
+                        break
             except Exception as err:
                 self.logger.warning("Could not resolve owner username: %s", err)
         return self._owner_username

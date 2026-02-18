@@ -105,6 +105,7 @@ class MSXHTTPServer:
         # MSX bootstrap
         self.app.router.add_get("/", self._handle_root)
         self.app.router.add_get("/msx/start.json", self._handle_start_json)
+        self.app.router.add_get("/msx/launcher.json", self._handle_launcher_json)
         self.app.router.add_get("/msx/plugin.html", self._handle_msx_plugin_html)
         self.app.router.add_get(
             "/msx/tvx-plugin-module.min.js",
@@ -196,7 +197,13 @@ class MSXHTTPServer:
 
     @web.middleware
     async def _cors_middleware(self, request: web.Request, handler: Any) -> web.StreamResponse:
-        """Add CORS headers to all responses."""
+        """Add CORS headers to all responses.
+
+        Wildcard CORS is intentional: this server runs on LAN (default port 8099).
+        The web player (/web) and MSX plugin (/msx/plugin.html) are served from the
+        same origin, so browser playback-control POSTs are always same-origin.
+        MSX TV app only makes GET requests. This matches MA's own webserver pattern.
+        """
         if request.method == "OPTIONS":
             return web.Response(
                 headers={
@@ -213,7 +220,9 @@ class MSXHTTPServer:
         """Start the HTTP server."""
         self._runner = web.AppRunner(self.app)
         await self._runner.setup()
-        # reuse_address + reuse_port allow fast restart after reload
+        # reuse_address + reuse_port allow fast restart after reload.
+        # 0.0.0.0 is required: MSX TVs on LAN must reach this server by host IP;
+        # binding to 127.0.0.1 would prevent TV connections.
         site = web.TCPSite(
             self._runner,
             "0.0.0.0",
@@ -257,7 +266,7 @@ class MSXHTTPServer:
         sendspin_port = "8927"
         sendspin_url = f"http://{hostname}:{sendspin_port}"
         kiosk_html5_url = f"{base}/web?kiosk=1"
-        sendspin_web_url = f"{base}/web?sendspin_url={quote(sendspin_url, safe='')}"
+        sendspin_web_url = f"{base}/web?sendspin=1&sendspin_url={quote(sendspin_url, safe='')}"
         sendspin_kiosk_url = (
             f"{base}/web?kiosk=1&sendspin=1&sendspin_url={quote(sendspin_url, safe='')}"
         )
@@ -326,15 +335,41 @@ small {{ color: #666; display: block; margin-top: 4px; }}
         return web.Response(text=html, content_type="text/html")
 
     async def _handle_start_json(self, request: web.Request) -> web.Response:
-        """Return MSX start configuration."""
+        """Return MSX start configuration pointing to the launcher menu."""
         prefix = f"http://{request.host}"
         return web.json_response(
             {
                 "name": "Music Assistant",
-                "version": "1.0.6",
-                "parameter": f"menu:request:interaction:init@{prefix}/msx/plugin.html?v=8",
+                "version": "1.0.7",
+                "parameter": f"content:{prefix}/msx/launcher.json",
             }
         )
+
+    async def _handle_launcher_json(self, request: web.Request) -> web.Response:
+        """Return MSX launcher page with MSX Player and Web Kiosk options."""
+        prefix = f"http://{request.host}"
+        content = MsxContent(
+            headline="Music Assistant",
+            template=MsxTemplate(
+                type="separate",
+                layout="0,0,2,4",
+                icon="msx-white-soft:music-note",
+                action="content:{context:content}",
+            ),
+            items=[
+                MsxItem(
+                    label="MSX Player",
+                    icon="msx-white-soft:tv",
+                    action=f"menu:request:interaction:init@{prefix}/msx/plugin.html?v=8",
+                ),
+                MsxItem(
+                    label="Web Kiosk",
+                    icon="msx-white-soft:open-in-browser",
+                    action=f"link:{prefix}/web?kiosk=1",
+                ),
+            ],
+        )
+        return web.json_response(content.model_dump(by_alias=True, exclude_none=True))
 
     def _serve_static(self, filename: str) -> Any:
         """Create a handler that serves a static file from the static directory."""
@@ -2009,13 +2044,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
         or "" if using IP fallback.
         """
         device_id = request.query.get("device_id")
-        # Try to get real IP from proxy headers first, then fall back to remote
-        remote_ip = (
-            request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
-            or request.headers.get("X-Real-IP", "")
-            or request.remote
-            or "unknown"
-        )
+        remote_ip = request.remote or "unknown"
 
         if device_id:
             sanitized = PLAYER_ID_SANITIZE_RE.sub("_", device_id).strip("_") or "device"
@@ -2053,13 +2082,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
         Player may be None if registration failed.
         """
         player_id, device_param = self._get_player_id_and_device_param(request)
-        # Get remote IP for display name
-        remote_ip = (
-            request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
-            or request.headers.get("X-Real-IP", "")
-            or request.remote
-            or None
-        )
+        remote_ip = request.remote
         # Web player clients pass source=web to distinguish from MSX TV players
         display_name: str | None = None
         prefix_label = "WEB TV" if request.query.get("source") == "web" else "MSX TV"
