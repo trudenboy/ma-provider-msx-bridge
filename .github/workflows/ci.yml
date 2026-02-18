@@ -72,3 +72,7 @@ jobs:
           source ma-server/.venv/bin/activate
           ruff check provider/ tests/
           ruff format --check provider/ tests/
+      - name: Type check
+        run: |
+          source ma-server/.venv/bin/activate
+          mypy provider/ --ignore-missing-imports
