@@ -30,6 +30,7 @@ Stream your [Music Assistant](https://music-assistant.io/) library to Smart TVs 
 <img width="960" height="540" alt="Screenshot 2026-02-18 at 16 34 49" src="https://github.com/user-attachments/assets/67e78b1a-3eb8-4c6c-accd-e5d2d8766763" />
 <img width="960" height="540" alt="Screenshot 2026-02-18 at 16 36 01" src="https://github.com/user-attachments/assets/71c2bdc6-8605-4da2-a8e3-6a1a8b7b0408" />
 <img width="960" height="540" alt="Screenshot 2026-02-18 at 16 32 12" src="https://github.com/user-attachments/assets/b6470645-8dc6-4687-a037-76a0d0ded039" />
+
 ## Architecture
 
 ```
