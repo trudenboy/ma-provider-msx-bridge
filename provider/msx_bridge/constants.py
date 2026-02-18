@@ -1,5 +1,7 @@
 """Constants for the MSX Bridge Provider."""
 
+from __future__ import annotations
+
 import re
 
 CONF_HTTP_PORT = "http_port"

@@ -138,22 +138,12 @@ class SharedGroupStream:
         # Large queue to handle slow readers (TV with weak WiFi)
         q: asyncio.Queue[bytes | None] = asyncio.Queue(maxsize=512)
 
-        async with self._lock:
-            self.subscribers[player_id] = q
-            subscriber_count = len(self.subscribers)
-
-        logger.info(
-            "[SharedStream:%s] Subscriber %s joined (total: %d)",
-            self.group_id,
-            player_id,
-            subscriber_count,
-        )
-
         bytes_sent = 0
         chunks_sent = 0
 
         try:
-            # Wait for stream to start (with timeout)
+            # Wait for stream to start before registering so we don't receive
+            # chunks that are already in the catch-up buffer via both paths.
             try:
                 await asyncio.wait_for(self.started.wait(), timeout=15.0)
             except TimeoutError:
@@ -164,9 +154,23 @@ class SharedGroupStream:
                 )
                 return
 
-            # Phase 1: Catch-up from buffer (for late joiners)
+            # Phase 1: Snapshot buffer and register for live chunks atomically.
+            # Holding the lock ensures the producer cannot distribute a new chunk
+            # between the snapshot and the registration, eliminating the window
+            # where the first chunk would appear in both the catch-up buffer and
+            # the subscriber's live queue.
             async with self._lock:
                 buffer_snapshot = list(self.buffer)
+                self.subscribers[player_id] = q
+                subscriber_count = len(self.subscribers)
+
+            logger.info(
+                "[SharedStream:%s] Subscriber %s joined (total: %d)",
+                self.group_id,
+                player_id,
+                subscriber_count,
+            )
+
             buffer_bytes = sum(len(c) for c in buffer_snapshot)
             logger.debug(
                 "[SharedStream:%s] Sending %d catch-up chunks (%d bytes) to %s",
