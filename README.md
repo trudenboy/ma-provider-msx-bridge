@@ -78,20 +78,93 @@ start.json ──► plugin.html (interaction plugin)
 
 Content pages return MSX JSON with `action` fields:
 - `"content:..."` — drill down to a detail page
-- `"audio:..."` — start audio playback
+- `"audio:..."` — start audio playback for a single track (used inside playlists)
+- `"playlist:..."` — load an MSX native playlist URL (auto-starts, supports TV-remote next/prev)
 
 ### Audio Playback Flow
 
 ```
-TV clicks track
+TV clicks track item (action: "playlist:/msx/playlist/album/{id}.json")
     │
     ▼
+MSX loads playlist JSON ── tracks rotated so clicked track is index 0
+    │
+    ▼ (each item: action: "audio:/msx/audio/{player_id}?uri=...&from_playlist=1")
+    │
 GET /msx/audio/{player_id}?uri=<track_uri>
     │
-    ├─► play_media() enqueues track via MA queue system
-    ├─► poll MSXPlayer.current_stream_url (up to 10s)
-    └─► proxy audio bytes from MA stream URL → TV speakers
+    ├─► play_media() enqueues track in MA queue
+    ├─► wait for MSXPlayer.wait_for_media() (up to 10s)
+    └─► PCM → ffmpeg → MP3/AAC/FLAC → TV speakers
+          (Content-Length set for MP3/AAC; omitted for FLAC)
+
+MA queue track change (next/prev from MA UI or API):
+    │
+    ▼
+notify_play_playlist() ── WS: {type:"playlist", url:"/msx/queue-playlist/{id}.json"}
+    └─► same queue, different track → WS: {type:"goto_index", index:N}
 ```
+
+## Browser Web Player
+
+Open `http://<SERVER_IP>:8099/web/` in any browser — no MSX app required.
+
+### Normal mode (`/web/`)
+
+Full library browser with sidebar navigation:
+
+- **Sidebar** — Albums, Artists, Playlists, Tracks, Recently Played, Search
+- **Content grid** — card view with album art; drill into album tracks / artist albums / playlist tracks
+- **Bottom player bar** — prev / play-pause / next + progress scrubber
+- **Full-screen player** (click the bar) — large album art, queue panel on the right, seek bar
+- **HTML5 audio** — streams directly from the provider; same `/msx/audio/` endpoint as the TV app
+- **WebSocket sync** — MA-initiated play/stop events reflected instantly in the browser
+
+### Kiosk mode (`/web/?kiosk=1`)
+
+Immersive full-screen display designed for always-on screens (TV, kiosk, digital signage):
+
+```
+┌──────────────────────────────────────────────────┐
+│  Blurred album art background + vignette overlay  │
+│                                                    │
+│ ┌────────────┐ ┌────────────────┐ ┌─────────────┐ │
+│ │  Album art │ │  LRC Lyrics    │ │    Queue    │ │
+│ │            │ │  (scrolling,   │ │  (up next)  │ │
+│ │  Title     │ │   karaoke)     │ │             │ │
+│ │  Artist    │ │  — or —        │ │             │ │
+│ │            │ │  CSS equalizer │ │             │ │
+│ └────────────┘ └────────────────┘ └─────────────┘ │
+│                                                    │
+│  [◄◄]  [▶▶]  [▶]  0:00 ──────────── 3:42          │  ← auto-hides
+└──────────────────────────────────────────────────┘
+```
+
+- **Three-column layout**: album art + track info (left), lyrics / equalizer (center), queue (right)
+- **Karaoke lyrics** — LRC-synced scrolling lines from `/api/lyrics/{player_id}`; active line highlighted and enlarged
+- **CSS equalizer** — animated bars shown in the center column when no lyrics are available
+- **Blurred background** — album art fills the screen, blurred + darkened
+- **Auto-hiding controls** — seek bar + prev/play/next panel fades out after a few seconds of inactivity; reappears on mouse move or touch
+- **Idle state** — music note icon + "Waiting for playback…" shown when nothing is playing
+- **WebSocket push** — MA-initiated play/stop/pause/seek updates the display instantly
+- **Device ID** — persisted in `localStorage`; each browser tab gets its own MA player
+- **Responsive** — queue hidden on ≤ 900 px; single-column on mobile (≤ 640 px)
+- **4K / large screen** — `@media (min-width: 1920px)` scales up fonts and controls
+
+### Kiosk + Sendspin mode (`/web/?kiosk=1&sendspin=1`)
+
+Same visuals as kiosk, but audio is delivered via the [Sendspin](https://github.com/music-assistant/sendspin) SDK for clock-synchronized multi-room playback:
+
+- Sync indicator (top-right): `CONNECTING` → `SYNCING` → `SYNCED`
+- Custom Sendspin server URL: `?sendspin_url=http://<SERVER_IP>:8927`
+
+### URL parameters summary
+
+| Parameter | Example | Effect |
+|-----------|---------|--------|
+| `kiosk` | `?kiosk=1` | Enable kiosk mode |
+| `sendspin` | `?kiosk=1&sendspin=1` | Kiosk + Sendspin synchronized audio |
+| `sendspin_url` | `?sendspin_url=http://ma:8927` | Override Sendspin server URL |
 
 ## Quick Start
 
@@ -160,6 +233,7 @@ You can also visit `http://<YOUR_SERVER_IP>:8099/` in a browser for a status das
 | GET | `/msx/recently-played.json` | Recently played tracks |
 | GET | `/msx/search-page.json` | Search page with Input Plugin keyboard trigger |
 | GET | `/msx/search-input.json?q=...` | Search results from Input Plugin keyboard |
+| GET | `/msx/launcher.json` | Alternative launcher (MSX launcher param) |
 | GET | `/msx/search.json?q=...` | Search results (artists, albums, tracks) |
 
 ### MSX Detail Pages
@@ -169,6 +243,17 @@ You can also visit `http://<YOUR_SERVER_IP>:8099/` in a browser for a status das
 | GET | `/msx/albums/{id}/tracks.json` | Tracks for an album |
 | GET | `/msx/artists/{id}/albums.json` | Albums for an artist |
 | GET | `/msx/playlists/{id}/tracks.json` | Tracks for a playlist |
+
+### MSX Native Playlists
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/msx/playlist/album/{id}.json` | Album tracks as MSX native playlist |
+| GET | `/msx/playlist/playlist/{id}.json` | Playlist tracks as MSX native playlist |
+| GET | `/msx/playlist/tracks.json` | All tracks as MSX native playlist |
+| GET | `/msx/playlist/recently-played.json` | Recently played as MSX native playlist |
+| GET | `/msx/playlist/search.json?q=...` | Search results as MSX native playlist |
+| GET | `/msx/queue-playlist/{player_id}.json` | Current MA queue as MSX native playlist |
 
 ### Audio & Stream
 
@@ -190,6 +275,8 @@ You can also visit `http://<YOUR_SERVER_IP>:8099/` in a browser for a status das
 | GET | `/api/tracks` | List tracks |
 | GET | `/api/search?q=...` | Search library |
 | GET | `/api/recently-played` | Recently played tracks |
+| GET | `/api/lyrics/{player_id}` | Lyrics for the currently playing track |
+| GET | `/api/queue/{player_id}` | Current queue state |
 
 ### Playback Control
 
@@ -206,7 +293,7 @@ You can also visit `http://<YOUR_SERVER_IP>:8099/` in a browser for a status das
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/ws?device_id=...` | WebSocket for push playback (MA → MSX play/stop notifications) |
+| GET | `/ws?device_id=...` | Bidirectional WebSocket: MA→TV (play/stop/pause/resume/playlist/goto_index/seek), TV→MA (position/pause/resume) |
 
 ### Utility
 
@@ -290,12 +377,16 @@ provider/msx_bridge/
     └── tvx-plugin.min.js       # TVX plugin library
 
 tests/
-├── conftest.py        # Shared fixtures (mock MA, players, HTTP server)
-├── test_init.py       # Provider setup tests
-├── test_player.py     # MSXPlayer unit tests
-├── test_provider.py   # MSXBridgeProvider unit tests
-├── test_http_server.py # HTTP route tests
-└── integration/       # Integration tests (require running MA server)
+├── conftest.py         # Shared fixtures (mock MA, players, HTTP server)
+├── test_init.py        # Provider setup tests
+├── test_player.py      # MSXPlayer unit tests (42)
+├── test_provider.py    # MSXBridgeProvider unit tests (9)
+├── test_http_server.py # HTTP route tests (53)
+├── test_group_stream.py # SharedGroupStream tests (20)
+├── test_models.py      # Pydantic model tests (4)
+├── test_mappers.py     # Mapper function tests (2)
+├── test_playlist.py    # Playlist integration tests (5)
+└── integration/        # Integration tests — require running MA server (30)
 
 scripts/
 ├── link-to-ma.sh      # Setup venv + symlink provider into MA server

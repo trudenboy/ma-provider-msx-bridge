@@ -5,7 +5,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-MA_SERVER="/tmp/msx-ma-server/ma-server"
+MA_SERVER="${1:-/tmp/msx-ma-server/ma-server}"
 
 PROVIDER_SRC="$PROJECT_ROOT/provider/msx_bridge"
 PROVIDER_DST="$MA_SERVER/music_assistant/providers/msx_bridge"
