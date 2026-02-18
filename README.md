@@ -29,7 +29,7 @@ Stream your [Music Assistant](https://music-assistant.io/) library to Smart TVs 
 <img width="1525" height="923" alt="MSX Player View" src="https://github.com/user-attachments/assets/e504a370-dd83-4485-aba2-66e46c74b50a" />
 <img width="960" height="540" alt="Screenshot 2026-02-18 at 16 34 49" src="https://github.com/user-attachments/assets/67e78b1a-3eb8-4c6c-accd-e5d2d8766763" />
 <img width="960" height="540" alt="Screenshot 2026-02-18 at 16 36 01" src="https://github.com/user-attachments/assets/71c2bdc6-8605-4da2-a8e3-6a1a8b7b0408" />
-<img width="960" height="540" alt="Screenshot 2026-02-18 at 16 32 12" src="https://github.com/user-attachments/assets/b6470645-8dc6-4687-a037-76a0d0ded039" />
+
 
 ## Architecture
 
@@ -125,21 +125,7 @@ Full library browser with sidebar navigation:
 
 Immersive full-screen display designed for always-on screens (TV, kiosk, digital signage):
 
-```
-┌──────────────────────────────────────────────────┐
-│  Blurred album art background + vignette overlay  │
-│                                                    │
-│ ┌────────────┐ ┌────────────────┐ ┌─────────────┐ │
-│ │  Album art │ │  LRC Lyrics    │ │    Queue    │ │
-│ │            │ │  (scrolling,   │ │  (up next)  │ │
-│ │  Title     │ │   karaoke)     │ │             │ │
-│ │  Artist    │ │  — or —        │ │             │ │
-│ │            │ │  CSS equalizer │ │             │ │
-│ └────────────┘ └────────────────┘ └─────────────┘ │
-│                                                    │
-│  [◄◄]  [▶▶]  [▶]  0:00 ──────────── 3:42          │  ← auto-hides
-└──────────────────────────────────────────────────┘
-```
+<img width="960" height="540" alt="Screenshot 2026-02-18 at 16 32 12" src="https://github.com/user-attachments/assets/b6470645-8dc6-4687-a037-76a0d0ded039" />
 
 - **Three-column layout**: album art + track info (left), lyrics / equalizer (center), queue (right)
 - **Karaoke lyrics** — LRC-synced scrolling lines from `/api/lyrics/{player_id}`; active line highlighted and enlarged
