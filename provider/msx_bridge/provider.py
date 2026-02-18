@@ -97,8 +97,7 @@ class SharedGroupStream:
                             q.put_nowait(chunk)
                         except asyncio.QueueFull:
                             logger.warning(
-                                "[SharedStream:%s] Queue full for subscriber %s, "
-                                "dropping chunk %d",
+                                "[SharedStream:%s] Queue full for subscriber %s, dropping chunk %d",
                                 self.group_id,
                                 player_id,
                                 chunk_count,
@@ -200,8 +199,7 @@ class SharedGroupStream:
                 remaining = len(self.subscribers)
 
             logger.info(
-                "[SharedStream:%s] Subscriber %s left after %d chunks, %d bytes "
-                "(remaining: %d)",
+                "[SharedStream:%s] Subscriber %s left after %d chunks, %d bytes (remaining: %d)",
                 self.group_id,
                 player_id,
                 chunks_sent,
@@ -260,8 +258,7 @@ class MSXBridgeProvider(PlayerProvider):
         self.http_server = MSXHTTPServer(self, port)
         await self.http_server.start()
         self.logger.info(
-            "MSX Bridge provider initialized, HTTP server on port %s, "
-            "group_stream_mode=%s",
+            "MSX Bridge provider initialized, HTTP server on port %s, group_stream_mode=%s",
             port,
             self.group_stream_mode,
         )
@@ -301,9 +298,7 @@ class MSXBridgeProvider(PlayerProvider):
                 users = await self.mass.webserver.auth.list_users()
                 if users:
                     self._owner_username = users[0].username
-                    self.logger.debug(
-                        "Resolved owner username: %s", self._owner_username
-                    )
+                    self.logger.debug("Resolved owner username: %s", self._owner_username)
             except Exception as err:
                 self.logger.warning("Could not resolve owner username: %s", err)
         return self._owner_username
@@ -324,11 +319,9 @@ class MSXBridgeProvider(PlayerProvider):
         """
         # Wait for any pending unregister to complete (race condition handling)
         if pending_event := self._pending_unregisters.get(player_id):
-            self.logger.debug(
-                "Waiting for pending unregister of %s before registering", player_id
-            )
+            self.logger.debug("Waiting for pending unregister of %s before registering", player_id)
             await pending_event.wait()
-        existing = self.mass.players.get_player(player_id, raise_unavailable=False)  # type: ignore[attr-defined]
+        existing = self.mass.players.get_player(player_id, raise_unavailable=False)
         if existing and isinstance(existing, MSXPlayer):
             if ip_address and not existing.device_info.ip_address:
                 existing.device_info.ip_address = ip_address
@@ -509,9 +502,7 @@ class MSXBridgeProvider(PlayerProvider):
         """Background task: unregister players idle longer than configured timeout."""
         timeout_minutes = cast(
             "int",
-            self.config.get_value(
-                CONF_PLAYER_IDLE_TIMEOUT, DEFAULT_PLAYER_IDLE_TIMEOUT
-            ),
+            self.config.get_value(CONF_PLAYER_IDLE_TIMEOUT, DEFAULT_PLAYER_IDLE_TIMEOUT),
         )
         interval_seconds = 60
         while not self.mass.closing:
@@ -531,9 +522,7 @@ class MSXBridgeProvider(PlayerProvider):
                         player.player_id,
                         timeout_minutes,
                     )
-                    self.mass.create_task(
-                        self._handle_player_unregister(player.player_id)
-                    )
+                    self.mass.create_task(self._handle_player_unregister(player.player_id))
 
     # --- Group Stream Management ---
 
@@ -600,8 +589,7 @@ class MSXBridgeProvider(PlayerProvider):
         # Reuse existing if same media and not finished
         if existing and not existing.finished and existing.media_uri == media_uri:
             logger.info(
-                "[GroupStream] Reusing existing shared stream for group %s "
-                "(subscribers: %d)",
+                "[GroupStream] Reusing existing shared stream for group %s (subscribers: %d)",
                 group_id,
                 existing.subscriber_count,
             )
@@ -610,8 +598,7 @@ class MSXBridgeProvider(PlayerProvider):
         # Clean up old stream if exists
         if existing:
             logger.info(
-                "[GroupStream] Replacing old shared stream for group %s "
-                "(old_uri=%s, new_uri=%s)",
+                "[GroupStream] Replacing old shared stream for group %s (old_uri=%s, new_uri=%s)",
                 group_id,
                 existing.media_uri[:50] if existing.media_uri else "N/A",
                 media_uri[:50] if media_uri else "N/A",
@@ -675,9 +662,7 @@ class MSXBridgeProvider(PlayerProvider):
             # Get queue to find session_id
             queue = self.mass.player_queues.get(source_id)
             if not queue:
-                logger.warning(
-                    "[MARedirect] Queue not found for source_id=%s", source_id
-                )
+                logger.warning("[MARedirect] Queue not found for source_id=%s", source_id)
                 return None
 
             # Build MA Streamserver URL
@@ -688,8 +673,7 @@ class MSXBridgeProvider(PlayerProvider):
                 base_url = self.mass.webserver.base_url
 
             stream_url = (
-                f"{base_url}/api/streams/single/{source_id}/"
-                f"queue/{queue_item_id}.{output_format}"
+                f"{base_url}/api/streams/single/{source_id}/queue/{queue_item_id}.{output_format}"
             )
 
             logger.info(
@@ -699,9 +683,7 @@ class MSXBridgeProvider(PlayerProvider):
             return stream_url
 
         except Exception as err:
-            logger.warning(
-                "[MARedirect] Failed to get MA stream URL: %s", err, exc_info=True
-            )
+            logger.warning("[MARedirect] Failed to get MA stream URL: %s", err, exc_info=True)
             return None
 
     async def cleanup_shared_streams(self) -> None:

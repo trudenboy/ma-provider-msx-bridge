@@ -302,7 +302,7 @@
                 }
             } catch (e) {}
         }
-        
+
         // Method 2: tvx.Tools.getHostDeviceId() - synchronous
         if (typeof tvx !== "undefined" && tvx.Tools && typeof tvx.Tools.getHostDeviceId === "function") {
             try {
@@ -313,7 +313,7 @@
                 }
             } catch (e) {}
         }
-        
+
         // Method 3: tvx.Settings.get("device")
         if (typeof tvx !== "undefined" && tvx.Settings && typeof tvx.Settings.get === "function") {
             try {
@@ -324,7 +324,7 @@
                 }
             } catch (e) {}
         }
-        
+
         // Method 4: tvx.Tools.getUniqueId()
         if (typeof tvx !== "undefined" && tvx.Tools && typeof tvx.Tools.getUniqueId === "function") {
             try {
@@ -335,7 +335,7 @@
                 }
             } catch (e) {}
         }
-        
+
         return null;
     }
 
@@ -364,7 +364,7 @@
     function collectTvxDebugInfo() {
         var info = { tvx_available: typeof tvx !== "undefined" };
         if (typeof tvx === "undefined") return info;
-        
+
         // tvx.Tools methods
         if (tvx.Tools) {
             info.tools_methods = Object.keys(tvx.Tools);
@@ -373,7 +373,7 @@
             try { info.getHostInfo = tvx.Tools.getHostInfo(); } catch(e) { info.getHostInfo_error = String(e); }
             try { info.getPlatformInfo = tvx.Tools.getPlatformInfo(); } catch(e) { info.getPlatformInfo_error = String(e); }
         }
-        
+
         // tvx.Settings
         if (tvx.Settings && typeof tvx.Settings.get === "function") {
             try { info.settings_device = tvx.Settings.get("device"); } catch(e) { info.settings_device_error = String(e); }
@@ -381,24 +381,24 @@
             try { info.settings_info = tvx.Settings.get("info"); } catch(e) { info.settings_info_error = String(e); }
             try { info.settings_id = tvx.Settings.get("id"); } catch(e) { info.settings_id_error = String(e); }
         }
-        
+
         // tvx.VideoPlugin
         if (tvx.VideoPlugin) {
             info.videoPlugin_methods = Object.keys(tvx.VideoPlugin);
             try { info.videoPlugin_getDeviceId = tvx.VideoPlugin.getDeviceId(); } catch(e) { info.videoPlugin_getDeviceId_error = String(e); }
         }
-        
+
         // tvx.InteractionPlugin
         if (tvx.InteractionPlugin && typeof tvx.InteractionPlugin.getInfo === "function") {
             try { info.interactionPlugin_info = tvx.InteractionPlugin.getInfo(); } catch(e) {}
         }
-        
+
         // User agent
         info.userAgent = navigator.userAgent;
-        
+
         return info;
     }
-    
+
     // Send debug info to server via WebSocket
     function sendDebugInfoToServer(ws) {
         if (!ws || ws.readyState !== WebSocket.OPEN) return;
