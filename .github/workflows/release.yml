@@ -1,0 +1,51 @@
+name: Release
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version (semver, e.g. 1.2.0)"
+        required: true
+        type: string
+      prerelease:
+        description: "Pre-release?"
+        type: boolean
+        default: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate version format
+        run: |
+          echo "${{ inputs.version }}" | grep -Pq '^\d+\.\d+\.\d+' || exit 1
+
+      - name: Create tag and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "v${{ inputs.version }}"
+          git push origin "v${{ inputs.version }}"
+
+      - name: Create GitHub Release
+        uses: ncipollo/release-action@v1
+        with:
+          tag: "v${{ inputs.version }}"
+          generateReleaseNotes: true
+          prerelease: ${{ inputs.prerelease }}
+
+      - name: Trigger sync to fork
+        run: |
+          gh workflow run sync-to-fork.yml \
+            --repo "${{ github.repository }}" \
+            --ref main \
+            -f target_branch=dev \
+            -f version="v${{ inputs.version }}"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
