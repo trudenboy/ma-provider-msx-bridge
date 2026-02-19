@@ -15,8 +15,8 @@ jobs:
   release:
     uses: trudenboy/ma-provider-tools/.github/workflows/reusable-release.yml@main
     with:
-      manifest_path: provider/msx_bridge/manifest.json
-      provider_path: provider/msx_bridge/
+      manifest_path: provider/manifest.json
+      provider_path: provider/
 
       version: ${{ inputs.version }}
       prerelease: ${{ inputs.prerelease }}
