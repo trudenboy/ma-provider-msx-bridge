@@ -13,13 +13,11 @@ from typing import Any, cast
 from music_assistant.models.player_provider import PlayerProvider
 
 from .constants import (
-    CONF_ABORT_STREAM_FIRST,
     CONF_ENABLE_GROUPING,
     CONF_GROUP_STREAM_MODE,
     CONF_HTTP_PORT,
     CONF_OUTPUT_FORMAT,
     CONF_PLAYER_IDLE_TIMEOUT,
-    DEFAULT_ABORT_STREAM_FIRST,
     DEFAULT_ENABLE_GROUPING,
     DEFAULT_GROUP_STREAM_MODE,
     DEFAULT_HTTP_PORT,
@@ -472,18 +470,10 @@ class MSXBridgeProvider(PlayerProvider):
         server = self.http_server
         if not server:
             return
-        abort_first = cast(
-            "bool",
-            self.config.get_value(CONF_ABORT_STREAM_FIRST, DEFAULT_ABORT_STREAM_FIRST),
-        )
 
         def _send() -> None:
-            if abort_first:
-                server.cancel_streams_for_player(player_id)
-                server.broadcast_stop(player_id)
-            else:
-                server.broadcast_stop(player_id)
-                server.cancel_streams_for_player(player_id)
+            server.broadcast_stop(player_id)
+            server.cancel_streams_for_player(player_id)
 
         _send()
         _send()
