@@ -1,0 +1,20 @@
+name: Test
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+
+  cancel-in-progress: true
+
+jobs:
+  test:
+    uses: trudenboy/ma-provider-tools/.github/workflows/reusable-test.yml@main
+    with:
+      provider_type: player_provider
+      provider_domain: msx_bridge
+      provider_path: provider/msx_bridge/
