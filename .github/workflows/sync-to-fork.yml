@@ -15,8 +15,8 @@ jobs:
   sync:
     uses: trudenboy/ma-provider-tools/.github/workflows/reusable-sync-to-fork.yml@main
     with:
-      manifest_path: provider/msx_bridge/manifest.json
-      provider_path: provider/msx_bridge/
+      manifest_path: provider/manifest.json
+      provider_path: provider/
 
       target_branch: ${{ inputs.target_branch }}
       version: ${{ inputs.version }}
