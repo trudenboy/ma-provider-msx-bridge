@@ -62,8 +62,8 @@ isProject: false
 
 - Выполнить `scripts/setup.sh` (venv, зависимости, pre-commit).
 - Запустить линтеры/форматирование: `pre-commit run --all-files`. Учесть, что mypy может падать на других провайдерах (например zvuk_music); для msx_bridge ошибок быть не должно.
-- Запустить тесты провайдера:  
-`pytest tests/providers/msx_bridge/ -v`  
+- Запустить тесты провайдера:
+`pytest tests/providers/msx_bridge/ -v`
 При необходимости подправить пути к фикстурам (если что-то осталось в корневом `tests/conftest.py` и нужно дублировать или импортировать).
 
 ### 1.5 Оформление PR

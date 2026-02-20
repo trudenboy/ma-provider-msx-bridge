@@ -30,11 +30,11 @@ flowchart LR
         icon_svg[icon.svg]
         icon_mono[icon_monochrome.svg optional]
     end
-    
+
     subgraph ma [MA Server]
         mass[mass.py load_provider_manifest]
     end
-    
+
     manifest --> mass
     icon_svg --> mass
     icon_mono --> mass

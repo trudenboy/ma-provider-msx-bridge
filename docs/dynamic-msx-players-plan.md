@@ -92,22 +92,22 @@ TVXVideoPlugin.requestDeviceId(callback); // Запрашивает device ID а
 
 ### 3.2 Серверная логика
 
-1. **Middleware / хелпер**  
+1. **Middleware / хелпер**
    Для каждого MSX-запроса:
    - Извлечь `device_id` из `request.query.get("device_id")`
    - Если есть — `player_id = "msx_" + sanitize(device_id)`
    - Если нет — `player_id = "msx_" + sanitize(request.remote)` (fallback)
 
-2. **get_or_register_player(request)**  
+2. **get_or_register_player(request)**
    - Определить `player_id` по device_id или IP
    - Если player не зарегистрирован — создать `MSXPlayer`, вызвать `mass.players.register(player)`
    - Вернуть player
 
-3. **Все MSX content handlers**  
+3. **Все MSX content handlers**
    - Перед обработкой вызывать `get_or_register_player(request)`
    - Передавать `player_id` в `_format_msx_track(..., player_id)` для формирования `action: "audio:{prefix}/msx/audio/{player_id}?uri=..."`
 
-4. **Unregister по таймауту**  
+4. **Unregister по таймауту**
    - Хранить `last_activity` у каждого MSX player
    - Фоновая задача: если прошло > N минут без запросов → `mass.players.unregister(player_id)`
    - Защита от гонок по аналогии с Sendspin (`_pending_unregisters`)

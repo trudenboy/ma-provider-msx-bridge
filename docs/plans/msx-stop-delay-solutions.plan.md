@@ -111,7 +111,7 @@ sequenceDiagram
 
     MA->>Provider: player.stop()
     Provider->>Provider: notify_play_stopped()
-    
+
     Note over Provider,TV: Текущий порядок
     Provider->>WS: broadcast_stop()
     WS->>Plugin: {type: "stop"}

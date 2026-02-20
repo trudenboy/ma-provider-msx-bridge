@@ -30,7 +30,7 @@ isProject: false
 
 То есть вместо `data: "http://host/msx/search-page.json"` у пункта **Search** можно передать в `data` строку **request:interaction**, и при выборе этого пункта MSX сразу откроет Interaction Plugin (нашу клавиатуру `input.html`), без загрузки промежуточной контент-страницы.
 
-**Текущая цепочка:** Menu → Content (search-page.json) → User presses OK → Input Plugin.  
+**Текущая цепочка:** Menu → Content (search-page.json) → User presses OK → Input Plugin.
 **Целевая:** Menu → Input Plugin (один клик по пункту «Search»).
 
 Формат action для Input Plugin мы уже используем в [http_server.py](provider/msx_bridge/http_server.py) (строки 394–398):

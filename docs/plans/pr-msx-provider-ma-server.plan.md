@@ -142,16 +142,16 @@ flowchart LR
     subgraph source [msx-music-assistant]
         src_provider[provider/msx_bridge/]
     end
-    
+
     subgraph target [ma-server PR]
         dst_provider[music_assistant/providers/msx_bridge/]
     end
-    
+
     subgraph ci [CI]
         lint[pre-commit lint]
         test[pytest]
     end
-    
+
     src_provider -->|copy| dst_provider
     dst_provider --> lint
     dst_provider --> test

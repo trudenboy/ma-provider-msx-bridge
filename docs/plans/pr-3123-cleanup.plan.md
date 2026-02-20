@@ -13,7 +13,7 @@ PR #3123 (feat/msx-bridge-player-provider → music-assistant/server dev) сей
 
 **Лишние в PR:**
 - `kion_music` — 10 файлов
-- `vk_music` — 8 файлов  
+- `vk_music` — 8 файлов
 - `zvuk_music` — 7 файлов
 - `yandex_music` — изменения (My Wave и др.)
 - `.gitignore`, `requirements_all.txt` — правки, не связанные с MSX
@@ -78,6 +78,6 @@ git push origin feat/msx-bridge-clean:feat/msx-bridge-player-provider --force
 ## Важные моменты
 
 - Репозиторий upstream: [music-assistant/server](https://github.com/music-assistant/server)
-- Текущий fork: trudenboy/ma-server  
+- Текущий fork: trudenboy/ma-server
 - PR: trudenboy/ma-server:feat/msx-bridge-player-provider → music-assistant/server:dev
 - `--force` допустим, так как ветка используется только для этого PR
