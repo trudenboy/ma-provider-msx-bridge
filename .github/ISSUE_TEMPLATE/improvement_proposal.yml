@@ -1,44 +1,44 @@
-name: Предложение по улучшению
-description: Предложить улучшение или новую функцию для провайдера msx_bridge
+name: Improvement Proposal
+description: Suggest an improvement or new feature for the msx_bridge provider
 labels: ["enhancement", "priority:medium"]
 body:
   - type: markdown
     attributes:
       value: |
-        Используйте этот шаблон для предложения улучшений или новых функций для провайдера.
-        Для ошибок используйте шаблон «Отчёт об ошибке».
+        Use this template to propose improvements or new features for the provider.
+        For bugs, use the Bug Report template instead.
 
   - type: textarea
     id: current_behavior
     attributes:
-      label: Текущее поведение / ограничение
-      description: Что вы не можете сделать сегодня или что работает неоптимально?
+      label: Current behavior / limitation
+      description: What can you not do today, or what works in a suboptimal way?
     validations:
       required: true
 
   - type: textarea
     id: proposed_change
     attributes:
-      label: Предлагаемое улучшение
-      description: Опишите, что вы хотели бы изменить или добавить.
+      label: Proposed improvement
+      description: Describe what you'd like to see changed or added.
     validations:
       required: true
 
   - type: textarea
     id: motivation
     attributes:
-      label: Мотивация / сценарий использования
-      description: Почему это улучшение ценно? Какой сценарий использования оно обеспечивает?
+      label: Motivation / use case
+      description: Why is this improvement valuable? What use case does it enable?
     validations:
       required: true
 
   - type: dropdown
     id: willing_to_implement
     attributes:
-      label: Готовы помочь с реализацией?
+      label: Willing to help implement?
       options:
-        - "Нет"
-        - "Да — могу создать PR"
-        - "Да — могу помочь с тестированием"
+        - "No"
+        - "Yes — I can submit a PR"
+        - "Yes — I can help test"
     validations:
       required: false
