@@ -103,4 +103,3 @@ provider/msx_bridge/
 1. Перезапустить MA server
 2. Открыть UI — провайдер MSX Bridge должен отображаться с новой иконкой
 3. Убедиться, что симлинк корректен: `icon.svg` виден в `ma-server/music_assistant/providers/msx_bridge/`
-

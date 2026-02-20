@@ -119,4 +119,3 @@ isProject: false
   - После прохождения тестов в `msx-music-assistant` перенести изменения в `ma-server` (ветка `feat/msx-bridge-player-provider`, базированная на `upstream/dev`).
   - Прогнать `pre-commit` в `ma-server` и убедиться, что Ruff/mypy зелёные.
   - Запушить изменения и убедиться, что PR #3123 показывает только MSX‑файлы и новые сообщения WebSocket без сторонних провайдеров.
-

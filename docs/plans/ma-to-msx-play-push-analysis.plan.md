@@ -96,4 +96,3 @@ sequenceDiagram
 1. WebSocket-роут в `http_server.py`, привязка клиентов к `player_id`
 2. Хук в `MSXPlayer.play_media()` → уведомление сервера → broadcast по WebSocket
 3. В `plugin.html` — WebSocket-клиент, при получении команды play вызов `executeAction("audio:" + streamUrl)`
-

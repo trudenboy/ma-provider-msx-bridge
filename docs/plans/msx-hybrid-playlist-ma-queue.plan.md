@@ -203,4 +203,3 @@ flowchart LR
 - Задокументировать:
   - различия между **Radio/flow mode**, **Native MSX playlist**, **Hybrid playlist + MA queue**;
   - ограничения и рекомендуемые сценарии использования каждого режима.
-
