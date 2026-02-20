@@ -17,24 +17,38 @@ from music_assistant_models.enums import PlayerType
 # the music_assistant package as editable.  The editable-install finder may not
 # discover packages added post-install, so we register the package manually when
 # the normal import fails.
-try:
-    import music_assistant.providers.msx_bridge  # noqa: F401
-except ModuleNotFoundError:
-    import music_assistant.providers
+if "music_assistant.providers.msx_bridge" not in sys.modules:
+    try:
+        import music_assistant.providers.msx_bridge  # noqa: F401
+    except ModuleNotFoundError:
+        import importlib
 
-    for _prov_path in music_assistant.providers.__path__:
-        _msx_dir = Path(_prov_path) / "msx_bridge"
-        if (_msx_dir / "__init__.py").exists():
-            _spec = importlib.util.spec_from_file_location(
-                "music_assistant.providers.msx_bridge",
-                str(_msx_dir / "__init__.py"),
-                submodule_search_locations=[str(_msx_dir)],
-            )
-            if _spec and _spec.loader:
-                _mod = importlib.util.module_from_spec(_spec)
-                sys.modules[_spec.name] = _mod
-                _spec.loader.exec_module(_mod)
-            break
+        import music_assistant.providers
+
+        # Try cache invalidation first (works with lenient editable installs)
+        importlib.invalidate_caches()
+        try:
+            import music_assistant.providers.msx_bridge  # noqa: F401
+        except ModuleNotFoundError:
+            # Search multiple candidate directories for the provider package
+            _candidates: list[Path] = []
+            for _p in music_assistant.providers.__path__:
+                _candidates.append(Path(_p) / "msx_bridge")
+            # Fallback: project-root/provider/ (direct, no symlink needed)
+            _candidates.append(Path(__file__).resolve().parent.parent / "provider")
+
+            for _msx_dir in _candidates:
+                if (_msx_dir / "__init__.py").exists():
+                    _spec = importlib.util.spec_from_file_location(
+                        "music_assistant.providers.msx_bridge",
+                        str(_msx_dir / "__init__.py"),
+                        submodule_search_locations=[str(_msx_dir)],
+                    )
+                    if _spec and _spec.loader:
+                        _mod = importlib.util.module_from_spec(_spec)
+                        sys.modules[_spec.name] = _mod
+                        _spec.loader.exec_module(_mod)
+                    break
 
 from music_assistant.providers.msx_bridge.http_server import MSXHTTPServer
 from music_assistant.providers.msx_bridge.player import MSXPlayer
