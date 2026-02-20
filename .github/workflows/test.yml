@@ -18,3 +18,4 @@ jobs:
       provider_type: player_provider
       provider_domain: msx_bridge
       provider_path: provider/
+      manifest_path: provider/manifest.json
