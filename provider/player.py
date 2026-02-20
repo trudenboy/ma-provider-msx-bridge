@@ -22,6 +22,11 @@ if TYPE_CHECKING:
 class MSXPlayer(Player):
     """Represents a Smart TV running MSX as a Music Assistant player."""
 
+    # Redeclare parent attrs so mypy sees the Optional type
+    # (--ignore-missing-imports hides the parent annotation).
+    _attr_elapsed_time: float | None = None
+    _attr_elapsed_time_last_updated: float | None = None
+
     current_stream_url: str | None = None
     output_format: str = "mp3"
     _skip_ws_notify: bool = False
