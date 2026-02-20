@@ -7,6 +7,7 @@ Usage:
 
 Requires MA server with linked MSX provider. Run ./scripts/link-to-ma.sh first.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -14,7 +15,6 @@ import os
 import re
 import subprocess
 import sys
-import time
 from pathlib import Path
 from urllib.parse import quote, unquote
 
@@ -122,9 +122,15 @@ async def main() -> None:
 
         async def fetch_stream() -> None:
             nonlocal stream_error
-            url = f"{BASE_URL}/stream/{player_id}" if play_ok else f"{BASE_URL}/msx/audio/{player_id}?uri={quote(track_uri, safe='')}&{device_param}"
+            url = (
+                f"{BASE_URL}/stream/{player_id}"
+                if play_ok
+                else f"{BASE_URL}/msx/audio/{player_id}?uri={quote(track_uri, safe='')}&{device_param}"
+            )
             try:
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=35)) as resp:
+                async with session.get(
+                    url, timeout=aiohttp.ClientTimeout(total=35)
+                ) as resp:
                     if resp.status != 200:
                         stream_error = f"status={resp.status}"
                     else:
@@ -145,7 +151,6 @@ async def main() -> None:
             f"{BASE_URL}/api/stop/{player_id}",
             timeout=5,
         ) as resp:
-            stop_ok = resp.status == 200
             print(f"Stop response: {resp.status}")
 
         # 6. Wait for stream to finish
@@ -165,7 +170,7 @@ async def main() -> None:
     with open(LOG_FILE) as f:
         lines = f.readlines()
 
-    debug_lines = [l.rstrip() for l in lines if "[MSX_DEBUG]" in l]
+    debug_lines = [line.rstrip() for line in lines if "[MSX_DEBUG]" in line]
     if not debug_lines:
         print("No [MSX_DEBUG] lines found in log.")
         print("Check if log level is INFO+ and server is writing to", LOG_FILE)
@@ -175,9 +180,9 @@ async def main() -> None:
 
     # Analysis
     print("\n=== Analysis ===")
-    registered = [l for l in debug_lines if "_register_stream" in l]
-    cancelled = [l for l in debug_lines if "cancel_streams_for_player" in l]
-    notify = [l for l in debug_lines if "notify_play_stopped" in l]
+    registered = [line for line in debug_lines if "_register_stream" in line]
+    cancelled = [line for line in debug_lines if "cancel_streams_for_player" in line]
+    notify = [line for line in debug_lines if "notify_play_stopped" in line]
 
     print(f"notify_play_stopped calls: {len(notify)}")
     print(f"cancel_streams_for_player calls: {len(cancelled)}")
@@ -196,7 +201,10 @@ async def main() -> None:
             print("\n*** ISSUE: cancel_streams_for_player found 0 tasks/transports!")
             print("   Possible cause: player_id mismatch between register and cancel.")
             if registered:
-                print("   Registered under:", registered[-1].split("all_registered=")[-1][:80])
+                print(
+                    "   Registered under:",
+                    registered[-1].split("all_registered=")[-1][:80],
+                )
         elif not registered:
             print("\n*** ISSUE: _register_stream never called - stream didn't start?")
 

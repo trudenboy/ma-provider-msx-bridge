@@ -159,4 +159,3 @@ PR в server и PR в docs можно делать **независимо**. У�
 - В mkdocs.yml добавить пункт "MSX Bridge: player-support/msx-bridge.md"
 - Создать docs/player-support/msx-bridge.md по структуре sendspin.md
 - Открыть PR с описанием добавленной документации
-

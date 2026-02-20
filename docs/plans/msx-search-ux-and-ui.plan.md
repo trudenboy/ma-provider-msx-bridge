@@ -109,4 +109,3 @@ sequenceDiagram
 
 - **Похожий на Showcases интерфейс:** уже достигается за счёт использования стандартных MSX-структур (list, separate, иконки); при желании можно точечно подравнять тексты.
 - **Поиск из меню без лишних кликов:** делается переносом текущего action поиска в `data` пункта меню в формате request:interaction в [plugin.html](provider/msx_bridge/static/plugin.html), с сохранением device_id и оставлением search-page.json для обратной совместимости.
-

@@ -139,5 +139,3 @@ sequenceDiagram
 | [provider/msx_bridge/static/plugin.html](provider/msx_bridge/static/plugin.html) | `executeAction` — пробовать `[player:eject     |
 | [provider/msx_bridge/provider.py](provider/msx_bridge/provider.py)               | Порядок вызовов в `notify_play_stopped`        |
 | [provider/msx_bridge/player.py](provider/msx_bridge/player.py)                   | Опционально: `PlayerFeature.POWER` и `power()` |
-
-

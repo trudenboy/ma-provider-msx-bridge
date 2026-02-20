@@ -164,4 +164,3 @@ flowchart LR
 - **Тесты:** В ma-server нет провайдер-специфичных тестов в `tests/`. Текущие тесты msx-music-assistant остаются в своём репо. Для PR достаточно, чтобы ma-server успешно импортировал провайдер и CI проходил.
 - **Документация:** В manifest поле `documentation` должно указывать на актуальный источник (например, README msx-music-assistant).
 - **Ветка:** ma-server использует `dev` как основную ветку разработки (по [trudenboy/ma-server](https://github.com/trudenboy/ma-server)).
-
