@@ -1,6 +1,6 @@
 name: Improvement Proposal
 description: Suggest an improvement or new feature for the msx_bridge provider
-labels: ["enhancement", "priority:medium"]
+labels: ["incident:proposal", "enhancement", "priority:medium"]
 body:
   - type: markdown
     attributes:
