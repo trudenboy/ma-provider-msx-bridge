@@ -2,7 +2,7 @@
 
 # Contributing
 
-Thank you for your interest in contributing!
+Thank you for your interest in contributing to **MSX Bridge**!
 
 ## Code of Conduct
 
@@ -14,8 +14,8 @@ Open a GitHub Issue with:
 - Detailed description of the problem
 - Steps to reproduce
 - Expected vs actual behavior
-- Environment details (MA version, TV model, MSX app version)
-- Logs from the MA server (`./scripts/test-server.sh log`)
+- Environment details (MA version, provider version)
+- Logs from the MA server
 
 ## Suggesting Features
 
@@ -29,11 +29,11 @@ Open a GitHub Issue explaining:
 
 1. Fork and clone the repository
 2. Create a feature branch: `git checkout -b feature/your-feature-name`
-3. Make your changes following the [coding standards](development.md#code-standards)
+3. Make your changes following the [coding standards](development.md#code-quality)
 4. Write or update tests (see [Development → Running Tests](development.md#running-tests))
 5. Ensure CI passes: `pre-commit run --all-files`
 6. Update documentation if your change affects behavior or configuration
-7. Push to your fork and open a PR against `main`
+7. Push to your fork and open a PR against `dev`
 
 PR description should include:
 - What changed and why
@@ -42,9 +42,11 @@ PR description should include:
 
 ## License
 
-By contributing, you agree that your contributions will be licensed under the MIT License.
+By contributing, you agree that your contributions will be licensed under the Apache 2.0 License.
 
-## See Also
+## Further Reading
 
-- [Development](development.md) — dev setup, test commands, linting
-- [Architecture](architecture.md) — codebase structure and key flows
+- [Testing Guide](testing.md) — running tests locally, CI pipeline, coverage
+- [Incident Management](incident-management.md) — labels, issue automation, Copilot triage
+- [Docker Dev Environment](dev-docker.md) — run MA + provider locally without dependencies
+- [Development](development.md) — dev setup, tooling, code quality standards
