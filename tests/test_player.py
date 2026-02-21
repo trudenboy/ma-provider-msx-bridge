@@ -412,11 +412,9 @@ async def test_propagation_recursion_guard(provider: Any, mass_mock: Mock) -> No
     member._attr_group_members = ["msx_member", "msx_leader"]  # would cause recursion without guard
 
     mass_mock.players.get = mass_mock.players.get_player = Mock(
-        side_effect=lambda pid: member
-        if pid == "msx_member"
-        else leader
-        if pid == "msx_leader"
-        else None
+        side_effect=lambda pid: (
+            member if pid == "msx_member" else leader if pid == "msx_leader" else None
+        )
     )
 
     media = Mock(spec=PlayerMedia)
