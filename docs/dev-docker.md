@@ -61,3 +61,4 @@ docker compose -f docker-compose.dev.yml restart
 
 All MA configuration, credentials, and cache are stored in `.ma-data/` (add to `.gitignore`).
 This directory is created automatically on first run.
+
