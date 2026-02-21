@@ -82,4 +82,3 @@ Use issue templates to create incidents manually:
 | **Improvement proposal** | New feature request — attach `incident:proposal` label |
 
 After creating the issue, add a priority label as appropriate.
-
