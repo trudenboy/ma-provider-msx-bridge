@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
 import sys
 import types
@@ -33,7 +34,7 @@ if _spec and "music_assistant.providers.msx_bridge" not in sys.modules:
     _pkg_mod.__path__ = [str(_provider_path)]  # type: ignore[attr-defined]
     _pkg_mod.__package__ = "music_assistant.providers.msx_bridge"
     sys.modules["music_assistant.providers.msx_bridge"] = _pkg_mod
-    try:
+    with contextlib.suppress(
+        Exception
+    ):  # provider __init__ may have MA-specific imports; best-effort
         _spec.loader.exec_module(_pkg_mod)  # type: ignore[union-attr]
-    except Exception:
-        pass  # provider __init__ may have MA-specific imports; best-effort

@@ -77,4 +77,3 @@ open htmlcov/index.html
 
 When tests or linters fail in CI, a GitHub issue is automatically created with the `incident:ci` label.
 See [Incident Management](incident-management.md) for how the incident workflow operates.
-

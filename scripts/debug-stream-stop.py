@@ -33,6 +33,7 @@ DATA_DIR = PROJECT_ROOT / ".ma-test-data"
 
 
 async def main() -> None:
+    """Run the MSX stream + stop debug flow."""
     print("=== MSX Stream Stop Debug ===\n")
 
     # 1. Ensure server is running
@@ -44,6 +45,7 @@ async def main() -> None:
     result = subprocess.run(
         [str(test_server), "status"],
         capture_output=True,
+        check=False,
         text=True,
         cwd=str(PROJECT_ROOT),
     )
@@ -79,9 +81,7 @@ async def main() -> None:
         print("Server OK")
 
         # Register player and get tracks (hitting MSX endpoint registers the player)
-        async with session.get(
-            f"{BASE_URL}/msx/tracks.json?{device_param}", timeout=10
-        ) as resp:
+        async with session.get(f"{BASE_URL}/msx/tracks.json?{device_param}", timeout=10) as resp:
             if resp.status == 200:
                 data = await resp.json()
                 items = data.get("items", [])
@@ -128,9 +128,7 @@ async def main() -> None:
                 else f"{BASE_URL}/msx/audio/{player_id}?uri={quote(track_uri, safe='')}&{device_param}"
             )
             try:
-                async with session.get(
-                    url, timeout=aiohttp.ClientTimeout(total=35)
-                ) as resp:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=35)) as resp:
                     if resp.status != 200:
                         stream_error = f"status={resp.status}"
                     else:
@@ -156,7 +154,7 @@ async def main() -> None:
         # 6. Wait for stream to finish
         try:
             await asyncio.wait_for(stream_done.wait(), timeout=35)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             stream_task.cancel()
             print("Stream timed out after 35s (expected if stop doesn't work)")
         print(f"Stream ended: {stream_error or 'ok'}")
