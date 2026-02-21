@@ -1,17 +1,17 @@
-name: Изменение upstream API
-description: Сообщить о критическом изменении в upstream API провайдера msx_bridge
+name: Upstream API Change
+description: Report a breaking change in the upstream API used by the msx_bridge provider
 labels: ["incident:upstream", "priority:high"]
 body:
   - type: markdown
     attributes:
       value: |
-        Используйте этот шаблон для сообщения об изменениях в API upstream-сервиса, влияющих на провайдер.
+        Use this template to report changes in the upstream service API that affect the provider.
 
   - type: input
     id: upstream_ref
     attributes:
-      label: Upstream репозиторий / коммит / PR
-      description: Ссылка на upstream изменение (коммит, PR, запись changelog или объявление).
+      label: Upstream repo / commit / PR
+      description: Link to the upstream change (commit, PR, changelog entry, or announcement).
       placeholder: "e.g. https://github.com/upstream/repo/pull/123"
     validations:
       required: true
@@ -19,21 +19,21 @@ body:
   - type: textarea
     id: what_changed
     attributes:
-      label: Что изменилось в upstream
-      description: Опишите изменение API — новые эндпоинты, удалённые поля, изменения авторизации и т.д.
+      label: What changed upstream
+      description: Describe the API change — new endpoints, removed fields, auth changes, etc.
     validations:
       required: true
 
   - type: textarea
     id: impact
     attributes:
-      label: Влияние на провайдер msx_bridge
-      description: Какие функции провайдера нарушены или затронуты?
+      label: Impact on msx_bridge provider
+      description: Which provider features are broken or affected?
     validations:
       required: true
 
   - type: textarea
     id: proposed_fix
     attributes:
-      label: Предложение по исправлению (необязательно)
-      description: Если у вас есть идеи по адаптации провайдера, опишите их здесь.
+      label: Proposed fix (optional)
+      description: If you have ideas for how to adapt the provider, describe them here.
