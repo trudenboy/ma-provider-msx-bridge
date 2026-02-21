@@ -44,6 +44,9 @@ Then open the MSX app → **Settings → Start Parameter** → enter `http://<SE
 | [Configuration](docs/configuration.md) | Port, output format, idle timeout, stop behavior, group streaming |
 | [Development](docs/development.md) | Dev setup, tests, linting, commit format |
 | [Contributing](docs/contributing.md) | Bug reports, feature requests, pull requests |
+| [Testing](docs/testing.md) | Running tests locally, CI pipeline, coverage |
+| [Incident Management](docs/incident-management.md) | Labels, automated issue tracking, Copilot triage |
+| [Docker Dev Environment](docs/dev-docker.md) | Run MA + provider locally without dependencies |
 
 ## Credits
 
