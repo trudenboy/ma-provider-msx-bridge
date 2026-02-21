@@ -150,7 +150,7 @@ class SharedGroupStream:
                     self.group_id,
                     player_id,
                 )
-                return
+                raise
 
             # Phase 1: Snapshot buffer and register for live chunks atomically.
             # Holding the lock ensures the producer cannot distribute a new chunk
@@ -161,9 +161,6 @@ class SharedGroupStream:
                 buffer_snapshot = list(self.buffer)
                 self.subscribers[player_id] = q
                 subscriber_count = len(self.subscribers)
-                # Capture finished flag inside the lock so we don't miss the case
-                # where the producer finished and sent EOF before we registered.
-                already_finished = self.finished
 
             logger.info(
                 "[SharedStream:%s] Subscriber %s joined (total: %d)",
@@ -185,12 +182,7 @@ class SharedGroupStream:
                 bytes_sent += len(chunk)
                 chunks_sent += 1
 
-            # Phase 2: Live stream.
-            # Skip if producer already finished before we registered — EOF was
-            # already broadcast over an empty subscribers dict and won't arrive.
-            if already_finished:
-                return
-
+            # Phase 2: Live stream
             while True:
                 next_chunk = await q.get()
                 if next_chunk is None:
@@ -310,9 +302,7 @@ class MSXBridgeProvider(PlayerProvider):
                 for user in users:
                     if user.enabled and user.username:
                         self._owner_username = user.username
-                        self.logger.debug(
-                            "Resolved owner username: %s", self._owner_username
-                        )
+                        self.logger.debug("Resolved owner username: %s", self._owner_username)
                         break
             except Exception as err:
                 self.logger.warning("Could not resolve owner username: %s", err)
@@ -334,9 +324,7 @@ class MSXBridgeProvider(PlayerProvider):
         """
         # Wait for any pending unregister to complete (race condition handling)
         if pending_event := self._pending_unregisters.get(player_id):
-            self.logger.debug(
-                "Waiting for pending unregister of %s before registering", player_id
-            )
+            self.logger.debug("Waiting for pending unregister of %s before registering", player_id)
             await pending_event.wait()
         existing = self.mass.players.get_player(player_id, raise_unavailable=False)
         if existing and isinstance(existing, MSXPlayer):
@@ -511,9 +499,7 @@ class MSXBridgeProvider(PlayerProvider):
         """Background task: unregister players idle longer than configured timeout."""
         timeout_minutes = cast(
             "int",
-            self.config.get_value(
-                CONF_PLAYER_IDLE_TIMEOUT, DEFAULT_PLAYER_IDLE_TIMEOUT
-            ),
+            self.config.get_value(CONF_PLAYER_IDLE_TIMEOUT, DEFAULT_PLAYER_IDLE_TIMEOUT),
         )
         interval_seconds = 60
         while not self.mass.closing:
@@ -533,9 +519,7 @@ class MSXBridgeProvider(PlayerProvider):
                         player.player_id,
                         timeout_minutes,
                     )
-                    self.mass.create_task(
-                        self._handle_player_unregister(player.player_id)
-                    )
+                    self.mass.create_task(self._handle_player_unregister(player.player_id))
 
     # --- Group Stream Management ---
 
@@ -675,9 +659,7 @@ class MSXBridgeProvider(PlayerProvider):
             # Get queue to find session_id
             queue = self.mass.player_queues.get(source_id)
             if not queue:
-                logger.warning(
-                    "[MARedirect] Queue not found for source_id=%s", source_id
-                )
+                logger.warning("[MARedirect] Queue not found for source_id=%s", source_id)
                 return None
 
             # Build MA Streamserver URL
@@ -687,7 +669,9 @@ class MSXBridgeProvider(PlayerProvider):
                 # Fallback: use webserver base_url
                 base_url = self.mass.webserver.base_url
 
-            stream_url = f"{base_url}/api/streams/single/{source_id}/queue/{queue_item_id}.{output_format}"
+            stream_url = (
+                f"{base_url}/api/streams/single/{source_id}/queue/{queue_item_id}.{output_format}"
+            )
 
             logger.info(
                 "[MARedirect] Generated MA stream URL: %s",
@@ -696,9 +680,7 @@ class MSXBridgeProvider(PlayerProvider):
             return stream_url
 
         except Exception as err:
-            logger.warning(
-                "[MARedirect] Failed to get MA stream URL: %s", err, exc_info=True
-            )
+            logger.warning("[MARedirect] Failed to get MA stream URL: %s", err, exc_info=True)
             return None
 
     async def cleanup_shared_streams(self) -> None:

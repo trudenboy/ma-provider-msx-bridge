@@ -2,53 +2,13 @@
 
 from __future__ import annotations
 
-import importlib.util
-import sys
 from collections.abc import AsyncGenerator
-from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, Mock
 
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
 from music_assistant_models.enums import PlayerType
-
-# Workaround: in CI the provider is symlinked into ma-server AFTER uv installs
-# the music_assistant package as editable.  The editable-install finder may not
-# discover packages added post-install, so we register the package manually when
-# the normal import fails.
-if "music_assistant.providers.msx_bridge" not in sys.modules:
-    try:
-        import music_assistant.providers.msx_bridge  # noqa: F401
-    except ModuleNotFoundError:
-        import importlib
-
-        import music_assistant.providers
-
-        # Try cache invalidation first (works with lenient editable installs)
-        importlib.invalidate_caches()
-        try:
-            import music_assistant.providers.msx_bridge  # noqa: F401
-        except ModuleNotFoundError:
-            # Search multiple candidate directories for the provider package
-            _candidates: list[Path] = []
-            for _p in music_assistant.providers.__path__:
-                _candidates.append(Path(_p) / "msx_bridge")
-            # Fallback: project-root/provider/ (direct, no symlink needed)
-            _candidates.append(Path(__file__).resolve().parent.parent / "provider")
-
-            for _msx_dir in _candidates:
-                if (_msx_dir / "__init__.py").exists():
-                    _spec = importlib.util.spec_from_file_location(
-                        "music_assistant.providers.msx_bridge",
-                        str(_msx_dir / "__init__.py"),
-                        submodule_search_locations=[str(_msx_dir)],
-                    )
-                    if _spec and _spec.loader:
-                        _mod = importlib.util.module_from_spec(_spec)
-                        sys.modules[_spec.name] = _mod
-                        _spec.loader.exec_module(_mod)
-                    break
 
 from music_assistant.providers.msx_bridge.http_server import MSXHTTPServer
 from music_assistant.providers.msx_bridge.player import MSXPlayer
@@ -96,13 +56,9 @@ def mass_mock(player_config_mock: Mock) -> Mock:
     mass.music.artists.library_items = AsyncMock(return_value=[])
     mass.music.artists.albums = AsyncMock(return_value=[])
     mass.music.playlists.library_items = AsyncMock(return_value=[])
-    mass.music.playlists.tracks = Mock(
-        side_effect=lambda *_args, **_kwargs: _empty_async_gen()
-    )
+    mass.music.playlists.tracks = Mock(side_effect=lambda *_args, **_kwargs: _empty_async_gen())
     mass.music.tracks.library_items = AsyncMock(return_value=[])
-    mass.music.search = AsyncMock(
-        return_value=Mock(artists=[], albums=[], tracks=[], playlists=[])
-    )
+    mass.music.search = AsyncMock(return_value=Mock(artists=[], albums=[], tracks=[], playlists=[]))
 
     # Track metadata resolution
     mass.music.get_item_by_uri = AsyncMock(return_value=None)
@@ -161,9 +117,7 @@ def config_mock() -> Mock:
 
 
 @pytest.fixture
-def provider(
-    mass_mock: Mock, manifest_mock: Mock, config_mock: Mock
-) -> MSXBridgeProvider:
+def provider(mass_mock: Mock, manifest_mock: Mock, config_mock: Mock) -> MSXBridgeProvider:
     """Return an MSXBridgeProvider instance without a real HTTP server."""
     prov = MSXBridgeProvider(mass_mock, manifest_mock, config_mock, set())
     prov.http_server = None
