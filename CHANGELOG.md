@@ -74,4 +74,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - fix(kiosk): use content: instead of menu: for kiosk mode (`fcc9330`)
 - fix(kiosk): get bridge URL in handleRequest before init (`f622d11`)
 
+
+<!-- Pre-separation: development in trudenboy/ma-server monorepo -->
+<!-- The following changes were developed in the `trudenboy/ma-server` monorepo before this provider was extracted into its own repository on 2026-02-15. -->
+
+## 2026-02-12
+
+- fix: fix playlist start index, foreground player, and MA next/prev
+
+## 2026-02-11
+
+- feat: switch to MSX native playlist playback with per-track streaming
+- refactor: optimize player grouping with config toggle, recursion guard, and mypy fixes
+
+## 2026-02-10
+
+- fix: omit Content-Length for flow streams to fix queue playback
+
+## 2026-02-09
+
+- feat: update provider with full MSX UI, search, and audio streaming
+- feat: open search keyboard from menu in one click
+- feat: instant stop/pause, resume playback, disable fix, quick-stop API
+
+## 2026-02-08
+
+- feat: add MSX Bridge Player Provider
+
 <!-- changelog entries will be added here by release workflow -->
