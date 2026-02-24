@@ -3,6 +3,12 @@
 
 # MSX Bridge — Incident Management
 
+## Where to Report Incidents
+
+> **File issues here:** [github.com/trudenboy/ma-provider-msx-bridge/issues](https://github.com/trudenboy/ma-provider-msx-bridge/issues)
+
+Use the **New Issue** button and select the appropriate template. Do not open issues in `trudenboy/ma-server` or `trudenboy/ma-provider-tools` — those repos serve a different purpose.
+
 ## Labels
 
 All issues use a standardized label taxonomy:
