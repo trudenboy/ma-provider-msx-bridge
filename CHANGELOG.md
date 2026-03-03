@@ -5,6 +5,46 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.1] - 2026-03-03
+
+- chore: sync workflow wrappers from ma-provider-tools (#63) (`c44a0e9`)
+- chore: reformat CHANGELOG — marker to top, releases newest-first [skip ci] (`aad1a0c`)
+- docs: add user documentation link to README (`f4eff5a`)
+- chore: sync workflow wrappers from ma-provider-tools (#62) (`fff6916`)
+- docs: add provider icon emblem to index page (`383f974`)
+- docs: add development.md (dev environment guide) (`e7d6301`)
+- docs: add Starlight title frontmatter to contributing.md (`60719e0`)
+- chore: add package-lock.json for npm cache (`1887e51`)
+- chore: sync workflow wrappers from ma-provider-tools (#61) (`ab60e86`)
+- docs: add contributing page (`95e94a7`)
+- docs: add configuration page (`26b1bda`)
+- docs: add Starlight docs.yml (`bb8fe80`)
+- docs: add Starlight incident-management.md (`ad75ce1`)
+- docs: add Starlight dev-docker.md (`43c48a9`)
+- docs: add Starlight testing.md (`43f21df`)
+- docs: add Starlight index.md (`6ad8bf3`)
+- docs: add Starlight content.config.ts (`2d78ef4`)
+- docs: add Starlight astro.config.mjs (`075bdf6`)
+- docs: add Starlight tsconfig.json (`a3127ea`)
+- docs: add Starlight package.json (`ba87c2a`)
+- chore: sync workflow wrappers from ma-provider-tools (#60) (`21e211d`)
+- docs: add pre-separation upstream PR history to CHANGELOG (`a3bf794`)
+- chore: generate historical changelog [skip ci] (`67e3df3`)
+- chore: sync workflow wrappers from ma-provider-tools (#59) (`efdc9cf`)
+- chore: sync workflow wrappers from ma-provider-tools (#58) (`94dcc25`)
+- chore: sync workflow wrappers from ma-provider-tools (#57) (`a65dc88`)
+- chore: sync workflow wrappers from ma-provider-tools (#56) (`b9e2d61`)
+- chore: sync workflow wrappers from ma-provider-tools (#55) (`861cf42`)
+- chore: sync workflow wrappers from ma-provider-tools (#54) (`cbf03f7`)
+- chore: sync workflow wrappers from ma-provider-tools (#53) (`7c54e3d`)
+- chore: sync workflow wrappers from ma-provider-tools (#52) (`b97838d`)
+- chore: sync workflow wrappers from ma-provider-tools (#51) (`25b6b0e`)
+- chore: sync workflow wrappers from ma-provider-tools (#50) (`804e4cb`)
+- chore: sync workflow wrappers from ma-provider-tools (#49) (`de99ac7`)
+- chore: sync workflow wrappers from ma-provider-tools (#48) (`049c7d4`)
+
+---
+
 <!-- changelog entries will be added here by release workflow -->
 
 ## 2026-02-22
