@@ -5,6 +5,7 @@ English | [Русский](README.ru.md)
 📖 <a href="https://trudenboy.github.io/ma-provider-msx-bridge/">User Documentation</a>
 
 > Stream your [Music Assistant](https://music-assistant.io/) library to Smart TVs through [Media Station X](https://msx.benzac.de/) with a native TV-optimized interface.
+<img width="2752" height="1536" alt="msx_infographic" src="https://github.com/user-attachments/assets/287fb05b-6a15-49c0-bc46-2af3afbc11d4" />
 
 ## Quick Start
 
