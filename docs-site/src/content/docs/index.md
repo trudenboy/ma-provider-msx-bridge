@@ -16,6 +16,3 @@ Provider created and maintained by [TrudenBoy](https://github.com/TrudenBoy).
 
 
 Setup instructions are on the [Configuration](configuration/) page.
-
-
-
