@@ -1,9 +1,9 @@
 name: Test
 on:
   push:
-    branches: [main, dev]
-  pull_request:
     branches: [main]
+  pull_request:
+    branches: [main, feat/msx-bridge-player-provider]
   workflow_dispatch:
 
 concurrency:

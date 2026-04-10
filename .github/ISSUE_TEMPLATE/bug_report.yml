@@ -12,7 +12,7 @@ body:
     attributes:
       label: Provider version
       description: |
-        Find this in `manifest.json` → `version` field, or in the latest GitHub Release tag.
+        Find this in the `VERSION` file at the repo root, or in the latest GitHub Release tag.
       placeholder: "e.g. 2.1.0"
     validations:
       required: true
