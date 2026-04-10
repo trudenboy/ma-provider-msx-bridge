@@ -8,6 +8,8 @@ on:
       - 'tests/**'
       - 'pyproject.toml'
       - 'VERSION'
+  schedule:
+    - cron: "30 6 * * 1"
   workflow_dispatch:
 
 concurrency:
@@ -85,6 +87,7 @@ jobs:
       provider_domain: msx_bridge
       provider_path: provider/
       manifest_path: provider/manifest.json
+      autofix: true
 
   # ── 3. Release (conditional: only when version changed) ──────────────────
   release:

@@ -4,6 +4,8 @@ on:
     branches: [main]
   pull_request:
     branches: [main, feat/msx-bridge-player-provider]
+  schedule:
+    - cron: "0 6 * * 1"
   workflow_dispatch:
 
 concurrency:
