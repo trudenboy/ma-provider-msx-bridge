@@ -75,6 +75,34 @@ test: add test for Z
 
 ## Release Process
 
-1. PR: `dev` → `main`
-2. Actions → Release → Run workflow → enter version number
+1. Bump version in `VERSION` file (e.g. `1.2.0` or `1.2.0b1`)
+2. Push to `feat/msx-bridge-player-provider` — pipeline auto-tags and releases
+3. Manual fallback: Actions → Release → Run workflow → enter version
+
+## Shared Workspace (multi-provider)
+
+For simultaneous development of multiple providers with a shared MA server:
+
+```bash
+# From the ma-provider-tools repository:
+python3 scripts/dev-workspace.py init --dir ~/ma-workspace --all
+
+# Add a specific provider to an existing workspace:
+python3 scripts/dev-workspace.py add msx_bridge
+
+# Connect this repository to a workspace:
+./scripts/setup.sh --workspace ~/ma-workspace
+
+# Update everything to latest:
+python3 scripts/dev-workspace.py update --dir ~/ma-workspace
+
+# Start MA server:
+python3 scripts/dev-workspace.py run --dir ~/ma-workspace
+
+# Workspace status:
+python3 scripts/dev-workspace.py status --dir ~/ma-workspace
+```
+
+The workspace uses a single `trudenboy/ma-server` fork and shared `.venv` (Python 3.12).
+Each provider is connected via symlink into `ma-server/music_assistant/providers/`.
 
