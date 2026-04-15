@@ -4,7 +4,8 @@ name = "ma-provider-msx-bridge"
 description = "MSX Bridge provider for Music Assistant"
 requires-python = ">=3.12"
 dynamic = ["version"]
-dependencies = []
+dependencies = [
+]
 
 [project.optional-dependencies]
 test = [
