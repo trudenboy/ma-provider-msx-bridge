@@ -7,6 +7,7 @@ Usage:
 
 Requires MA server with linked MSX provider. Run ./scripts/link-to-ma.sh first.
 """
+# ruff: noqa  -- standalone debug script, not part of provider source
 
 from __future__ import annotations
 
