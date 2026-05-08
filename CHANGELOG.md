@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.1.2] - 2026-05-09
 
+- fix(provider/models): switch `MsxTemplateType` from `class …(str, Enum)` to `class …(StrEnum)` to satisfy ruff `UP042` from the upstream-synced lint rules.
 - fix(scripts/debug-stream-stop): mark standalone debug script with `# ruff: noqa` so upstream-synced lint rules from `ma-provider-tools` don't fail CI on it.
 - chore: sync workflow wrappers from ma-provider-tools (CLAUDE.md, ruff/mypy/codespell from upstream music-assistant/server, config-sync CI guard).
 
