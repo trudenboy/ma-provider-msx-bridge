@@ -1,157 +1,123 @@
+<!-- ma-provider-tools: rendered from wrappers/CLAUDE.md.j2 -->
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file aligns development of the **MSX Bridge** provider with the
+upstream [`music-assistant/server`](https://github.com/music-assistant/server)
+standards. It is rendered from `wrappers/CLAUDE.md.j2` in
+[`trudenboy/ma-provider-tools`](https://github.com/trudenboy/ma-provider-tools)
+and is kept in sync across every provider repo — **do not edit it here**.
 
-## Project Overview
+Provider-specific architecture, key flows, and gotchas live in
+[`CLAUDE.local.md`](./CLAUDE.local.md). Claude Code automatically picks up both
+files when working in this repository.
 
-Music Assistant (MA) Player Provider that streams music to Smart TVs via the Media Station X (MSX) app. Implemented as an MA provider plugin — runs inside the MA server process with direct access to internal APIs.
+## Development Commands
 
-## Architecture
+- `./scripts/setup.sh` — initial setup (venv via `uv`, dependencies, pre-commit hooks). Re-run after pulling latest code.
+- `uv run pytest` — run all tests
+- `uv run pytest provider/tests/<file>.py` — run a specific test file
+- `uv run ruff check provider/` — lint
+- `uv run ruff format provider/` — auto-format
+- `uv run mypy provider/` — type check
+- `pre-commit run --all-files` — full pre-commit gate
 
-```
-Smart TV (MSX App) --HTTP--> MSXBridgeProvider (inside MA, port 8099) --internal API--> MA core
-```
+Always run `pre-commit run --all-files` after a code change to ensure the new
+code adheres to the project standards.
 
-**Provider** (`provider/msx_bridge/`): MA Player Provider with embedded HTTP server.
-- `__init__.py` — `setup()`, `get_config_entries()` (7 config entries), provider entry point
-- `provider.py` — `MSXBridgeProvider(PlayerProvider)`: manages lifecycle, dynamic player registration, idle timeout loop, WebSocket push notifications, starts HTTP server
-- `player.py` — `MSXPlayer(Player)`: represents a Smart TV as an MA player. Stores stream URL from `play_media()` for the TV to fetch via HTTP.
-- `http_server.py` — `MSXHTTPServer`: aiohttp server with routes for MSX bootstrap, library browsing, playback control, WebSocket, and stream proxy
-- `constants.py` — config keys and defaults (7 config entries: `http_port`, `output_format`, `player_idle_timeout`, `show_stop_notification`, `abort_stream_first`, `enable_player_grouping`, `group_stream_mode`)
-- `models.py` — Pydantic models for MSX JSON API (`MsxTemplate`, `MsxItem`, `MsxContent`)
-- `mappers.py` — Converters from MA objects to MSX models (`map_track_to_msx`, `map_album_to_msx`, `map_artist_to_msx`, `map_playlist_to_msx`, `map_tracks_to_msx_playlist`)
-- `manifest.json` — provider metadata for MA
-- `static/` — static files served by aiohttp:
-  - `plugin.html` — MSX interaction plugin (detects device ID, opens WebSocket, builds menu)
-  - `sendspin-plugin.html` — Sendspin TVX Video Plugin (reserved for future use)
-  - `input.html` — MSX Input Plugin wrapper (search keyboard)
-  - `input.js` — Input Plugin logic
-  - `tvx-plugin-module.min.js` — TVX plugin module library
-  - `tvx-plugin.min.js` — TVX plugin library
-  - `web/` — Browser-based web player (index.html, web.js)
+## Code Style
 
-### Key Flows
+### Comments
 
-**MSX Bootstrap & Navigation:**
-1. TV loads `/msx/start.json` → points to `/msx/plugin.html` as interaction plugin
-2. Plugin detects device ID via `TVXVideoPlugin.requestDeviceId()` (falls back to IP)
-3. Plugin opens WebSocket to `/ws?device_id=...` for push playback notifications
-4. Plugin requests `/msx/menu.json?device_id=...` → returns menu items (Search, Albums, Artists, Playlists, Tracks)
-5. Clicking a menu item loads a content page (e.g. `/msx/albums.json?device_id=...`) → MSX renders list
-6. All URLs carry `device_id` param so the server maps requests to the correct player
-7. Content items have `action: "content:..."` (drill to detail page), `action: "audio:..."` (single track), or `action: "playlist:..."` (MSX native playlist — loads URL, auto-starts, supports next/prev)
+Only use comments to explain complex, multi-line blocks of code. Do not comment
+obvious operations.
 
-**Dynamic Player Registration:**
-1. Any MSX request calls `_ensure_player_for_request()` → extracts `device_id` or IP → derives `player_id`
-2. `provider.get_or_register_player(player_id)` creates an `MSXPlayer` on-demand if not already registered
-3. Background idle timeout loop runs every 60s → unregisters players with no activity for `player_idle_timeout` minutes (default: 30)
-4. Handles race conditions via `_pending_unregisters` events
+### Docstring Format
 
-**Audio Playback (via MSX native player):**
-1. Track list items use `action: "playlist:/msx/playlist/album/{id}.json"` — MSX loads the playlist, auto-starts playback, tracks rotated so clicked track is first; native next/prev
-2. Each playlist item has `action: "audio:/msx/audio/{player_id}?uri=<uri>&from_playlist=1"`
-3. `GET /msx/audio/{player_id}?uri=...` → calls `mass.player_queues.play_media()` → waits for `MSXPlayer.wait_for_media()` (up to 10s)
-4. Streams: `mass.streams.get_stream()` → raw PCM → `get_ffmpeg_stream()` → encoded MP3/AAC/FLAC → TV
-5. `Content-Length: duration * bytes_per_sec` set for MP3 (40,000 B/s) and AAC (32,000 B/s) — FLAC omits it (non-deterministic size)
-6. **MA queue → MSX playlist:** `notify_play_playlist()` sends WS `{type:"playlist", url:"/msx/queue-playlist/{player_id}.json"}` — TV loads MA queue as MSX native playlist; same-queue track changes use `{type:"goto_index", index:N}` instead of resending
+Use Sphinx-style docstrings with `:param:` syntax. For simple functions, a
+single-line docstring is fine.
 
-**WebSocket Push (bidirectional MA ↔ MSX):**
-1. Plugin connects to `/ws?device_id=...` on startup
-2. MA → TV message types: `play` (title/artist/image/duration/next_action/prev_action), `stop` (sent twice for instant close), `pause`, `resume`, `playlist` (url to load), `goto_index` (index in current playlist), `seek` (position_seconds)
-3. TV → MA message types: `position` (current playback seconds → `player.update_position()`), `pause` (with position), `resume` — bidirectional protocol
-4. `_skip_ws_notify` flag prevents echo-back when MSX initiates pause/resume
-5. WS position reports override wall-clock elapsed time for 10s (more accurate than polling)
+Don't explain inner workings of the code in the docstrings (you can use inline
+comments for that if/when needed). The docstring should provide clarity to the
+**caller** of the function/method, not explain how it works
+technically/internally.
 
-**Direct Stream Proxy (for programmatic playback):**
-1. MA calls `play_media(media)` on `MSXPlayer` → player stores `media.uri` as `current_stream_url`
-2. TV fetches `GET /stream/{player_id}` → HTTP server streams audio via PCM → ffmpeg → encoded output
+```python
+def my_function(param1: str, param2: int, param3: bool = False) -> str:
+    """
+    Brief one-line description of the function.
 
-**Library REST API:**
-- TV or external client calls `/api/albums`, `/api/artists`, etc. → server calls `mass.music.*` internally
-
-## Development Setup
-
-```bash
-# Clone MA server fork alongside this project (if not already done)
-# Use the integration branch with pending upstream PRs for the test environment
-cd /tmp/msx-ma-server && git clone https://github.com/trudenboy/ma-server.git
-
-# Setup venv, install deps, symlink provider — one command does it all
-./scripts/link-to-ma.sh
+    :param param1: Description of what param1 is used for.
+    :param param2: Description of what param2 is used for.
+    :param param3: Description of what param3 is used for.
+    """
 ```
 
-### Working with the MA venv
+Do **not** use Google-style (`Args:`) or bullet-style (`- param:`) docstrings.
+AI assistants tend to generate Google-style by default — explicitly steer them
+to Sphinx, and rewrite anything that slips through.
 
-All commands (server, tests, pre-commit, linting) must run inside the MA venv:
+## Branching and PRs
 
-```bash
-# Activate the venv
-source /tmp/msx-ma-server/ma-server/.venv/bin/activate
+- All work-in-progress PRs target `feat/msx-bridge-player-provider` (primary development branch).
+- Before opening a PR: run lint + tests + `pre-commit run --all-files`. CI runs `ruff format --check`, so pushing without `ruff format` is the most common red build.
 
-# Start MA server (provider auto-loads)
-cd /tmp/msx-ma-server/ma-server && python -m music_assistant --log-level debug
+## Pull Request Workflow
 
-# Run tests
-cd /tmp/msx-ma-server/ma-server && pytest
+All non-trivial changes go through a pull request — never push directly to
+`feat/msx-bridge-player-provider`. Inside a PR, follow this loop:
 
-# Pre-commit (linting, formatting)
-cd /tmp/msx-ma-server/ma-server && pre-commit run --all-files
+1. **Self-review.** Run at least one self-review pass on the diff (e.g. the
+   `/code-review` skill or an equivalent reviewer) before asking for human
+   review.
+2. **Copilot triage.** Check the PR for GitHub Copilot review comments. For
+   each comment: analyze it, apply a fix when warranted, reply with a short
+   justification, and resolve the thread.
+3. **Version + changelog.** *After* review feedback is addressed, bump the
+   `VERSION` file (PEP 440 — `1.2.0` stable, `1.2.0b1` beta) and add a
+   `CHANGELOG.md` entry — in the same PR. The release pipeline tags and
+   publishes automatically when the new `VERSION` lands on `feat/msx-bridge-player-provider`.
+4. **Ask before merging.** Always request explicit maintainer approval to
+   merge. Do not self-merge or enable auto-merge without it. (Auto-merge is
+   reserved for `distribute.yml`-generated wrapper-sync PRs from
+   `ma-provider-tools`.)
 
-# Verify provider imports
-python -c "from music_assistant.providers.msx_bridge import setup; print('OK')"
-```
+Follow-up commits driven by review (your own pass or Copilot's) land directly
+on the PR branch — no separate PR needed.
 
-## Code Standards
+## Upstream is Read-Only
 
-- **Python**: PEP 8, type hints on all functions, `from __future__ import annotations`
-- **Commits**: `type(scope): description` — types: feat, fix, docs, style, refactor, test, chore
-- **Async**: All I/O uses async/await (aiohttp)
-- **MA conventions**: Follow patterns from `_demo_player_provider` and `sendspin` providers
-- **DO NOT use subagents (Task tool) without explicit user instruction or confirmation!**
+Never push to or open PRs against the upstream Music Assistant repo
+(`music-assistant/server` — the true upstream) or the integration fork
+(`trudenboy/ma-server`) without an explicit maintainer instruction. The
+provider repo is the source of truth; sync to the integration fork and
+upstream PR submission run automatically through `ma-provider-tools`
+workflows (`sync-to-fork.yml`, `upstream-pr.yml`).
 
-## Key Files Reference (MA Server)
+This provider is intended to be inlined into
+`music_assistant/providers/msx_bridge` upstream eventually — that is the
+target shape, not a possibility. Any code that lints / type-checks here
+must lint / type-check identically upstream.
 
-| Path | Purpose |
-|------|---------|
-| `music_assistant/models/player.py` | `Player` base class |
-| `music_assistant/models/player_provider.py` | `PlayerProvider` base class |
-| `music_assistant/providers/_demo_player_provider/` | Template provider |
-| `music_assistant/providers/sendspin/` | Reference: provider with embedded HTTP server |
+## Auto-Synced Lint & Typing Config
 
-## Project Status
+`ruff.toml`, `[tool.mypy]`, and `[tool.codespell].skip` mirror upstream
+`music-assistant/server/pyproject.toml` and are regenerated by
+`ma-provider-tools` (`scripts/sync_upstream_config.py`, weekly cron).
+**Do not hand-edit these in the provider repo** — the
+`Check config sync` GitHub Action will fail any PR that drifts. To change
+a rule, open a PR in `trudenboy/ma-provider-tools`; once merged, the
+distribute workflow propagates the change here.
 
-`MSXBridgeProvider`, `MSXPlayer`, and `MSXHTTPServer` are implemented with:
-- Dynamic player registration (device ID or IP-based) with idle timeout cleanup
-- Multi-TV support (each TV gets its own player via device ID)
-- WebSocket push notifications — bidirectional: MA→TV (play/stop/pause/resume/playlist/goto_index/seek) and TV→MA (position/pause/resume)
-- Player state management (play, pause, stop, seek, volume, poll)
-- Player grouping: `SET_MEMBERS` feature, `_propagate_to_group_members()` syncs play/pause/stop across group
-- `SharedGroupStream` in `provider.py` — one ffmpeg, multiple TV readers (catch-up buffer, late-joiner support)
-- `ProviderFeature.REMOVE_PLAYER` — user can remove a player from MA UI; `ProviderFeature.SYNC_PLAYERS` when grouping enabled
-- MSX bootstrap (`/msx/start.json`, `/msx/plugin.html`, static assets)
-- MSX interaction plugin with device ID detection and WebSocket client
-- MSX native JSON content pages (`/msx/menu.json`, `/msx/albums.json`, `/msx/artists.json`, `/msx/playlists.json`, `/msx/tracks.json`, `/msx/recently-played.json`, `/msx/search.json`, `/msx/search-page.json`, `/msx/search-input.json`, `/msx/launcher.json`)
-- MSX detail pages (`/msx/albums/{id}/tracks.json`, `/msx/artists/{id}/albums.json`, `/msx/playlists/{id}/tracks.json`)
-- MSX native playlist endpoints (`/msx/playlist/album/{id}.json`, `/msx/playlist/playlist/{id}.json`, `/msx/playlist/tracks.json`, `/msx/playlist/recently-played.json`, `/msx/playlist/search.json`, `/msx/queue-playlist/{player_id}.json`)
-- Audio playback endpoint (`/msx/audio/{player_id}`) via playlist action; Content-Length set for MP3/AAC from duration; FLAC omits it
-- Stream proxy (`/stream/{player_id}`) with same PCM→ffmpeg chain
-- Library REST API (`/api/albums`, `/api/artists`, `/api/playlists`, `/api/tracks`, `/api/search`, `/api/recently-played`, `/api/lyrics/{player_id}`, `/api/queue/{player_id}`, plus detail sub-routes)
-- Playback control (`/api/play`, `/api/pause/{player_id}`, `/api/stop/{player_id}`, `/api/quick-stop/{player_id}`, `/api/next/{player_id}`, `/api/previous/{player_id}`)
-- Health endpoint (`/health`)
-- Status dashboard (`/`)
-- 141 tests: 111 unit (test_http_server 53, test_player 42, test_group_stream 20, test_provider 9, test_init 6, test_models 4, test_playlist 5, test_mappers 2) + 30 integration
-- `map_track_to_msx()` / `map_tracks_to_msx_playlist()` in `mappers.py` replace the old `_format_msx_track()` helper
-- 7 config entries: `http_port`, `output_format`, `player_idle_timeout`, `show_stop_notification`, `abort_stream_first`, `enable_player_grouping`, `group_stream_mode`
-- Browser web player (`/web`) with library browsing, playback controls, and keyboard shortcuts
-- Group stream modes: Independent (separate ffmpeg per TV) or Shared Buffer (one ffmpeg, multiple readers)
-- `on_player_disabled` override: does not unregister (player stays on Enable); still broadcasts stop for instant MSX close
+Provider-specific carve-outs that do *not* drift: `python_version`,
+`packages = ["tests", "provider"]`, the `[[tool.mypy.overrides]]`
+block, and `codespell.ignore-words-list`.
 
-Next steps: integration testing with real MA server + MSX app, full MSX TypeScript plugin.
+## Debugging
 
-## Gotchas
+Music Assistant stores its data in `$HOME/.musicassistant/`. When debugging
+locally:
 
-- **Album track ordering**: `_sort_album_tracks()` uses `(disc, track_number, name)` — without `name` as tiebreaker, tracks with identical disc/number get non-deterministic order between display page and playlist endpoint (causes mismatched play).
-- **MSX `playlist:` action**: always starts from index 0 — rotate tracks so clicked track is index 0 (`msx_items[start_index:] + msx_items[:start_index]`).
-- **MSX `playlist:` vs `playlist:auto:`**: `playlist:` shows player in foreground and auto-starts; `playlist:auto:` plays in background silently.
-- **Content-Length for audio**: set for MP3 (40,000 B/s) and AAC (32,000 B/s) only — FLAC size is non-deterministic, omitting Content-Length for FLAC prevents MSX from hanging.
-- **WS echo prevention**: set `_skip_ws_notify = True` before calling MA pause/resume when MSX initiates the action, to avoid MA echoing the WS command back to the TV.
+- **Logs:** `$HOME/.musicassistant/musicassistant.log` (current),
+  `musicassistant.log.1`, `.log.2`, etc. for older rotated logs.
+- **Database:** `$HOME/.musicassistant/library.db` — query via `sqlite3`.
+  **Only execute SELECT queries** — never write to a live database.
