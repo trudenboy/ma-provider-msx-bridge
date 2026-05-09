@@ -82,6 +82,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.1.3] - 2026-05-09
+
+- fix(provider): rewrite 6 Google-style docstrings to Sphinx style (#89) (`0b86afb`)
+- chore: update changelog for v1.1.2 [skip ci] (`a02860c`)
+
+---
+
 <!-- changelog entries will be added here by release workflow -->
 
 ## 2026-02-22
