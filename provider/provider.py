@@ -134,10 +134,12 @@ class SharedGroupStream:
                     )
 
     async def subscribe(self, player_id: str) -> AsyncIterator[bytes]:
-        """Subscribe to stream, get buffered + live chunks.
+        """
+        Subscribe to stream, get buffered + live chunks.
 
-        Yields:
-            Audio chunks (bytes). First yields catch-up buffer, then live chunks.
+        :param player_id: Identifier of the subscribing TV player.
+        :returns: Async iterator that first yields the catch-up buffer
+            and then the live chunks.
         """
         # Large queue to handle slow readers (TV with weak WiFi)
         q: asyncio.Queue[bytes | None] = asyncio.Queue(maxsize=512)
@@ -585,10 +587,12 @@ class MSXBridgeProvider(PlayerProvider):
         return self.group_stream_mode == GROUP_STREAM_MODE_REDIRECT
 
     def get_group_id_for_player(self, player: MSXPlayer) -> str | None:
-        """Get group ID if player is in a group (as leader or member).
+        """
+        Get group ID if player is in a group (as leader or member).
 
-        Returns:
-            group_id if player is grouped, None if solo player.
+        :param player: The MSXPlayer to inspect.
+        :returns: ``group_id`` if the player is grouped, ``None`` if
+            it is a solo player.
         """
         # If player is synced to another (member), use leader's ID as group
         if player.synced_to:
@@ -617,15 +621,14 @@ class MSXBridgeProvider(PlayerProvider):
         media_uri: str,
         audio_chunks: AsyncIterator[bytes],
     ) -> SharedGroupStream:
-        """Get existing shared stream or create new one for the group.
+        """
+        Get existing shared stream or create new one for the group.
 
-        Args:
-            group_id: ID of the group (leader's player_id)
-            media_uri: URI of the media being streamed
-            audio_chunks: Async iterator yielding encoded audio chunks
-
-        Returns:
-            SharedGroupStream instance
+        :param group_id: ID of the group (the leader's ``player_id``).
+        :param media_uri: URI of the media being streamed.
+        :param audio_chunks: Async iterator yielding encoded audio
+            chunks.
+        :returns: A :class:`SharedGroupStream` instance.
         """
         existing = self._shared_streams.get(group_id)
 
@@ -681,12 +684,11 @@ class MSXBridgeProvider(PlayerProvider):
         ``redirect``, which is NOT exposed in the provider config UI.
         It will be activated once MA exposes a public streaming endpoint.
 
-        Args:
-            media: PlayerMedia with queue_item_id and source_id
-            output_format: Audio format (mp3, aac, flac)
-
-        Returns:
-            Direct URL to MA Streamserver, or None if unavailable
+        :param media: PlayerMedia with ``queue_item_id`` and
+            ``source_id``.
+        :param output_format: Audio format (``mp3``, ``aac``, ``flac``).
+        :returns: Direct URL to MA Streamserver, or ``None`` if
+            unavailable.
         """
         if not media:
             logger.debug("[MARedirect] No media provided")
