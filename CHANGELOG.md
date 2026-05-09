@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.3] - 2026-05-09
+
+### Changed
+
+- Rewrote 6 Google-style docstrings (`SharedGroupStream.subscribe`, `MSXBridgeProvider.get_group_id_for_player`, `MSXBridgeProvider.get_or_create_shared_stream`, `MSXBridgeProvider.get_ma_stream_url`) to Sphinx-style `:param:` / `:returns:` per the upstream music-assistant/server CLAUDE.md docstring rule.
+
 ## [1.1.2] - 2026-05-09
 
 - fix(provider/models): switch `MsxTemplateType` from `class …(str, Enum)` to `class …(StrEnum)` to satisfy ruff `UP042` from the upstream-synced lint rules.
