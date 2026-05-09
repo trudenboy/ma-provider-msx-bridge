@@ -51,6 +51,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.1.2] - 2026-05-09
+
+- chore: sync workflow wrappers from ma-provider-tools (#86) (`5090ec7`)
+- chore: sync workflow wrappers from ma-provider-tools (#84) (`7c60aed`)
+- chore: sync workflow wrappers from ma-provider-tools (#78) (`c323c7b`)
+- chore: sync workflow wrappers from ma-provider-tools (#76) (`8905424`)
+- chore: sync workflow wrappers from ma-provider-tools (#72) (`dbbd25c`)
+- chore: sync workflow wrappers from ma-provider-tools (#70) (`5f92017`)
+- chore: add VERSION file (1.1.1) (`24934cc`)
+- chore: sync workflow wrappers from ma-provider-tools (#66) (`9447264`)
+- fix(http_server): clamp device_id length and correct _get_prefix docstring (`e2e4436`)
+- fix(http_server): cancel active streams on stop and escape request.host in dashboard HTML (`ebfea30`)
+- fix(lint): shorten _background_tasks comment and restore type: ignore[unreachable] (`f8947e9`)
+- fix: address PR #3123 review comments (r2894314958, r2894314991, r2894315022) (`e40d206`)
+- Add infographic to README for visual reference (`ea7419e`)
+- fix(player): normalize group_members order in set_members (`50e4bd8`)
+- fix(tests): remove unused mass_mock args (ruff ARG001) (`71083c4`)
+- fix(http_server): address code review security issues from PR #3123 (`dc7626a`)
+- fix: remove dead raw_timeout validation and fix XSS in web.js img src (`67c8725`)
+- fix(http_server): handle None from request.url.host for mypy compatibility (`21a9f02`)
+- fix: address PR review comments (IPv6, viewport, SharedGroupStream EOF hang) (`7198c8d`)
+- chore: update changelog for v1.1.1 [skip ci] (`a3abd49`)
+
+---
+
 <!-- changelog entries will be added here by release workflow -->
 
 ## 2026-02-22
