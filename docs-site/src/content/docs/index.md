@@ -16,7 +16,7 @@ description: Documentation for the MSX Bridge provider for Music Assistant
 [![Stars](https://img.shields.io/github/stars/trudenboy/ma-provider-msx-bridge?style=flat&logo=github)](https://github.com/trudenboy/ma-provider-msx-bridge/stargazers)
 
 
-<div class="topic-pills"> <code>music-assistant</code> <code>home-assistant</code> <code>python</code> <code>player-provider</code> <code>media-station-x</code> <code>smart-tv</code> <code>tv-streaming</code> <code>playback-bridge</code>
+<div class="topic-pills"> <code>music-assistant</code> <code>home-assistant</code> <code>python</code> <code>player-provider</code> <code>media-station-x</code> <code>msx</code> <code>smart-tv</code> <code>tv-streaming</code> <code>playback-bridge</code>
 </div>
 
 
