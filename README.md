@@ -1,5 +1,16 @@
 # MSX Music Assistant Bridge
 
+
+<!-- >>> ma-provider-tools sync (readme header) — DO NOT EDIT >>> -->
+[![CI](https://github.com/trudenboy/ma-provider-msx-bridge/actions/workflows/test.yml/badge.svg)](https://github.com/trudenboy/ma-provider-msx-bridge/actions/workflows/test.yml)
+[![Release](https://img.shields.io/github/v/release/trudenboy/ma-provider-msx-bridge?display_name=tag)](https://github.com/trudenboy/ma-provider-msx-bridge/releases/latest)
+[![License](https://img.shields.io/github/license/trudenboy/ma-provider-msx-bridge)](LICENSE)
+[![Music Assistant](https://img.shields.io/badge/Music%20Assistant-provider-9070B8?logo=python&logoColor=white)](https://www.music-assistant.io/)
+[![Stars](https://img.shields.io/github/stars/trudenboy/ma-provider-msx-bridge?style=flat&logo=github)](https://github.com/trudenboy/ma-provider-msx-bridge/stargazers)
+
+**📖 [Documentation](https://trudenboy.github.io/ma-provider-msx-bridge/)** · **🔄 [Changelog](CHANGELOG.md)** · **🐛 [Issues](https://github.com/trudenboy/ma-provider-msx-bridge/issues)** · **💬 [Discussions](https://github.com/trudenboy/ma-provider-msx-bridge/discussions)**
+<!-- <<< ma-provider-tools sync (readme header) <<< -->
+
 English | [Русский](README.ru.md)
 
 📖 <a href="https://trudenboy.github.io/ma-provider-msx-bridge/">User Documentation</a>
