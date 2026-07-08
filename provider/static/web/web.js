@@ -121,7 +121,29 @@ const SENDSPIN_URL_PARAM = urlParams.get('sendspin_url') || '';
 
     function resolveUrl(url) {
         if (!url) return '';
+<<<<<<< ours
         if (url.indexOf('http://') === 0 || url.indexOf('https://') === 0) return url;
+=======
+        if (isHttpUrl(url)) {
+            try {
+                var parsed = new URL(url);
+                if (parsed.host !== location.host) return '';
+                // rebuild from parsed parts so a "//evil.com/x" pathname can't change the host
+                return BASE + parsed.pathname + parsed.search;
+            } catch (e) {
+                return '';
+            }
+        }
+        if (url.charAt(0) === '/') return BASE + url;
+        return '';
+    }
+
+    // Image URLs may legitimately point at remote CDNs (album art), so any
+    // http(s) URL is allowed here — but never other schemes like javascript:.
+    function safeImageUrl(url) {
+        if (!url) return '';
+        if (isHttpUrl(url)) return url;
+>>>>>>> theirs
         if (url.charAt(0) === '/') return BASE + url;
         return url;
     }

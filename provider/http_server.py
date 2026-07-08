@@ -253,7 +253,13 @@ class MSXHTTPServer:
     async def _handle_root(self, request: web.Request) -> web.Response:
         """Serve status dashboard."""
         players = self.provider.players
+<<<<<<< ours
         base = self._get_prefix(request)
+=======
+        # base is derived from the Host header, so escape it before embedding in HTML
+        prefix = self._get_prefix(request)
+        base = html_escape(prefix)
+>>>>>>> theirs
         player_rows = []
         for p in players:
             row = (
@@ -274,10 +280,10 @@ class MSXHTTPServer:
         sendspin_port = "8927"
         sendspin_url = f"http://{hostname}:{sendspin_port}"
         kiosk_html5_url = f"{base}/web?kiosk=1"
-        sendspin_web_url = f"{base}/web?sendspin=1&sendspin_url={quote(sendspin_url, safe='')}"
-        sendspin_kiosk_url = (
-            f"{base}/web?kiosk=1&sendspin=1&sendspin_url={quote(sendspin_url, safe='')}"
-        )
+        # escape the composed URL as a whole: host-derived prefix plus & separators
+        sendspin_query = f"sendspin=1&sendspin_url={quote(sendspin_url, safe='')}"
+        sendspin_web_url = html_escape(f"{prefix}/web?{sendspin_query}")
+        sendspin_kiosk_url = html_escape(f"{prefix}/web?kiosk=1&{sendspin_query}")
 
         html = f"""<!DOCTYPE html>
 <html>

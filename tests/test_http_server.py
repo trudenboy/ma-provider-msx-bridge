@@ -41,6 +41,28 @@ async def test_root_html(http_client: TestClient[Any, Any]) -> None:
     assert "MSX" in body
 
 
+<<<<<<< ours
+=======
+async def test_root_html_escapes_host_header(http_client: TestClient[Any, Any]) -> None:
+    """A crafted Host header must not be reflected unescaped (XSS)."""
+    resp = await http_client.get("/", headers={"Host": 'evil"><script>alert(1)</script>'})
+    assert resp.status == 200
+    body = await resp.text()
+    assert "<script>alert(1)</script>" not in body
+    # the quote must be escaped so the host can't break out of href attributes
+    assert 'evil">' not in body
+
+
+async def test_root_html_sendspin_urls_escaped(http_client: TestClient[Any, Any]) -> None:
+    """Generated sendspin hrefs must be HTML-escaped as a whole, including & separators."""
+    resp = await http_client.get("/")
+    assert resp.status == 200
+    body = await resp.text()
+    assert "&amp;sendspin_url=http%3A%2F%2F" in body
+    assert "&sendspin_url=http%3A%2F%2F" not in body
+
+
+>>>>>>> theirs
 async def test_start_json(http_client: TestClient[Any, Any]) -> None:
     """GET /msx/start.json should return launcher menu config."""
     resp = await http_client.get("/msx/start.json")
