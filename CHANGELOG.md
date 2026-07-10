@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.4] - 2026-07-10
+
+### Changed
+
+- Playback started from a TV or the web player is attributed to the owner account using the new Music Assistant impersonation mechanism (ported from upstream PR [#4613](https://github.com/music-assistant/server/pull/4613)).
+
+### Security
+
+- The status dashboard no longer reflects a crafted `Host` header unescaped into the page, closing a reflected-XSS vector (ported from upstream PR [#4562](https://github.com/music-assistant/server/pull/4562)).
+- The web player now rejects audio and content URLs that point at a different host and ignores image URLs with non-http(s) schemes such as `javascript:` (ported from upstream PR [#4562](https://github.com/music-assistant/server/pull/4562)).
+
 ## [1.1.3] - 2026-05-09
 
 ### Changed
@@ -186,4 +197,3 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## 2026-02-08
 
 - feat: add MSX Bridge Player Provider
-- Reverse-synced upstream PR #4562 (WIP)
