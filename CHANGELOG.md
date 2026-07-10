@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Playback started from a TV or the web player is attributed to the owner account using the new Music Assistant impersonation mechanism (ported from upstream PR [#4613](https://github.com/music-assistant/server/pull/4613)).
+- Library lists keep showing full item details after Music Assistant switched its library listings to slim summary items by default (ported from upstream PR [#4693](https://github.com/music-assistant/server/pull/4693)).
 
 ### Security
 
