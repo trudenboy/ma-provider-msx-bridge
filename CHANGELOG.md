@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The status dashboard no longer reflects a crafted `Host` header unescaped into the page, closing a reflected-XSS vector (ported from upstream PR [#4562](https://github.com/music-assistant/server/pull/4562)).
 - The web player now rejects audio and content URLs that point at a different host and ignores image URLs with non-http(s) schemes such as `javascript:` (ported from upstream PR [#4562](https://github.com/music-assistant/server/pull/4562)).
+- Hardened the web player URL check so a same-host URL cannot smuggle a different target via its path, and the status dashboard now HTML-escapes generated player links as a whole (ported from upstream PR [#4662](https://github.com/music-assistant/server/pull/4662)).
 
 ## [1.1.3] - 2026-05-09
 
