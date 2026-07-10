@@ -1009,6 +1009,33 @@ const SENDSPIN_URL_PARAM = urlParams.get('sendspin_url') || '';
         }
     }
 
+    // --- Party Mode (kiosk QR overlay) ---
+    var PARTY_POLL_INTERVAL = 30000;
+
+    function updatePartyOverlay() {
+        fetch('/api/party')
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                var panel = document.getElementById('kiosk-party');
+                if (!panel) return;
+                var qrUrl = data && data.active ? resolveUrl(data.qr_url) : '';
+                if (!qrUrl) { panel.hidden = true; return; }
+                // cache-bust so a rotated join code refreshes the image
+                var img = document.getElementById('kiosk-party-qr');
+                img.src = qrUrl + (qrUrl.indexOf('?') >= 0 ? '&' : '?') + 't=' + Date.now();
+                document.getElementById('kiosk-party-name').textContent = data.name || '';
+                document.getElementById('kiosk-party-text').textContent =
+                    data.qr_text || 'Scan to join the party';
+                panel.hidden = false;
+            })
+            .catch(function () { /* keep last state on transient errors */ });
+    }
+
+    function startPartyPolling() {
+        updatePartyOverlay();
+        setInterval(updatePartyOverlay, PARTY_POLL_INTERVAL);
+    }
+
     // --- Kiosk Queue ---
     function fetchKioskQueue(playerId) {
         clearTimeout(kioskQueueTimer);
@@ -1201,6 +1228,8 @@ const SENDSPIN_URL_PARAM = urlParams.get('sendspin_url') || '';
             updateLyricsOffset();
             window.addEventListener('resize', updateLyricsOffset);
 
+            startPartyPolling();
+
             console.log('[WebPlayer] Kiosk mode initialized with Sendspin');
         } else if (KIOSK_MODE) {
             // Kiosk HTML5 mode: fullscreen player with WebSocket push + HTML5 Audio
@@ -1257,6 +1286,8 @@ const SENDSPIN_URL_PARAM = urlParams.get('sendspin_url') || '';
             hideKioskControls(); // start in hidden state
             updateLyricsOffset();
             window.addEventListener('resize', updateLyricsOffset);
+
+            startPartyPolling();
 
             console.log('[WebPlayer] Kiosk mode initialized with HTML5 streaming');
         } else {

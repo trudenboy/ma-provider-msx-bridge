@@ -2,7 +2,7 @@
 id: "0001"
 title: "Party Mode on the TV: kiosk QR overlay and party status"
 size: M
-status: todo
+status: done
 priority: P1
 effort_minutes: 20
 feature_id:
