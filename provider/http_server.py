@@ -457,7 +457,9 @@ small {{ color: #666; display: block; margin-top: 4px; }}
         offset = _int_param(request.query, "offset", 0)
         try:
             albums = await asyncio.wait_for(
-                self.provider.mass.music.albums.library_items(limit=limit, offset=offset),
+                self.provider.mass.music.albums.library_items(
+                    limit=limit, offset=offset, summary=False
+                ),
                 timeout=10.0,
             )
         except Exception:
@@ -486,7 +488,9 @@ small {{ color: #666; display: block; margin-top: 4px; }}
         offset = _int_param(request.query, "offset", 0)
         try:
             artists = await asyncio.wait_for(
-                self.provider.mass.music.artists.library_items(limit=limit, offset=offset),
+                self.provider.mass.music.artists.library_items(
+                    limit=limit, offset=offset, summary=False
+                ),
                 timeout=10.0,
             )
         except Exception:
@@ -513,7 +517,9 @@ small {{ color: #666; display: block; margin-top: 4px; }}
         offset = _int_param(request.query, "offset", 0)
         try:
             playlists = await asyncio.wait_for(
-                self.provider.mass.music.playlists.library_items(limit=limit, offset=offset),
+                self.provider.mass.music.playlists.library_items(
+                    limit=limit, offset=offset, summary=False
+                ),
                 timeout=10.0,
             )
         except Exception:
@@ -540,7 +546,9 @@ small {{ color: #666; display: block; margin-top: 4px; }}
         offset = _int_param(request.query, "offset", 0)
         try:
             tracks = await asyncio.wait_for(
-                self.provider.mass.music.tracks.library_items(limit=limit, offset=offset),
+                self.provider.mass.music.tracks.library_items(
+                    limit=limit, offset=offset, summary=False
+                ),
                 timeout=10.0,
             )
         except Exception:
@@ -578,7 +586,9 @@ small {{ color: #666; display: block; margin-top: 4px; }}
         prefix = self._get_prefix(request)
         try:
             tracks = await asyncio.wait_for(
-                self.provider.mass.music.tracks.library_items(limit=50, order_by="last_played"),
+                self.provider.mass.music.tracks.library_items(
+                    limit=50, order_by="last_played", summary=False
+                ),
                 timeout=10.0,
             )
         except Exception:
@@ -908,7 +918,9 @@ small {{ color: #666; display: block; margin-top: 4px; }}
         limit = _int_param(request.query, "limit", 50)
         offset = _int_param(request.query, "offset", 0)
         start = _int_param(request.query, "start", 0)
-        tracks = await self.provider.mass.music.tracks.library_items(limit=limit, offset=offset)
+        tracks = await self.provider.mass.music.tracks.library_items(
+            limit=limit, offset=offset, summary=False
+        )
         playlist = map_tracks_to_msx_playlist(
             list(tracks),
             start,
@@ -925,7 +937,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
         prefix = self._get_prefix(request)
         start = _int_param(request.query, "start", 0)
         tracks = await self.provider.mass.music.tracks.library_items(
-            limit=50, order_by="last_played"
+            limit=50, order_by="last_played", summary=False
         )
         playlist = map_tracks_to_msx_playlist(
             list(tracks),
@@ -1785,7 +1797,9 @@ small {{ color: #666; display: block; margin-top: 4px; }}
         """List albums."""
         limit = _int_param(request.query, "limit", 50)
         offset = _int_param(request.query, "offset", 0)
-        albums = await self.provider.mass.music.albums.library_items(limit=limit, offset=offset)
+        albums = await self.provider.mass.music.albums.library_items(
+            limit=limit, offset=offset, summary=False
+        )
         return web.json_response(
             {
                 "items": [
@@ -1816,7 +1830,9 @@ small {{ color: #666; display: block; margin-top: 4px; }}
         """List artists."""
         limit = _int_param(request.query, "limit", 50)
         offset = _int_param(request.query, "offset", 0)
-        artists = await self.provider.mass.music.artists.library_items(limit=limit, offset=offset)
+        artists = await self.provider.mass.music.artists.library_items(
+            limit=limit, offset=offset, summary=False
+        )
         return web.json_response(
             {
                 "items": [
@@ -1856,7 +1872,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
         limit = _int_param(request.query, "limit", 50)
         offset = _int_param(request.query, "offset", 0)
         playlists = await self.provider.mass.music.playlists.library_items(
-            limit=limit, offset=offset
+            limit=limit, offset=offset, summary=False
         )
         return web.json_response(
             {
@@ -1887,7 +1903,9 @@ small {{ color: #666; display: block; margin-top: 4px; }}
         """List tracks."""
         limit = _int_param(request.query, "limit", 50)
         offset = _int_param(request.query, "offset", 0)
-        tracks = await self.provider.mass.music.tracks.library_items(limit=limit, offset=offset)
+        tracks = await self.provider.mass.music.tracks.library_items(
+            limit=limit, offset=offset, summary=False
+        )
         return web.json_response(
             {
                 "items": [self._format_track(track) for track in tracks],
@@ -1940,7 +1958,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
         """Return recently played items."""
         limit = _int_param(request.query, "limit", 20)
         tracks = await self.provider.mass.music.tracks.library_items(
-            limit=limit, order_by="last_played"
+            limit=limit, order_by="last_played", summary=False
         )
         return web.json_response(
             {

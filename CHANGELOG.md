@@ -187,3 +187,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - feat: add MSX Bridge Player Provider
 - Reverse-synced upstream PR #4613 (WIP)
+- Reverse-synced upstream PR #4693 (WIP)
