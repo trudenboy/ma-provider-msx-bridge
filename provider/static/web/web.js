@@ -1014,21 +1014,29 @@ const SENDSPIN_URL_PARAM = urlParams.get('sendspin_url') || '';
 
     function updatePartyOverlay() {
         fetch('/api/party')
-            .then(function (r) { return r.json(); })
+            .then(function (r) {
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                return r.json();
+            })
             .then(function (data) {
                 var panel = document.getElementById('kiosk-party');
                 if (!panel) return;
                 var qrUrl = data && data.active ? resolveUrl(data.qr_url) : '';
                 if (!qrUrl) { panel.hidden = true; return; }
-                // cache-bust so a rotated join code refreshes the image
+                // the version param changes only when the join code rotates, so the
+                // TV refetches the image exactly then (no flicker on idle polls)
+                var src = addParam(qrUrl, 'v=' + encodeURIComponent(data.qr_version || ''));
                 var img = document.getElementById('kiosk-party-qr');
-                img.src = qrUrl + (qrUrl.indexOf('?') >= 0 ? '&' : '?') + 't=' + Date.now();
+                if (img.src !== src) img.src = src;
                 document.getElementById('kiosk-party-name').textContent = data.name || '';
                 document.getElementById('kiosk-party-text').textContent =
                     data.qr_text || 'Scan to join the party';
                 panel.hidden = false;
             })
-            .catch(function () { /* keep last state on transient errors */ });
+            .catch(function (e) {
+                // keep the last shown state on transient network errors
+                console.warn('Party status fetch failed:', e);
+            });
     }
 
     function startPartyPolling() {

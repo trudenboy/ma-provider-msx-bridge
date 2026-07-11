@@ -57,8 +57,34 @@ async def test_party_status_active(http_client: TestClient[Any, Any], mass_mock:
     assert data["active"] is True
     assert data["name"] == "My Party"
     assert data["qr_text"] == "Scan to join!"
-    assert data["qr_url"].endswith("/api/party/qr.svg")
+    # relative so the kiosk works behind reverse proxies / mapped ports
+    assert data["qr_url"] == "/api/party/qr.svg"
+    # opaque version so clients refetch the QR only when the join code rotates
+    assert data["qr_version"]
+    assert JOIN_URL not in data["qr_version"]
     mass_mock.get_provider.assert_called_with("party")
+
+
+async def test_party_status_survives_plugin_errors(
+    http_client: TestClient[Any, Any], mass_mock: Mock
+) -> None:
+    """A raising Party plugin must degrade to inactive, not a 500."""
+    party = _party_mock()
+    party.get_party_url = AsyncMock(side_effect=RuntimeError("guest access broken"))
+    mass_mock.get_provider = Mock(return_value=party)
+    resp = await http_client.get("/api/party")
+    assert resp.status == 200
+    assert await resp.json() == {"active": False}
+
+
+async def test_party_status_is_cached(http_client: TestClient[Any, Any], mass_mock: Mock) -> None:
+    """Repeated status requests within the cache TTL must not re-query the plugin."""
+    party = _party_mock()
+    mass_mock.get_provider = Mock(return_value=party)
+    resp1 = await http_client.get("/api/party")
+    resp2 = await http_client.get("/api/party")
+    assert resp1.status == resp2.status == 200
+    party.get_party_url.assert_awaited_once()
 
 
 async def test_party_status_active_without_custom_texts(
@@ -120,6 +146,22 @@ async def test_party_qr_404_guest_access_off(
     assert resp.status == 404
 
 
+async def test_party_qr_png(http_client: TestClient[Any, Any], mass_mock: Mock) -> None:
+    """GET /api/party/qr.png should return a PNG QR for MSX pages on TVs without SVG."""
+    mass_mock.get_provider = Mock(return_value=_party_mock())
+    resp = await http_client.get("/api/party/qr.png")
+    assert resp.status == 200
+    assert "image/png" in resp.headers["Content-Type"]
+    body = await resp.read()
+    assert body.startswith(b"\x89PNG")
+
+
+async def test_party_qr_png_404_inactive(http_client: TestClient[Any, Any]) -> None:
+    """GET /api/party/qr.png should 404 when no party is active."""
+    resp = await http_client.get("/api/party/qr.png")
+    assert resp.status == 404
+
+
 # --- /msx/party.json native MSX page ---
 
 
@@ -131,9 +173,19 @@ async def test_msx_party_page_active(http_client: TestClient[Any, Any], mass_moc
     data = await resp.json()
     assert data["headline"] == "My Party"
     items = data["items"]
-    assert any(item.get("image", "").endswith("/api/party/qr.svg") for item in items)
+    # PNG, not SVG: MSX image slots on older TV engines cannot decode SVG
+    assert any(item.get("image", "").endswith("/api/party/qr.png") for item in items)
     body = await resp.text()
     assert JOIN_URL not in body
+
+
+async def test_msx_party_page_refreshes_player_activity(
+    http_client: TestClient[Any, Any], mass_mock: Mock
+) -> None:
+    """Viewing the party page must register/refresh the player like other MSX pages."""
+    resp = await http_client.get("/msx/party.json?device_id=partytv")
+    assert resp.status == 200
+    mass_mock.players.register.assert_awaited()
 
 
 async def test_msx_party_page_inactive(http_client: TestClient[Any, Any]) -> None:
@@ -166,3 +218,25 @@ async def test_msx_menu_hides_party_when_inactive(http_client: TestClient[Any, A
     assert resp.status == 200
     data = await resp.json()
     assert not any(i.get("label") == "Party" for i in data["items"])
+
+
+async def test_msx_menu_survives_plugin_errors(
+    http_client: TestClient[Any, Any], mass_mock: Mock
+) -> None:
+    """A raising Party plugin must not break the main menu."""
+    party = _party_mock()
+    party.get_party_url = AsyncMock(side_effect=RuntimeError("guest access broken"))
+    mass_mock.get_provider = Mock(return_value=party)
+    resp = await http_client.get("/msx/menu.json")
+    assert resp.status == 200
+    data = await resp.json()
+    assert any(i.get("label") == "Albums" for i in data["items"])
+    assert not any(i.get("label") == "Party" for i in data["items"])
+
+
+async def test_tv_plugin_menu_has_party_entry(http_client: TestClient[Any, Any]) -> None:
+    """The TV interaction plugin's client-side menu must link to the party page."""
+    resp = await http_client.get("/msx/plugin.html")
+    assert resp.status == 200
+    body = await resp.text()
+    assert "/msx/party.json" in body
