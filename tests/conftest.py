@@ -84,6 +84,9 @@ def mass_mock(player_config_mock: Mock) -> Mock:
     # Image URLs
     mass.metadata.get_image_url = Mock(return_value=None)
 
+    # Other providers (e.g. the Party plugin) are absent by default
+    mass.get_provider = Mock(return_value=None)
+
     return mass
 
 

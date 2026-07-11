@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-07-10
+
+### Added
+
+- Party Mode on the TV: when the Music Assistant Party plugin has guest access enabled, the kiosk shows a QR code with the party name and caption so guests can join from their phones, a Party entry appears in the MSX menu with the same QR on a native TV page, and the QR image plus a small party-status endpoint are exposed over HTTP. Requires no setup on the TV; everything hides automatically when no party is active.
+
 ## [1.1.4] - 2026-07-10
 
 ### Changed
