@@ -1170,6 +1170,25 @@ def test_web_player_has_no_cdn_dependency() -> None:
     assert "sendspin-js/index.js" in web_js
 
 
+async def test_root_has_kiosk_url_builder(http_client: TestClient[Any, Any]) -> None:
+    """The status page offers a kiosk URL builder with the four display toggles."""
+    resp = await http_client.get("/")
+    assert resp.status == 200
+    body = await resp.text()
+    assert 'id="kiosk-builder"' in body
+    for name in ("controls", "party", "viz", "lyrics"):
+        assert f'data-kiosk-param="{name}"' in body
+    assert 'id="kiosk-builder-link"' in body
+    assert 'id="kiosk-builder-url"' in body
+
+
+def test_web_player_reads_kiosk_display_params() -> None:
+    """web.js must read the four kiosk display params (URL contract)."""
+    web_js = (STATIC_DIR / "web" / "web.js").read_text(encoding="utf-8")
+    for name in ("controls", "party", "viz", "lyrics"):
+        assert f"kioskFlag('{name}')" in web_js, f"missing kiosk param: {name}"
+
+
 def test_web_player_js_parses() -> None:
     """web.js must be syntactically valid (guards against edits breaking the kiosk)."""
     node = shutil.which("node")

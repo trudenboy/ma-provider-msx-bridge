@@ -33,6 +33,19 @@ http://<SERVER_IP>:8099/web/
 - Library browsing (Albums, Artists, Playlists, Tracks)
 - Search functionality
 
+### Kiosk Display Toggles
+
+The kiosk URL (`/web?kiosk=1`) accepts four display toggles — each is on by default, `=0` disables it:
+
+| Param | Hides |
+|-------|-------|
+| `controls=0` | Playback control panel (also on mouse/touch interaction) |
+| `party=0` | Party QR overlay (party status is not polled at all) |
+| `viz=0` | Spectrum visualizer / equalizer |
+| `lyrics=0` | Karaoke lyrics (not fetched at all) |
+
+Example — art and visualizer only: `/web?kiosk=1&controls=0&party=0&lyrics=0`. The provider status page (`/`) has a **Kiosk URL Builder** that composes these links interactively.
+
 ### Kiosk Mode Setup (Raspberry Pi)
 
 ```bash

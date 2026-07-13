@@ -344,6 +344,8 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
   background: #1976d2; color: white; cursor: pointer; font-size: 14px; }}
 .btn:hover {{ background: #1565c0; }}
 .link-row {{ margin: 8px 0; }}
+.builder-row {{ margin: 6px 0; }}
+.builder-row label {{ margin-right: 16px; cursor: pointer; }}
 .link-row a {{ color: #1976d2; text-decoration: none; }}
 .link-row a:hover {{ text-decoration: underline; }}
 small {{ color: #666; display: block; margin-top: 4px; }}
@@ -383,6 +385,54 @@ small {{ color: #666; display: block; margin-top: 4px; }}
 <strong>Custom Sendspin URL:</strong><br>
 <code>/web?kiosk=1&amp;sendspin=1&amp;sendspin_url=http://&lt;ma-server&gt;:8927</code>
 </div>
+</div>
+
+<div class="info">
+<h3>Kiosk URL Builder</h3>
+<div id="kiosk-builder">
+<div class="builder-row">
+<label><input type="radio" name="kiosk-mode" value="html5" checked> HTML5</label>
+<label><input type="radio" name="kiosk-mode" value="sendspin"> Sendspin</label>
+</div>
+<div class="builder-row">
+<label><input type="checkbox" data-kiosk-param="controls" checked> Controls</label>
+<label><input type="checkbox" data-kiosk-param="party" checked> Party QR</label>
+<label><input type="checkbox" data-kiosk-param="viz" checked> Visualizer</label>
+<label><input type="checkbox" data-kiosk-param="lyrics" checked> Lyrics</label>
+</div>
+<div class="link-row">
+<a id="kiosk-builder-link" href="/web?kiosk=1" target="_blank">Open kiosk</a>
+</div>
+<code id="kiosk-builder-url"></code>
+</div>
+<script>
+(function () {{
+    var builder = document.getElementById('kiosk-builder');
+    var link = document.getElementById('kiosk-builder-link');
+    var urlOut = document.getElementById('kiosk-builder-url');
+
+    function rebuild() {{
+        var params = ['kiosk=1'];
+        var mode = builder.querySelector('input[name="kiosk-mode"]:checked').value;
+        if (mode === 'sendspin') {{
+            params.push('sendspin=1');
+        }}
+        var boxes = builder.querySelectorAll('input[data-kiosk-param]');
+        for (var i = 0; i < boxes.length; i++) {{
+            // only non-default choices land in the URL
+            if (!boxes[i].checked) {{
+                params.push(boxes[i].getAttribute('data-kiosk-param') + '=0');
+            }}
+        }}
+        var url = location.origin + '/web?' + params.join('&');
+        link.href = url;
+        urlOut.textContent = url;
+    }}
+
+    builder.addEventListener('change', rebuild);
+    rebuild();
+}})();
+</script>
 </div>
 
 <div class="info">
