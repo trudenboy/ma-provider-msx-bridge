@@ -389,6 +389,57 @@ async def test_control_unknown_player(provider: MSXBridgeProvider) -> None:
         await client.close()
 
 
+async def test_control_endpoints_reject_cross_site(http_client: TestClient[Any, Any]) -> None:
+    """
+    State-changing endpoints must reject browser cross-site requests (CSRF).
+
+    Any web page can fire a GET via an img/script tag; modern browsers stamp
+    such requests with Sec-Fetch-Site: cross-site. The rejection must happen
+    before the player lookup so probing is impossible too.
+    """
+    headers = {"Sec-Fetch-Site": "cross-site"}
+    for path in (
+        "/api/pause/msx_x",
+        "/api/stop/msx_x",
+        "/api/quick-stop/msx_x",
+        "/api/next/msx_x",
+        "/api/previous/msx_x",
+    ):
+        resp = await http_client.get(path, headers=headers)
+        assert resp.status == 403, f"{path} must reject cross-site GET"
+
+    resp = await http_client.post(
+        "/api/play",
+        json={"track_uri": "library://track/1", "player_id": "msx_x"},
+        headers=headers,
+    )
+    assert resp.status == 403, "/api/play must reject cross-site POST"
+
+
+async def test_control_endpoints_allow_same_origin(
+    provider: MSXBridgeProvider, mass_mock: Mock
+) -> None:
+    """Same-origin browser requests (web player, MSX plugin) must still work."""
+    _register_msx_player(mass_mock, provider, "msx_test")
+    server = MSXHTTPServer(provider, 0)
+    client = AiohttpTestClient(TestServer(server.app))
+    await client.start_server()
+    try:
+        resp = await client.get("/api/pause/msx_test", headers={"Sec-Fetch-Site": "same-origin"})
+        assert resp.status == 200
+        mass_mock.players.cmd_pause.assert_awaited_once_with("msx_test")
+    finally:
+        await client.close()
+
+
+async def test_control_endpoints_reject_unexpected_methods(
+    http_client: TestClient[Any, Any],
+) -> None:
+    """Control endpoints accept only GET and POST — no wildcard methods."""
+    resp = await http_client.delete("/api/pause/msx_x")
+    assert resp.status == 405
+
+
 # --- MSX content page actions ---
 
 
@@ -724,6 +775,53 @@ async def test_msx_audio_from_playlist_skips_ws(
         # And reset to False after
         assert player._skip_ws_notify is False
 
+    finally:
+        await client.close()
+
+
+async def test_msx_audio_arms_wait_before_enqueue(
+    provider: MSXBridgeProvider, mass_mock: Mock
+) -> None:
+    """GET /msx/audio must arm expect_new_media() BEFORE enqueuing new playback."""
+    server = MSXHTTPServer(provider, 0)
+    client = AiohttpTestClient(TestServer(server.app))
+    await client.start_server()
+    try:
+        player = MagicMock(spec=MSXPlayer)
+        player.player_id = "msx_test"
+        player.output_format = "mp3"
+        player._skip_ws_notify = False
+        media = PlayerMedia(
+            uri="library://track/1",
+            title=None,
+            artist=None,
+            album=None,
+            image_url=None,
+            duration=180,
+        )
+        player.current_media = media
+        player.wait_for_media = AsyncMock(return_value=media)
+        mass_mock.players.get.return_value = mass_mock.players.get_player.return_value = player
+
+        mass_mock.streams = Mock()
+        mass_mock.streams.get_stream = Mock(return_value=_async_iter([b"pcm"]))
+
+        call_order: list[str] = []
+        player.expect_new_media = Mock(side_effect=lambda: call_order.append("arm"))
+
+        async def _record_enqueue(*_a: object, **_k: object) -> None:
+            call_order.append("enqueue")
+
+        mass_mock.player_queues.play_media = _record_enqueue
+
+        with patch(
+            "music_assistant.providers.msx_bridge.http_server.get_ffmpeg_stream",
+            return_value=_async_iter([b"encoded-chunk-1"]),
+        ):
+            resp = await client.get("/msx/audio/msx_test?uri=library://track/1")
+            assert resp.status == 200
+
+        assert call_order == ["arm", "enqueue"]
     finally:
         await client.close()
 
