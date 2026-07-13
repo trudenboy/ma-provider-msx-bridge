@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Sendspin bridge (experimental, off by default): each TV can be registered as a Sendspin client so it joins sample-synchronized playback groups together with any Music Assistant players — not just other MSX TVs. When a synchronized stream starts, the TV automatically opens the web kiosk in Sendspin mode; if the TV's browser cannot run the Sendspin client, playback transfers back to the regular HTTP player automatically and the failure is logged.
 - During an active party, the join QR code is now stamped into the bottom-right corner of the cover art shown by the native MSX player, so guests can scan it without leaving playback. Covers return to normal automatically when the party ends.
+- The web kiosk's center equalizer is now a real audio spectrum analyzer driven by the live playback signal (HTTP kiosk mode); the Sendspin kiosk keeps its decorative animation, and browsers without Web Audio fall back to it automatically.
 
 ### Changed
 

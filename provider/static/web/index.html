@@ -708,6 +708,12 @@
             min-height: 8px;
         }
 
+        /* Live spectrum: heights are set inline from FFT data, no keyframes */
+        #eq-bars.eq-live .eq-bar {
+            animation: none;
+            transition: height 0.06s linear;
+        }
+
         @keyframes eqBounce {
             0%   { height: var(--eq-min, 8px); opacity: 0.5; }
             100% { height: var(--eq-max, 100px); opacity: 1; }
