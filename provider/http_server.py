@@ -1195,17 +1195,9 @@ small {{ color: #666; display: block; margin-top: 4px; }}
         """
         player_id = player.player_id
 
-        # Resolve effective output format: per-player config overrides provider default.
-        # CONF_ENTRY_OUTPUT_CODEC_DEFAULT_MP3 uses key "output_codec"; fall back to
-        # player.output_format (set from provider-level config during registration).
-        effective_format = cast(
-            "str",
-            player.config.get_value("output_codec", player.output_format),
-        )
-
         # --- Mode 1: MA Redirect ---
         if self.provider.is_redirect_stream_mode():
-            redirect_url = await self.provider.get_ma_stream_url(media, effective_format)
+            redirect_url = await self.provider.get_ma_stream_url(player_id, media)
             if redirect_url:
                 logger.info(
                     "[StreamMode:redirect] Player %s -> MA Streamserver: %s",
@@ -1219,6 +1211,16 @@ small {{ color: #666; display: block; margin-top: 4px; }}
                 "falling back to independent mode",
                 player_id,
             )
+
+        # Resolve effective output format: per-player config overrides provider default.
+        # CONF_ENTRY_OUTPUT_CODEC_DEFAULT_MP3 uses key "output_codec"; fall back to
+        # player.output_format (set from provider-level config during registration).
+        # Only the proxy paths below need this — in redirect mode the MA streamserver
+        # applies the same per-player codec config itself.
+        effective_format = cast(
+            "str",
+            player.config.get_value("output_codec", player.output_format),
+        )
 
         pcm_format, out_format, headers = self._build_audio_params(
             effective_format,

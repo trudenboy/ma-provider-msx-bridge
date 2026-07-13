@@ -89,14 +89,15 @@ MA Group Command
 └─────────────┘   └─────────────┘
 ```
 
-### Group Stream Modes
+### Stream Delivery Modes
 
-The `group_stream_mode` config option controls how audio is streamed to grouped players:
+The `group_stream_mode` config option controls how audio is delivered to TVs:
 
 | Mode | Description | Use Case |
 |------|-------------|----------|
-| `independent` (default) | Each TV gets its own ffmpeg process | Maximum compatibility, slightly higher CPU |
-| `shared` | One ffmpeg process, multiple readers | Lower CPU usage, better for many TVs |
+| `independent` (default) | Each TV gets its own proxied ffmpeg process | Maximum compatibility, slightly higher CPU |
+| `shared` | One ffmpeg process, multiple readers | Lower CPU usage, better for many grouped TVs |
+| `redirect` | TVs fetch audio directly from the MA streamserver (no local ffmpeg) | Lowest CPU; per-player codec and DSP applied by MA; no shared-buffer group sync |
 
 ```
 Independent Mode:

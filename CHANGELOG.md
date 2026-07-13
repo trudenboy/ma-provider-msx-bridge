@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-07-13
+
+### Added
+
+- New "MA Streamserver" stream delivery mode: TVs are redirected to fetch audio directly from the Music Assistant streamserver instead of the provider's own transcoding proxy — one less ffmpeg process per TV, with per-player codec settings and DSP applied by Music Assistant itself. Falls back to the proxy automatically when the direct URL cannot be resolved. The default mode is unchanged.
+
+### Fixed
+
+- Sendspin kiosk mode now works on TVs without internet access and matches current Music Assistant servers: the Sendspin client library is bundled with the provider (previously an outdated version was loaded from a CDN at runtime, which failed on LAN-only setups).
+
 ## [1.2.2] - 2026-07-13
 
 ### Fixed
