@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import re
+import shutil
+import subprocess
 from collections.abc import AsyncGenerator
 from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
@@ -1166,6 +1168,20 @@ def test_web_player_has_no_cdn_dependency() -> None:
     assert "unpkg.com" not in web_js
     assert "jsdelivr" not in web_js
     assert "sendspin-js/index.js" in web_js
+
+
+def test_web_player_js_parses() -> None:
+    """web.js must be syntactically valid (guards against edits breaking the kiosk)."""
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node not available")
+    result = subprocess.run(  # noqa: S603
+        [node, "--check", str(STATIC_DIR / "web" / "web.js")],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def test_vendored_sendspin_js_imports_are_browser_loadable() -> None:
