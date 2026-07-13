@@ -6,10 +6,18 @@ import json
 from typing import Any
 from unittest.mock import AsyncMock, Mock, patch
 
+import pytest
+
+# The bridge rides on MA's Sendspin provider; skip the whole module when the
+# installed Music Assistant ships no Sendspin provider (as some CI images do).
+pytest.importorskip("music_assistant.providers.sendspin")
+
 from music_assistant_models.enums import ConfigEntryType
 
 from music_assistant.providers.msx_bridge import get_config_entries
-from music_assistant.providers.msx_bridge.constants import CONF_ENABLE_SENDSPIN_BRIDGE
+from music_assistant.providers.msx_bridge.constants import (
+    CONF_ENABLE_SENDSPIN_BRIDGE,
+)
 from music_assistant.providers.msx_bridge.http_server import MSXHTTPServer
 from music_assistant.providers.msx_bridge.player import MSXPlayer
 from music_assistant.providers.msx_bridge.provider import MSXBridgeProvider
