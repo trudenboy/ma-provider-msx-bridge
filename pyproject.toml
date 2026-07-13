@@ -13,7 +13,6 @@ test = [
   "pytest-asyncio>=0.24",
   "pytest-aiohttp>=1.1",
   "pytest-cov>=7.0",
-  "segno==1.6.6",
   "syrupy>=5.0",
   "codespell>=2.4",
   "music-assistant @ git+https://github.com/music-assistant/server.git@dev",
