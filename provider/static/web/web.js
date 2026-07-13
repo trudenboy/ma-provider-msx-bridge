@@ -13,6 +13,8 @@
  * - kiosk: Enable kiosk mode (e.g., ?kiosk=1)
  * - sendspin: Use Sendspin SDK in kiosk mode (e.g., ?kiosk=1&sendspin=1)
  * - sendspin_url: Custom Sendspin server URL (e.g., ?sendspin_url=http://ma:8927)
+ * - controls / party / viz / lyrics: kiosk display toggles, on by default,
+ *   "=0" disables (e.g., ?kiosk=1&controls=0&lyrics=0)
  */
 
 // --- URL Parameters ---
@@ -20,6 +22,13 @@ const urlParams = new URLSearchParams(window.location.search);
 const KIOSK_MODE = urlParams.get('kiosk') === '1';
 const SENDSPIN_MODE = KIOSK_MODE && urlParams.get('sendspin') === '1';
 const SENDSPIN_URL_PARAM = urlParams.get('sendspin_url') || '';
+
+// Kiosk display toggles: every feature is on unless explicitly "=0"
+function kioskFlag(name) { return urlParams.get(name) !== '0'; }
+const KIOSK_SHOW_CONTROLS = kioskFlag('controls');
+const KIOSK_SHOW_PARTY = kioskFlag('party');
+const KIOSK_SHOW_VIZ = kioskFlag('viz');
+const KIOSK_SHOW_LYRICS = kioskFlag('lyrics');
 
 (function () {
     'use strict';
@@ -883,8 +892,19 @@ const SENDSPIN_URL_PARAM = urlParams.get('sendspin_url') || '';
         document.documentElement.style.setProperty('--lyrics-bottom-offset', panelH + 'px');
     }
 
+    // --- Kiosk display toggles (URL params) ---
+    function applyKioskDisplayFlags() {
+        var kp = document.getElementById('kiosk-player');
+        if (!kp) return;
+        if (!KIOSK_SHOW_CONTROLS) kp.classList.add('kiosk-hide-controls');
+        if (!KIOSK_SHOW_PARTY) kp.classList.add('kiosk-hide-party');
+        if (!KIOSK_SHOW_VIZ) kp.classList.add('kiosk-hide-viz');
+        if (!KIOSK_SHOW_LYRICS) kp.classList.add('kiosk-hide-lyrics');
+    }
+
     // --- Kiosk Auto-Hide Controls ---
     function showKioskControls() {
+        if (!KIOSK_SHOW_CONTROLS) return;
         var kp = document.getElementById('kiosk-player');
         if (kp) kp.classList.remove('controls-hidden');
         document.body.classList.add('controls-visible');
@@ -1006,6 +1026,7 @@ const SENDSPIN_URL_PARAM = urlParams.get('sendspin_url') || '';
     }
 
     function fetchLyrics(playerId) {
+        if (KIOSK_MODE && !KIOSK_SHOW_LYRICS) return;
         clearTimeout(lyricsFetchTimer);
         lyricsFetchTimer = setTimeout(function() {
             fetch('/api/lyrics/' + encodeURIComponent(playerId))
@@ -1070,6 +1091,7 @@ const SENDSPIN_URL_PARAM = urlParams.get('sendspin_url') || '';
     }
 
     function startVisualizer() {
+        if (!KIOSK_SHOW_VIZ) return;
         setupVisualizer();
         if (!audioAnalyser) return;
         // A suspended context (autoplay policy) never produces data until resumed.
@@ -1314,6 +1336,7 @@ const SENDSPIN_URL_PARAM = urlParams.get('sendspin_url') || '';
         if (SENDSPIN_MODE) {
             // Kiosk + Sendspin mode: synchronized audio via Sendspin SDK
             document.body.classList.add('kiosk-mode');
+            applyKioskDisplayFlags();
 
             // Build CSS equalizer bars
             buildEqualizer();
@@ -1332,12 +1355,13 @@ const SENDSPIN_URL_PARAM = urlParams.get('sendspin_url') || '';
             updateLyricsOffset();
             window.addEventListener('resize', updateLyricsOffset);
 
-            startPartyPolling();
+            if (KIOSK_SHOW_PARTY) startPartyPolling();
 
             console.log('[WebPlayer] Kiosk mode initialized with Sendspin');
         } else if (KIOSK_MODE) {
             // Kiosk HTML5 mode: fullscreen player with WebSocket push + HTML5 Audio
             document.body.classList.add('kiosk-mode');
+            applyKioskDisplayFlags();
 
             // Build CSS equalizer bars
             buildEqualizer();
@@ -1393,7 +1417,7 @@ const SENDSPIN_URL_PARAM = urlParams.get('sendspin_url') || '';
             updateLyricsOffset();
             window.addEventListener('resize', updateLyricsOffset);
 
-            startPartyPolling();
+            if (KIOSK_SHOW_PARTY) startPartyPolling();
 
             console.log('[WebPlayer] Kiosk mode initialized with HTML5 streaming');
         } else {

@@ -714,6 +714,12 @@
             transition: height 0.06s linear;
         }
 
+        /* Kiosk display toggles (URL params controls/party/viz/lyrics = 0) */
+        #kiosk-player.kiosk-hide-controls #kiosk-controls-panel { display: none !important; }
+        #kiosk-player.kiosk-hide-party #kiosk-party { display: none !important; }
+        #kiosk-player.kiosk-hide-viz #kiosk-equalizer { display: none !important; }
+        #kiosk-player.kiosk-hide-lyrics #kiosk-lyrics { display: none !important; }
+
         @keyframes eqBounce {
             0%   { height: var(--eq-min, 8px); opacity: 0.5; }
             100% { height: var(--eq-max, 100px); opacity: 1; }
