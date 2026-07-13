@@ -1629,6 +1629,27 @@ small {{ color: #666; display: block; margin-top: 4px; }}
             if not ws.closed:
                 self.provider.mass.create_task(self._ws_send(ws, msg, player_id))
 
+    def broadcast_sendspin(self, player_id: str, url: str) -> None:
+        """Notify WebSocket clients to open the Sendspin kiosk (bridge stream start)."""
+        clients = self._ws_clients.get(player_id, set())
+        if not clients:
+            logger.warning(
+                "broadcast_sendspin: no WebSocket clients for player_id=%s (connected: %s)",
+                player_id,
+                list(self._ws_clients.keys()),
+            )
+            return
+        logger.info(
+            "broadcast_sendspin: player_id=%s, url=%s, sending to %d client(s)",
+            player_id,
+            url,
+            len(clients),
+        )
+        msg = json.dumps({"type": "sendspin", "url": url, "player_id": player_id})
+        for ws in list(clients):
+            if not ws.closed:
+                self.provider.mass.create_task(self._ws_send(ws, msg, player_id))
+
     def broadcast_goto_index(self, player_id: str, index: int) -> None:
         """Notify subscribed WebSocket clients to jump to a playlist index."""
         clients = self._ws_clients.get(player_id, set())

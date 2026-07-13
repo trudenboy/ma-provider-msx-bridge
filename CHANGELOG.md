@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-07-13
+
+### Added
+
+- Sendspin bridge (experimental, off by default): each TV can be registered as a Sendspin client so it joins sample-synchronized playback groups together with any Music Assistant players — not just other MSX TVs. When a synchronized stream starts, the TV automatically opens the web kiosk in Sendspin mode; if the TV's browser cannot run the Sendspin client, playback transfers back to the regular HTTP player automatically and the failure is logged.
+
 ## [1.3.0] - 2026-07-13
 
 ### Added
