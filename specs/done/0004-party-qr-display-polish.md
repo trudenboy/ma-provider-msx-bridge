@@ -52,7 +52,7 @@ the TV during playback without any MSX-side rendering support.
 - Unit: the compositor function stamps a QR onto a source image (output
   differs from source, dimensions preserved, corner pixels white-ish).
 - Integration: `GET /api/party/qr-cover.png?image=...` with an active
-  party returns `image/png`; without a party returns 302 to the original.
+  party returns `image/png`; without a party returns 302 to the original; a prefix-lookalike host and an external host both return 400.
 - Integration: a disallowed (external-host) image URL is redirected, not
   fetched.
 - Unit: playlist mapping uses the composited URL when a party is active

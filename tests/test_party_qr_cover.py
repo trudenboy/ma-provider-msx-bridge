@@ -106,8 +106,11 @@ async def test_qr_cover_active_party_returns_png(
         await client.close()
 
 
-async def test_qr_cover_no_party_redirects_to_original(provider: MSXBridgeProvider) -> None:
-    """Without an active party the endpoint redirects to the original image."""
+async def test_qr_cover_no_party_redirects_to_original(
+    provider: MSXBridgeProvider, mass_mock: Mock
+) -> None:
+    """Without an active party the endpoint redirects to the (allowed) original image."""
+    mass_mock.webserver.base_url = "http://ma.local:8095"
     server = MSXHTTPServer(provider, 0)
     client = AiohttpTestClient(TestServer(server.app))
     await client.start_server()
@@ -121,10 +124,10 @@ async def test_qr_cover_no_party_redirects_to_original(provider: MSXBridgeProvid
         await client.close()
 
 
-async def test_qr_cover_disallowed_source_redirects(
+async def test_qr_cover_disallowed_source_rejected(
     provider: MSXBridgeProvider, mass_mock: Mock
 ) -> None:
-    """External-host image URLs are never fetched — redirect to the original instead."""
+    """External-host image URLs are never fetched NOR redirected to (open redirect)."""
     mass_mock.get_provider = Mock(return_value=_party_mock())
     mass_mock.webserver.base_url = "http://ma.local:8095"
     mass_mock.http_session = _http_session_mock(_black_cover_png())
@@ -136,9 +139,49 @@ async def test_qr_cover_disallowed_source_redirects(
         resp = await client.get(
             "/api/party/qr-cover.png", params={"image": evil}, allow_redirects=False
         )
-        assert resp.status == 302
-        assert resp.headers["Location"] == evil
+        assert resp.status == 400
         mass_mock.http_session.get.assert_not_called()
+    finally:
+        await client.close()
+
+
+async def test_qr_cover_prefix_bypass_rejected(
+    provider: MSXBridgeProvider, mass_mock: Mock
+) -> None:
+    """A host that merely starts with an allowed base must be rejected (SSRF bypass)."""
+    mass_mock.get_provider = Mock(return_value=_party_mock())
+    mass_mock.webserver.base_url = "http://ma.local:8095"
+    mass_mock.http_session = _http_session_mock(_black_cover_png())
+    server = MSXHTTPServer(provider, 0)
+    client = AiohttpTestClient(TestServer(server.app))
+    await client.start_server()
+    try:
+        bypass = "http://ma.local:8095.evil.example/img.png"
+        resp = await client.get(
+            "/api/party/qr-cover.png", params={"image": bypass}, allow_redirects=False
+        )
+        assert resp.status == 400
+        mass_mock.http_session.get.assert_not_called()
+    finally:
+        await client.close()
+
+
+async def test_qr_cover_fetch_does_not_follow_redirects(
+    provider: MSXBridgeProvider, mass_mock: Mock
+) -> None:
+    """The cover fetch must not follow redirects (allowlisted host 302 -> loopback)."""
+    mass_mock.get_provider = Mock(return_value=_party_mock())
+    mass_mock.webserver.base_url = "http://ma.local:8095"
+    mass_mock.http_session = _http_session_mock(_black_cover_png())
+    server = MSXHTTPServer(provider, 0)
+    client = AiohttpTestClient(TestServer(server.app))
+    await client.start_server()
+    try:
+        resp = await client.get(
+            "/api/party/qr-cover.png", params={"image": COVER_URL}, allow_redirects=False
+        )
+        assert resp.status == 200
+        assert mass_mock.http_session.get.call_args.kwargs.get("allow_redirects") is False
     finally:
         await client.close()
 
