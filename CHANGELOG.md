@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.2] - 2026-07-13
+
+### Fixed
+
+- Selecting a track while another playback request was still being set up could serve the previous track's audio to the TV or fail with a spurious timeout; the bridge now explicitly waits for the newly requested track.
+- In shared-buffer group mode, simultaneous stream requests from several TVs in the same group could spawn a duplicate audio encoder that kept running with no listeners until the track ended; stream creation is now serialized per group.
+- Playback progress and player idle tracking are no longer affected by system clock adjustments: an NTP time step (common on devices without a hardware clock, right after boot) could corrupt the reported track position by hours or unregister all active TVs mid-session.
+
+### Security
+
+- Playback control endpoints now reject cross-site browser requests, so a malicious web page opened on the LAN can no longer pause, stop or skip tracks on TVs (CSRF). TVs, the web player, the dashboard and non-browser automations are unaffected. These endpoints also accept only GET and POST instead of any HTTP method.
+
 ## [1.2.1] - 2026-07-11
 
 ### Changed

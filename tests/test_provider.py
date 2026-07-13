@@ -46,6 +46,21 @@ async def test_handle_async_init_default_port(mass_mock: Mock, manifest_mock: Mo
         mock_server.start.assert_awaited_once()
 
 
+def test_on_player_activity_uses_monotonic_clock(provider: MSXBridgeProvider) -> None:
+    """
+    The idle-activity ledger must use the monotonic clock.
+
+    With wall-clock timestamps, an NTP step forward (common on RTC-less hosts
+    right after boot) instantly ages every player past the idle cutoff and
+    mass-unregisters them mid-session.
+    """
+    with patch("music_assistant.providers.msx_bridge.provider.time") as mock_time:
+        mock_time.monotonic.return_value = 1234.0
+        provider.on_player_activity("msx_x")
+
+    assert provider._player_last_activity["msx_x"] == 1234.0
+
+
 async def test_loaded_in_mass_starts_timeout_task(provider: MSXBridgeProvider) -> None:
     """loaded_in_mass should start idle timeout task and/or register default player."""
     mock_task = Mock()

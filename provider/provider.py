@@ -70,7 +70,7 @@ class SharedGroupStream:
             "[SharedStream:%s] Starting producer task",
             self.group_id,
         )
-        self._start_time = time.time()
+        self._start_time = time.monotonic()
         self.producer_task = asyncio.create_task(self._produce(audio_chunks))
 
     async def _produce(self, audio_chunks: AsyncIterator[bytes]) -> None:
@@ -106,7 +106,7 @@ class SharedGroupStream:
                 self.group_id,
                 chunk_count,
                 self._total_bytes,
-                time.time() - self._start_time,
+                time.monotonic() - self._start_time,
             )
         except asyncio.CancelledError:
             logger.debug("[SharedStream:%s] Producer cancelled", self.group_id)
@@ -263,6 +263,7 @@ class MSXBridgeProvider(PlayerProvider):
     _timeout_task: asyncio.Task[None] | None = None
     _owner_username: str | None = None
     _shared_streams: dict[str, SharedGroupStream]  # group_id -> SharedGroupStream
+    _shared_stream_lock: asyncio.Lock
     _background_tasks: set[asyncio.Task[None]]  # fire-and-forget tasks (unregister, stream stop)
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
@@ -271,6 +272,7 @@ class MSXBridgeProvider(PlayerProvider):
         self._player_last_activity = {}
         self._pending_unregisters = {}
         self._shared_streams = {}
+        self._shared_stream_lock = asyncio.Lock()
         self._background_tasks = set()
 
     async def handle_async_init(self) -> None:
@@ -379,7 +381,7 @@ class MSXBridgeProvider(PlayerProvider):
             ip_address=ip_address,
         )
         await self.mass.players.register(player)
-        self._player_last_activity[player_id] = time.time()
+        self._player_last_activity[player_id] = time.monotonic()
         self.logger.info("Registered MSX player: %s (%s)", name, player_id)
         return player
 
@@ -414,7 +416,8 @@ class MSXBridgeProvider(PlayerProvider):
 
     def on_player_activity(self, player_id: str) -> None:
         """Record activity for a player (extends idle timeout)."""
-        self._player_last_activity[player_id] = time.time()
+        # Monotonic: a wall-clock NTP step must not age players past the cutoff
+        self._player_last_activity[player_id] = time.monotonic()
 
     def on_player_disabled(self, player_id: str) -> None:
         """
@@ -556,7 +559,7 @@ class MSXBridgeProvider(PlayerProvider):
                 await asyncio.sleep(interval_seconds)
             except asyncio.CancelledError:
                 break
-            now = time.time()
+            now = time.monotonic()
             cutoff = now - (timeout_minutes * 60)
             for player in list(self.players):
                 if not isinstance(player, MSXPlayer):
@@ -635,38 +638,43 @@ class MSXBridgeProvider(PlayerProvider):
         Returns:
             SharedGroupStream instance
         """
-        existing = self._shared_streams.get(group_id)
+        # Serialize check-and-create: without the lock, two concurrent callers
+        # replacing an old stream both pass the "existing" check while awaiting
+        # existing.stop(), creating two producers — one orphaned.
+        async with self._shared_stream_lock:
+            existing = self._shared_streams.get(group_id)
 
-        # Reuse existing if same media and not finished
-        if existing and not existing.finished and existing.media_uri == media_uri:
+            # Reuse existing if same media and not finished
+            if existing and not existing.finished and existing.media_uri == media_uri:
+                logger.info(
+                    "[GroupStream] Reusing existing shared stream for group %s (subscribers: %d)",
+                    group_id,
+                    existing.subscriber_count,
+                )
+                return existing
+
+            # Clean up old stream if exists
+            if existing:
+                logger.info(
+                    "[GroupStream] Replacing old shared stream for group %s "
+                    "(old_uri=%s, new_uri=%s)",
+                    group_id,
+                    existing.media_uri[:50] if existing.media_uri else "N/A",
+                    media_uri[:50] if media_uri else "N/A",
+                )
+                await existing.stop()
+
+            # Create new shared stream
             logger.info(
-                "[GroupStream] Reusing existing shared stream for group %s (subscribers: %d)",
+                "[GroupStream] Creating new shared stream for group %s, uri=%s",
                 group_id,
-                existing.subscriber_count,
+                media_uri[:80] if media_uri else "N/A",
             )
-            return existing
+            stream = SharedGroupStream(group_id, media_uri)
+            await stream.start(audio_chunks)
+            self._shared_streams[group_id] = stream
 
-        # Clean up old stream if exists
-        if existing:
-            logger.info(
-                "[GroupStream] Replacing old shared stream for group %s (old_uri=%s, new_uri=%s)",
-                group_id,
-                existing.media_uri[:50] if existing.media_uri else "N/A",
-                media_uri[:50] if media_uri else "N/A",
-            )
-            await existing.stop()
-
-        # Create new shared stream
-        logger.info(
-            "[GroupStream] Creating new shared stream for group %s, uri=%s",
-            group_id,
-            media_uri[:80] if media_uri else "N/A",
-        )
-        stream = SharedGroupStream(group_id, media_uri)
-        await stream.start(audio_chunks)
-        self._shared_streams[group_id] = stream
-
-        return stream
+            return stream
 
     def remove_shared_stream(self, group_id: str) -> None:
         """Remove and cleanup shared stream for a group."""
