@@ -13,7 +13,7 @@ from html import escape as html_escape
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, NamedTuple, cast
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 import aiohttp
 from aiohttp import WSMsgType, web
@@ -2246,14 +2246,20 @@ small {{ color: #666; display: block; margin-top: 4px; }}
         image_url = request.query.get("image", "")
         if not image_url:
             return web.Response(status=400, text="Missing image parameter")
+        # Reject non-MA sources outright — redirecting would be an open
+        # redirect and fetching would be an SSRF proxy.
+        if not self._is_allowed_cover_source(request, image_url):
+            return web.Response(status=400, text="Image source not permitted")
         party = await self._get_active_party()
-        if party is None or not self._is_allowed_cover_source(request, image_url):
+        if party is None:
             raise web.HTTPFound(location=image_url)
         cache_key = (image_url, party.qr_version)
         if (cached := self._qr_cover_cache.get(cache_key)) is None:
             try:
                 async with self.provider.mass.http_session.get(
-                    image_url, timeout=aiohttp.ClientTimeout(total=10)
+                    image_url,
+                    timeout=aiohttp.ClientTimeout(total=10),
+                    allow_redirects=False,
                 ) as resp:
                     if resp.status != 200:
                         raise ValueError(f"cover fetch returned HTTP {resp.status}")
@@ -2276,19 +2282,38 @@ small {{ color: #666; display: block; margin-top: 4px; }}
             headers={"Cache-Control": "no-store"},
         )
 
+    @staticmethod
+    def _url_origin(url: str) -> tuple[str, str | None, int | None]:
+        """Return (scheme, hostname, port); raises ValueError on malformed URLs."""
+        parts = urlsplit(url)
+        # .port is lazy and raises on garbage like "host:8095.evil.example"
+        return (parts.scheme, parts.hostname, parts.port)
+
     def _is_allowed_cover_source(self, request: web.Request, image_url: str) -> bool:
         """Only composite covers served by this provider or MA itself (no open proxy)."""
-        if image_url.startswith(self._get_prefix(request)):
-            return True
-        allowed = []
+        try:
+            target_origin = self._url_origin(image_url)
+        except ValueError:
+            return False
+        if target_origin[0] not in ("http", "https") or not target_origin[1]:
+            return False
+        allowed_bases = [self._get_prefix(request)]
         for source in (
             getattr(self.provider.mass, "webserver", None),
             getattr(self.provider.mass, "streams", None),
         ):
             base_url = getattr(source, "base_url", None)
             if isinstance(base_url, str) and base_url.startswith("http"):
-                allowed.append(base_url)
-        return any(image_url.startswith(prefix) for prefix in allowed)
+                allowed_bases.append(base_url)
+        # Compare parsed origins, not string prefixes: "http://ma:8095.evil.com"
+        # must not pass for the allowed base "http://ma:8095".
+        for base in allowed_bases:
+            try:
+                if target_origin == self._url_origin(base):
+                    return True
+            except ValueError:
+                continue
+        return False
 
     # --- Playback Control ---
 
