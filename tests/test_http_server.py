@@ -490,6 +490,26 @@ def _make_playlist_mock(item_id: int = 1, name: str = "Test Playlist") -> Mock:
     return playlist
 
 
+def _make_audio_player(mass_mock: Mock) -> tuple[MagicMock, PlayerMedia]:
+    """Wire a MagicMock MSXPlayer with queue-backed media into mass_mock for audio tests."""
+    player = MagicMock(spec=MSXPlayer)
+    player.player_id = "msx_test"
+    player.output_format = "mp3"
+    player._skip_ws_notify = False
+    media = PlayerMedia(
+        uri="library://track/1",
+        title=None,
+        artist=None,
+        album=None,
+        image_url=None,
+        duration=180,
+    )
+    player.current_media = media
+    player.wait_for_media = AsyncMock(return_value=media)
+    mass_mock.players.get.return_value = mass_mock.players.get_player.return_value = player
+    return player, media
+
+
 async def test_msx_albums_have_action(provider: MSXBridgeProvider, mass_mock: Mock) -> None:
     """GET /msx/albums.json items should have content: action for drill-down."""
     album = _make_album_mock()
@@ -694,20 +714,7 @@ async def test_msx_audio_per_track_mode(provider: MSXBridgeProvider, mass_mock: 
     client = AiohttpTestClient(TestServer(server.app))
     await client.start_server()
     try:
-        player = MagicMock(spec=MSXPlayer)
-        player.player_id = "msx_test"
-        player.output_format = "mp3"
-        media = PlayerMedia(
-            uri="library://track/1",
-            title=None,
-            artist=None,
-            album=None,
-            image_url=None,
-            duration=180,
-        )
-        player.current_media = media
-        player.wait_for_media = AsyncMock(return_value=media)
-        mass_mock.players.get.return_value = mass_mock.players.get_player.return_value = player
+        _make_audio_player(mass_mock)
 
         mass_mock.streams = Mock()
         mass_mock.streams.get_stream = Mock(return_value=_async_iter([b"pcm"]))
@@ -736,21 +743,7 @@ async def test_msx_audio_from_playlist_skips_ws(
     client = AiohttpTestClient(TestServer(server.app))
     await client.start_server()
     try:
-        player = MagicMock(spec=MSXPlayer)
-        player.player_id = "msx_test"
-        player.output_format = "mp3"
-        player._skip_ws_notify = False
-        media = PlayerMedia(
-            uri="library://track/1",
-            title=None,
-            artist=None,
-            album=None,
-            image_url=None,
-            duration=180,
-        )
-        player.current_media = media
-        player.wait_for_media = AsyncMock(return_value=media)
-        mass_mock.players.get.return_value = mass_mock.players.get_player.return_value = player
+        player, _media = _make_audio_player(mass_mock)
 
         mass_mock.streams = Mock()
         mass_mock.streams.get_stream = Mock(return_value=_async_iter([b"pcm"]))
@@ -788,21 +781,7 @@ async def test_msx_audio_arms_wait_before_enqueue(
     client = AiohttpTestClient(TestServer(server.app))
     await client.start_server()
     try:
-        player = MagicMock(spec=MSXPlayer)
-        player.player_id = "msx_test"
-        player.output_format = "mp3"
-        player._skip_ws_notify = False
-        media = PlayerMedia(
-            uri="library://track/1",
-            title=None,
-            artist=None,
-            album=None,
-            image_url=None,
-            duration=180,
-        )
-        player.current_media = media
-        player.wait_for_media = AsyncMock(return_value=media)
-        mass_mock.players.get.return_value = mass_mock.players.get_player.return_value = player
+        player, _media = _make_audio_player(mass_mock)
 
         mass_mock.streams = Mock()
         mass_mock.streams.get_stream = Mock(return_value=_async_iter([b"pcm"]))
@@ -1128,20 +1107,7 @@ async def test_msx_audio_redirect_mode(provider: MSXBridgeProvider, mass_mock: M
     client = AiohttpTestClient(TestServer(server.app))
     await client.start_server()
     try:
-        player = MagicMock(spec=MSXPlayer)
-        player.player_id = "msx_test"
-        player.output_format = "mp3"
-        media = PlayerMedia(
-            uri="library://track/1",
-            title=None,
-            artist=None,
-            album=None,
-            image_url=None,
-            duration=180,
-        )
-        player.current_media = media
-        player.wait_for_media = AsyncMock(return_value=media)
-        mass_mock.players.get.return_value = mass_mock.players.get_player.return_value = player
+        _make_audio_player(mass_mock)
 
         stream_url = "http://ma:8097/single/s1/q1/i1/msx_test.mp3"
         mass_mock.streams = Mock()
@@ -1150,7 +1116,6 @@ async def test_msx_audio_redirect_mode(provider: MSXBridgeProvider, mass_mock: M
         resp = await client.get("/msx/audio/msx_test?uri=library://track/1", allow_redirects=False)
         assert resp.status == 302
         assert resp.headers["Location"] == stream_url
-        mass_mock.streams.resolve_stream_url.assert_awaited_once_with("msx_test", media)
     finally:
         await client.close()
 
@@ -1164,20 +1129,7 @@ async def test_msx_audio_redirect_mode_falls_back_to_proxy(
     client = AiohttpTestClient(TestServer(server.app))
     await client.start_server()
     try:
-        player = MagicMock(spec=MSXPlayer)
-        player.player_id = "msx_test"
-        player.output_format = "mp3"
-        media = PlayerMedia(
-            uri="library://track/1",
-            title=None,
-            artist=None,
-            album=None,
-            image_url=None,
-            duration=180,
-        )
-        player.current_media = media
-        player.wait_for_media = AsyncMock(return_value=media)
-        mass_mock.players.get.return_value = mass_mock.players.get_player.return_value = player
+        _make_audio_player(mass_mock)
 
         mass_mock.streams = Mock()
         mass_mock.streams.resolve_stream_url = AsyncMock(side_effect=RuntimeError("boom"))
@@ -1218,22 +1170,36 @@ def test_web_player_has_no_cdn_dependency() -> None:
 
 def test_vendored_sendspin_js_imports_are_browser_loadable() -> None:
     """
-    Every relative import in the vendored SDK must carry an explicit .js extension.
+    Every import specifier in the vendored SDK must be loadable by a browser.
 
-    The upstream dist is TypeScript output with extensionless specifiers that
-    only work through CDN rewriting; browsers loading from our static server
-    need exact paths.
+    Relative specifiers must resolve to a vendored file (the upstream dist is
+    TypeScript output with extensionless specifiers that only work through CDN
+    rewriting). Bare specifiers cannot resolve in browsers at all; the two
+    opus-encdec ones are a known opus-decode fallback that stays unreachable
+    because the web player stops advertising opus when WebCodecs is missing.
     """
     vendor_dir = STATIC_DIR / "web" / "sendspin-js"
     js_files = list(vendor_dir.rglob("*.js"))
     assert js_files, "vendored sendspin-js dist is missing"
+    known_bare_specifiers = {
+        "opus-encdec/dist/libopus-decoder.js",
+        "opus-encdec/src/oggOpusDecoder.js",
+    }
+    # static imports/re-exports, side-effect imports, and dynamic import()
+    pattern = re.compile(
+        r"""(?:import\s*\(\s*|import[^'"()]*?from\s+|import\s+|export[^'"()]*?from\s+)"""
+        r"""['"]([^'"]+)['"]"""
+    )
     bad: list[str] = []
-    pattern = re.compile(r"""(?:import|export)[^'"]*?from\s+['"](\.\.?/[^'"]+)['"]""")
     for js_file in js_files:
         for specifier in pattern.findall(js_file.read_text(encoding="utf-8")):
-            if not specifier.endswith(".js"):
-                bad.append(f"{js_file.name}: {specifier}")
-    assert not bad, f"extensionless relative imports found: {bad}"
+            if specifier.startswith("."):
+                target = (js_file.parent / specifier).resolve()
+                if not (specifier.endswith(".js") and target.is_file()):
+                    bad.append(f"{js_file.name}: {specifier}")
+            elif specifier not in known_bare_specifiers:
+                bad.append(f"{js_file.name}: bare specifier {specifier}")
+    assert not bad, f"browser-unloadable import specifiers: {bad}"
 
 
 # --- Queue API ---

@@ -61,6 +61,25 @@ async def test_get_ma_stream_url_uses_streamserver(
     mass_mock.streams.resolve_stream_url.assert_awaited_once_with("msx_test", media)
 
 
+async def test_get_ma_stream_url_rejects_flow_urls(
+    provider: MSXBridgeProvider, mass_mock: Mock
+) -> None:
+    """
+    A flow-mode URL must be rejected (None -> proxy fallback).
+
+    MA forces flow mode when e.g. crossfade is enabled and the player lacks
+    gapless support. A flow URL streams the whole queue continuously, which
+    breaks the MSX per-track model (progress display, auto-advance).
+    """
+    mass_mock.streams.resolve_stream_url = AsyncMock(
+        return_value="http://ma:8097/flow/s1/q1/i1/msx_test.mp3"
+    )
+
+    url = await provider.get_ma_stream_url("msx_test", Mock())
+
+    assert url is None
+
+
 async def test_get_ma_stream_url_returns_none_on_error(
     provider: MSXBridgeProvider, mass_mock: Mock
 ) -> None:

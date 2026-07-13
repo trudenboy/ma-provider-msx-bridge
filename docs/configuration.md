@@ -14,7 +14,7 @@ The provider exposes seven settings in the Music Assistant UI under **Settings â
 | `show_stop_notification` | `false` | Show a confirmation dialog on MSX when MA stops playback |
 | `abort_stream_first` | `false` | When stopping: abort the stream connection before sending the WebSocket stop signal (may reduce stop delay on some TVs) |
 | `enable_player_grouping` | `true` | Allow grouping multiple MSX TVs for synchronized playback (experimental) |
-| `group_stream_mode` | `independent` | How audio is streamed to grouped players (see below) |
+| `group_stream_mode` | `independent` | How audio is delivered to TVs (see Stream Delivery Mode below) |
 
 ## Output Format
 
@@ -35,16 +35,23 @@ TVs are registered as MA players on their first request. The idle timeout contro
 - **Playing** players are never cleaned up regardless of timeout
 - Set to `0` to disable automatic cleanup (players persist until MA restarts)
 
-## Group Stream Mode
+## Stream Delivery Mode
 
-When `enable_player_grouping` is `true` and TVs are grouped in MA:
+Controls how audio reaches the TVs (config key `group_stream_mode`):
 
 | Mode | Description | CPU |
 |------|-------------|-----|
-| `independent` | Each grouped TV gets its own ffmpeg process | Higher (one per TV) |
-| `shared` | One ffmpeg process, output broadcast to all TVs via a catch-up buffer | Lower |
+| `independent` | Each TV gets its own proxied ffmpeg process | Higher (one per TV) |
+| `shared` | One ffmpeg process, output broadcast to all group members via a catch-up buffer | Lower |
+| `redirect` | TVs are redirected to fetch audio directly from the Music Assistant streamserver | Lowest (no local ffmpeg) |
 
 `shared` mode is experimental. Late-joining TVs receive buffered audio and may hear a brief gap at join time.
+
+`redirect` mode lets Music Assistant apply the per-player codec setting and DSP itself. Notes:
+
+- Falls back to `independent` automatically when the direct URL cannot be resolved.
+- Tracks that require a continuous queue stream (e.g. crossfade enabled) are served through the local proxy instead, preserving per-track progress on the TV.
+- Grouped TVs each fetch their own stream from MA â€” there is no shared-buffer synchronization in this mode.
 
 ## Stop and Pause Behavior
 

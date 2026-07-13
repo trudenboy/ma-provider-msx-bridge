@@ -22,7 +22,7 @@
     },
     "group_stream_mode": {
       "label": "Stream Delivery Mode",
-      "description": "How audio reaches the TVs. 'Independent' proxies a separate stream per TV (more CPU, no sync). 'Shared Buffer' uses one ffmpeg process for all group members (less CPU). 'MA Streamserver' redirects TVs to the Music Assistant streamserver directly — least CPU, per-player codec and DSP applied by MA; falls back to Independent when the URL cannot be resolved.",
+      "description": "How audio reaches the TVs. 'Independent' proxies a separate stream per TV (more CPU, no sync). 'Shared Buffer' uses one ffmpeg process for all group members (less CPU). 'MA Streamserver' redirects TVs to the Music Assistant streamserver directly — least CPU, per-player codec and DSP applied by MA; falls back to Independent when the URL cannot be resolved. Note: in MA Streamserver mode grouped TVs each fetch their own stream (no shared-buffer sync).",
       "options": {
         "independent": "Independent (default) - each TV has own proxied stream",
         "shared": "Shared Buffer - one ffmpeg, multiple readers (less CPU)",

@@ -701,7 +701,18 @@ class MSXBridgeProvider(PlayerProvider):
         try:
             stream_url: str = await self.mass.streams.resolve_stream_url(player_id, media)
         except Exception as err:
-            logger.warning("[MARedirect] Failed to resolve MA stream URL: %s", err)
+            logger.warning("[MARedirect] Failed to resolve MA stream URL: %s", err, exc_info=True)
+            return None
+        # MA returns a flow URL (continuous whole-queue stream) when e.g. crossfade
+        # is enabled and the player lacks gapless support. That breaks the MSX
+        # per-track model (progress display, auto-advance re-enqueue), so serve
+        # such tracks through the local per-track proxy instead.
+        if "/flow/" in stream_url:
+            logger.debug(
+                "[MARedirect] Flow-mode URL not usable for MSX per-track playback, "
+                "falling back to proxy: %s",
+                stream_url,
+            )
             return None
         logger.debug("[MARedirect] Resolved MA stream URL: %s", stream_url)
         return stream_url
