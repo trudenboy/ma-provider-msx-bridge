@@ -193,10 +193,14 @@ const SENDSPIN_URL_PARAM = urlParams.get('sendspin_url') || '';
 
             console.log('[Sendspin] SDK loaded, connecting to:', sendspinUrl);
 
+            // When opened by the Sendspin bridge, connect with the bridge's
+            // client id so the server upgrades the pre-registered client
+            // instead of creating a new player.
+            var bridgeClientId = urlParams.get('sendspin_client_id');
             var playerConfig = {
-                playerId: 'web-kiosk-' + deviceId.substring(0, 8),
+                playerId: bridgeClientId || ('web-kiosk-' + deviceId.substring(0, 8)),
                 baseUrl: sendspinUrl,
-                clientName: 'Web Kiosk Player',
+                clientName: bridgeClientId ? 'MSX TV (Sendspin)' : 'Web Kiosk Player',
                 correctionMode: 'sync',
                 onStateChange: onSendspinStateChange
             };

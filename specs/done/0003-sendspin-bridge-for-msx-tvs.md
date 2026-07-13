@@ -2,7 +2,7 @@
 id: "0003"
 title: "Sendspin bridge: sample-synchronized playback on MSX TVs"
 size: L
-status: todo
+status: done
 priority: P1
 effort_minutes: 120
 feature_id:
@@ -91,7 +91,7 @@ sequenceDiagram
 
 ## Data Model
 
-- **Bridge client id**: `msx-bridge-<sanitized device_id>` — stable across
+- **Bridge client id**: `spb_msx_<player id without the msx_ prefix>` (follows the Sendspin ecosystem `spb_` bridge convention) — stable across
   reconnects so the Sendspin player identity (and its config) persists.
 - **Provider config**: new boolean entry `enable_sendspin_bridge`
   (default `false`), independent of `enable_player_grouping`.
