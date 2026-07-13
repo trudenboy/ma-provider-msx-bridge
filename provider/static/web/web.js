@@ -184,7 +184,11 @@ const SENDSPIN_URL_PARAM = urlParams.get('sendspin_url') || '';
         sendspinUrl = SENDSPIN_URL_PARAM || getDefaultSendspinUrl();
 
         try {
-            var sdkUrl = 'https://unpkg.com/@music-assistant/sendspin-js@1.0.0/dist/index.js';
+            // Vendored @sendspin/sendspin-js (see scripts/vendor-sendspin-js.sh):
+            // TVs on LAN-only setups have no CDN access. Absolute path because
+            // the kiosk page lives at /web (no trailing slash), which would
+            // break relative import resolution.
+            var sdkUrl = '/web/sendspin-js/index.js';
             var module = await import(sdkUrl);
             var SendspinPlayer = module.SendspinPlayer;
 
@@ -226,7 +230,8 @@ const SENDSPIN_URL_PARAM = urlParams.get('sendspin_url') || '';
             });
         }
 
-        updateSendspinStatus(sendspinPlayer.isClockSynced ? 'synced' : 'syncing');
+        var syncInfo = sendspinPlayer.timeSyncInfo;
+        updateSendspinStatus(syncInfo && syncInfo.synced ? 'synced' : 'syncing');
     }
 
     function updateSendspinProgress() {

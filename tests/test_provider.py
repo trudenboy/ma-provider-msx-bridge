@@ -46,6 +46,33 @@ async def test_handle_async_init_default_port(mass_mock: Mock, manifest_mock: Mo
         mock_server.start.assert_awaited_once()
 
 
+async def test_get_ma_stream_url_uses_streamserver(
+    provider: MSXBridgeProvider, mass_mock: Mock
+) -> None:
+    """get_ma_stream_url must resolve the URL via the MA streamserver API."""
+    media = Mock()
+    mass_mock.streams.resolve_stream_url = AsyncMock(
+        return_value="http://ma:8097/single/s1/q1/i1/msx_test.mp3"
+    )
+
+    url = await provider.get_ma_stream_url("msx_test", media)
+
+    assert url == "http://ma:8097/single/s1/q1/i1/msx_test.mp3"
+    mass_mock.streams.resolve_stream_url.assert_awaited_once_with("msx_test", media)
+
+
+async def test_get_ma_stream_url_returns_none_on_error(
+    provider: MSXBridgeProvider, mass_mock: Mock
+) -> None:
+    """get_ma_stream_url must degrade to None (proxy fallback) when resolution fails."""
+    mass_mock.streams.resolve_stream_url = AsyncMock(side_effect=RuntimeError("no session"))
+
+    url = await provider.get_ma_stream_url("msx_test", Mock())
+
+    assert url is None
+    mass_mock.streams.resolve_stream_url.assert_awaited_once()
+
+
 def test_on_player_activity_uses_monotonic_clock(provider: MSXBridgeProvider) -> None:
     """
     The idle-activity ledger must use the monotonic clock.

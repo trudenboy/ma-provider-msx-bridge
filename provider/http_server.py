@@ -1205,7 +1205,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
 
         # --- Mode 1: MA Redirect ---
         if self.provider.is_redirect_stream_mode():
-            redirect_url = await self.provider.get_ma_stream_url(media, effective_format)
+            redirect_url = await self.provider.get_ma_stream_url(player_id, media)
             if redirect_url:
                 logger.info(
                     "[StreamMode:redirect] Player %s -> MA Streamserver: %s",
