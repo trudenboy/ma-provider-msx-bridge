@@ -4,16 +4,19 @@ from __future__ import annotations
 
 import io
 import json
+import threading
 import time
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, Mock
 from urllib.parse import parse_qs, urlsplit
 
+import pytest
 import segno
 from aiohttp.test_utils import TestClient as AiohttpTestClient
 from aiohttp.test_utils import TestServer
 from PIL import Image
 
+from music_assistant.providers.msx_bridge import http_server as http_server_module
 from music_assistant.providers.msx_bridge.http_server import (
     MSXHTTPServer,
     PartyInfo,
@@ -103,6 +106,35 @@ async def test_qr_cover_active_party_returns_png(
         assert resp.headers["Content-Type"] == "image/png"
         body = await resp.read()
         assert Image.open(io.BytesIO(body)).size == (200, 200)
+    finally:
+        await client.close()
+
+
+async def test_qr_cover_composite_runs_off_event_loop(
+    provider: MSXBridgeProvider, mass_mock: Mock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """PIL compositing must run in a worker thread, never on the event loop."""
+    mass_mock.get_provider = Mock(return_value=_party_mock())
+    mass_mock.webserver.base_url = "http://ma.local:8095"
+    mass_mock.http_session = _http_session_mock(_black_cover_png())
+    loop_thread = threading.get_ident()
+    stamp_threads: list[int] = []
+
+    def _tracking_stamp(cover_bytes: bytes, qr_bytes: bytes) -> bytes:
+        stamp_threads.append(threading.get_ident())
+        return _stamp_qr_on_cover(cover_bytes, qr_bytes)
+
+    monkeypatch.setattr(http_server_module, "_stamp_qr_on_cover", _tracking_stamp)
+    server = MSXHTTPServer(provider, 0)
+    client = AiohttpTestClient(TestServer(server.app))
+    await client.start_server()
+    try:
+        resp = await client.get(
+            "/api/party/qr-cover.png", params={"image": COVER_URL}, allow_redirects=False
+        )
+        assert resp.status == 200
+        assert stamp_threads
+        assert loop_thread not in stamp_threads
     finally:
         await client.close()
 

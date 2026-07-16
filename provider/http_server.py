@@ -82,6 +82,20 @@ def _strip_known_extension(value: str) -> str:
     return value
 
 
+def _render_qr(join_url: str, kind: str) -> bytes:
+    """Render the join URL as a QR image (blocking; run in a worker thread)."""
+    import segno  # noqa: PLC0415  # only needed when the Party plugin is used
+
+    buf = io.BytesIO()
+    segno.make(join_url, error="m").save(buf, kind=kind, scale=8)
+    return buf.getvalue()
+
+
+def _render_qr_cover(join_url: str, cover_bytes: bytes) -> bytes:
+    """Render the QR and composite it onto the cover (blocking; run in a worker thread)."""
+    return _stamp_qr_on_cover(cover_bytes, _render_qr(join_url, "png"))
+
+
 def _stamp_qr_on_cover(cover_bytes: bytes, qr_bytes: bytes) -> bytes:
     """Composite the QR into the cover's bottom-right corner; returns PNG bytes."""
     from PIL import Image  # noqa: PLC0415  # only needed when the Party plugin is used
@@ -2273,13 +2287,10 @@ small {{ color: #666; display: block; margin-top: 4px; }}
         party = await self._get_active_party()
         if party is None:
             return web.Response(status=404, text="No active party")
-        import segno  # noqa: PLC0415  # only needed when the Party plugin is used
-
         kind = "png" if request.path.endswith(".png") else "svg"
-        buf = io.BytesIO()
-        segno.make(party.join_url, error="m").save(buf, kind=kind, scale=8)
+        body = await asyncio.to_thread(_render_qr, party.join_url, kind)
         return web.Response(
-            body=buf.getvalue(),
+            body=body,
             content_type="image/png" if kind == "png" else "image/svg+xml",
             headers={"Cache-Control": "no-store"},
         )
@@ -2314,11 +2325,9 @@ small {{ color: #666; display: block; margin-top: 4px; }}
                     if resp.status != 200:
                         raise ValueError(f"cover fetch returned HTTP {resp.status}")
                     cover_bytes = await resp.read()
-                import segno  # noqa: PLC0415  # only needed when the Party plugin is used
-
-                qr_buf = io.BytesIO()
-                segno.make(party.join_url, error="m").save(qr_buf, kind="png", scale=8)
-                cached = _stamp_qr_on_cover(cover_bytes, qr_buf.getvalue())
+                # PIL decode/re-encode blocks; on this loop it would stall audio
+                # streaming for every player, so hop to a worker thread
+                cached = await asyncio.to_thread(_render_qr_cover, party.join_url, cover_bytes)
             except Exception as err:
                 logger.debug("QR cover composite failed for %s: %s", image_url, err)
                 raise web.HTTPFound(location=image_url) from None
