@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import functools
 import hashlib
 import io
 import json
@@ -82,8 +83,13 @@ def _strip_known_extension(value: str) -> str:
     return value
 
 
+@functools.lru_cache(maxsize=4)
 def _render_qr(join_url: str, kind: str) -> bytes:
-    """Render the join URL as a QR image (blocking; run in a worker thread)."""
+    """
+    Render the join URL as a QR image (blocking on a miss; run in a worker thread).
+
+    Results are memoized — the output only changes when the join code rotates.
+    """
     import segno  # noqa: PLC0415  # only needed when the Party plugin is used
 
     buf = io.BytesIO()
@@ -145,6 +151,7 @@ class MSXHTTPServer:
         self._active_stream_transports: dict[str, set[Any]] = {}
         self._party_cache: tuple[float, PartyInfo | None] | None = None
         self._qr_cover_cache: dict[tuple[str, str], bytes] = {}
+        self._qr_cover_inflight: dict[tuple[str, str], asyncio.Task[bytes]] = {}
         self._client_prefixes: dict[str, str] = {}
         self._setup_routes()
 
@@ -2238,7 +2245,8 @@ small {{ color: #666; display: block; margin-top: 4px; }}
         return f"{prefix}/api/party/qr-cover.png"
 
     async def _get_active_party(self) -> PartyInfo | None:
-        """Return details of the active party, or None when no party is active.
+        """
+        Return details of the active party, or None when no party is active.
 
         Never raises: a broken or slow Party plugin degrades to "no party" so
         the core UI (menu, kiosk) keeps working. Results are cached briefly.
@@ -2317,29 +2325,58 @@ small {{ color: #666; display: block; margin-top: 4px; }}
         cache_key = (image_url, party.qr_version)
         if (cached := self._qr_cover_cache.get(cache_key)) is None:
             try:
-                async with self.provider.mass.http_session.get(
-                    image_url,
-                    timeout=aiohttp.ClientTimeout(total=10),
-                    allow_redirects=False,
-                ) as resp:
-                    if resp.status != 200:
-                        raise ValueError(f"cover fetch returned HTTP {resp.status}")
-                    cover_bytes = await resp.read()
-                # PIL decode/re-encode blocks; on this loop it would stall audio
-                # streaming for every player, so hop to a worker thread
-                cached = await asyncio.to_thread(_render_qr_cover, party.join_url, cover_bytes)
+                # shield: a TV dropping its request must not cancel the shared
+                # render — late joiners and the cache still get the result
+                cached = await asyncio.shield(
+                    self._qr_cover_task(cache_key, image_url, party.join_url)
+                )
             except Exception as err:
                 logger.debug("QR cover composite failed for %s: %s", image_url, err)
                 raise web.HTTPFound(location=image_url) from None
-            # QR rotation changes the cache key; keep the cache tiny and bounded
-            if len(self._qr_cover_cache) >= 32:
-                self._qr_cover_cache.clear()
-            self._qr_cover_cache[cache_key] = cached
         return web.Response(
             body=cached,
             content_type="image/png",
             headers={"Cache-Control": "no-store"},
         )
+
+    def _qr_cover_task(
+        self, cache_key: tuple[str, str], image_url: str, join_url: str
+    ) -> asyncio.Task[bytes]:
+        """Return the in-flight render task for this cover, starting one if needed."""
+        if (task := self._qr_cover_inflight.get(cache_key)) is None:
+            task = asyncio.create_task(self._fetch_and_render_cover(cache_key, image_url, join_url))
+            self._qr_cover_inflight[cache_key] = task
+
+            def _cleanup(finished: asyncio.Task[bytes]) -> None:
+                self._qr_cover_inflight.pop(cache_key, None)
+                # consume the exception so a task whose waiters were all
+                # cancelled never logs "exception was never retrieved"
+                if not finished.cancelled():
+                    finished.exception()
+
+            task.add_done_callback(_cleanup)
+        return task
+
+    async def _fetch_and_render_cover(
+        self, cache_key: tuple[str, str], image_url: str, join_url: str
+    ) -> bytes:
+        """Fetch the cover, composite the QR onto it, and cache the PNG."""
+        async with self.provider.mass.http_session.get(
+            image_url,
+            timeout=aiohttp.ClientTimeout(total=10),
+            allow_redirects=False,
+        ) as resp:
+            if resp.status != 200:
+                raise ValueError(f"cover fetch returned HTTP {resp.status}")
+            cover_bytes = await resp.read()
+        # PIL decode/re-encode blocks; on this loop it would stall audio
+        # streaming for every player, so hop to a worker thread
+        rendered = await asyncio.to_thread(_render_qr_cover, join_url, cover_bytes)
+        # QR rotation changes the cache key; keep the cache tiny and bounded
+        if len(self._qr_cover_cache) >= 32:
+            self._qr_cover_cache.clear()
+        self._qr_cover_cache[cache_key] = rendered
+        return rendered
 
     @staticmethod
     def _url_origin(url: str) -> tuple[str, str | None, int | None]:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import io
 import json
 import threading
@@ -59,6 +60,24 @@ def _http_session_mock(body: bytes, status: int = 200) -> Mock:
     resp = AsyncMock()
     resp.status = status
     resp.read = AsyncMock(return_value=body)
+    cm = MagicMock()
+    cm.__aenter__ = AsyncMock(return_value=resp)
+    cm.__aexit__ = AsyncMock(return_value=False)
+    session = Mock()
+    session.get = Mock(return_value=cm)
+    return session
+
+
+def _slow_http_session_mock(body: bytes, release: asyncio.Event) -> Mock:
+    """Return a mock session whose get() blocks reading the body until released."""
+
+    async def _gated_read() -> bytes:
+        await release.wait()
+        return body
+
+    resp = AsyncMock()
+    resp.status = 200
+    resp.read = _gated_read
     cm = MagicMock()
     cm.__aenter__ = AsyncMock(return_value=resp)
     cm.__aexit__ = AsyncMock(return_value=False)
@@ -137,6 +156,64 @@ async def test_qr_cover_composite_runs_off_event_loop(
         assert loop_thread not in stamp_threads
     finally:
         await client.close()
+
+
+async def test_qr_cover_concurrent_misses_coalesce(
+    provider: MSXBridgeProvider, mass_mock: Mock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Concurrent requests for the same cover share one fetch and one composite."""
+    mass_mock.get_provider = Mock(return_value=_party_mock())
+    mass_mock.webserver.base_url = "http://ma.local:8095"
+    release = asyncio.Event()
+    mass_mock.http_session = _slow_http_session_mock(_black_cover_png(), release)
+    stamp_calls: list[int] = []
+
+    def _tracking_stamp(cover_bytes: bytes, qr_bytes: bytes) -> bytes:
+        stamp_calls.append(1)
+        return _stamp_qr_on_cover(cover_bytes, qr_bytes)
+
+    monkeypatch.setattr(http_server_module, "_stamp_qr_on_cover", _tracking_stamp)
+    server = MSXHTTPServer(provider, 0)
+    client = AiohttpTestClient(TestServer(server.app))
+    await client.start_server()
+    try:
+        requests = [
+            asyncio.ensure_future(
+                client.get(
+                    "/api/party/qr-cover.png", params={"image": COVER_URL}, allow_redirects=False
+                )
+            )
+            for _ in range(5)
+        ]
+        await asyncio.sleep(0.05)
+        release.set()
+        responses = await asyncio.gather(*requests)
+        assert all(r.status == 200 for r in responses)
+        assert mass_mock.http_session.get.call_count == 1
+        assert len(stamp_calls) == 1
+    finally:
+        await client.close()
+
+
+async def test_qr_cover_render_survives_requester_cancellation(
+    provider: MSXBridgeProvider, mass_mock: Mock
+) -> None:
+    """A disconnected TV must not cancel the shared render; the cache still fills."""
+    release = asyncio.Event()
+    mass_mock.http_session = _slow_http_session_mock(_black_cover_png(), release)
+    server = MSXHTTPServer(provider, 0)
+    cache_key = (COVER_URL, "v1")
+
+    task = server._qr_cover_task(cache_key, COVER_URL, JOIN_URL)
+    assert server._qr_cover_task(cache_key, COVER_URL, JOIN_URL) is task
+    waiter = asyncio.ensure_future(asyncio.shield(task))
+    await asyncio.sleep(0)
+    waiter.cancel()
+    release.set()
+    rendered = await task
+
+    assert server._qr_cover_cache[cache_key] == rendered
+    assert cache_key not in server._qr_cover_inflight
 
 
 async def test_qr_cover_no_party_redirects_to_original(
