@@ -5,10 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.4.4] - 2026-07-16
 
-- fix(tests): move the annotation-only `pytest` import into `TYPE_CHECKING` blocks in `test_party.py` / `test_party_qr_cover.py` (TC002), per the upstream dev ruff rules.
-- style: ruff 0.15 safe autofixes matching the upstream dev lint rules.
+### Changed
+
+- The Sendspin bridge and the redirect stream mode are now enabled by default for new installations. Existing installations keep their stored settings; both can still be turned off in the provider settings.
 
 ## [1.4.3] - 2026-07-16
 
