@@ -7,11 +7,10 @@ import io
 import json
 import threading
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock, Mock
 from urllib.parse import parse_qs, urlsplit
 
-import pytest
 import segno
 from aiohttp.test_utils import TestClient as AiohttpTestClient
 from aiohttp.test_utils import TestServer
@@ -24,6 +23,9 @@ from music_assistant.providers.msx_bridge.http_server import (
     _stamp_qr_on_cover,
 )
 from music_assistant.providers.msx_bridge.mappers import map_tracks_to_msx_playlist
+
+if TYPE_CHECKING:
+    import pytest
 from music_assistant.providers.msx_bridge.provider import MSXBridgeProvider
 
 JOIN_URL = "http://ma.local:8095/?join=ABC123"

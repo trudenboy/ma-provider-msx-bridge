@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+- fix(tests): move the annotation-only `pytest` import into `TYPE_CHECKING` blocks in `test_party.py` / `test_party_qr_cover.py` (TC002), per the upstream dev ruff rules.
+- style: ruff 0.15 safe autofixes matching the upstream dev lint rules.
+
 ## [1.4.3] - 2026-07-16
 
 ### Fixed
