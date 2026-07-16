@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.2] - 2026-07-16
+
+### Changed
+
+- During a party, simultaneous cover requests from several TVs now share a single fetch and composite instead of each doing the work separately, and the join QR image is rendered once per code rotation instead of on every request.
+
+### Fixed
+
+- Generating the party QR code and stamping it into cover art no longer runs on the server's event loop: a burst of TVs refetching covers right after the join code rotated could briefly stall audio streaming for every connected player. The image work now runs in a worker thread.
+
 ## [1.4.1] - 2026-07-13
 
 ### Fixed
