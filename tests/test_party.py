@@ -6,12 +6,12 @@ import threading
 from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, Mock
 
-import pytest
 import segno
 
 from music_assistant.providers.msx_bridge.http_server import _render_qr
 
 if TYPE_CHECKING:
+    import pytest
     from aiohttp.test_utils import TestClient
 
 JOIN_URL = "http://ma.local:8095/?join=ABC123"
