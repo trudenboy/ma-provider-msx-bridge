@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import importlib
 import importlib.util
 import sys
 import types
@@ -11,9 +12,12 @@ from pathlib import Path
 # Make the provider/ directory importable as music_assistant.providers.msx_bridge
 _provider_path = Path(__file__).parent / "provider"
 
-# Ensure parent namespace packages exist
+# Reuse the real MA packages when installed so transitive imports can reach
+# other providers. Fall back to namespace shims for lightweight test setups.
 for _pkg in ("music_assistant", "music_assistant.providers"):
-    if _pkg not in sys.modules:
+    try:
+        importlib.import_module(_pkg)
+    except ModuleNotFoundError:
         _mod = types.ModuleType(_pkg)
         _mod.__path__ = []  # type: ignore[attr-defined]
         _mod.__package__ = _pkg
