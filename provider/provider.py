@@ -33,11 +33,9 @@ from .http_server import MSXHTTPServer
 from .player import MSXPlayer
 
 if TYPE_CHECKING:
-<<<<<<< ours
-    from .sendspin_bridge import MSXSendspinBridgeManager
-=======
     from music_assistant.controllers.streams.audio_processing import AudioOutputPlan
->>>>>>> theirs
+
+    from .sendspin_bridge import MSXSendspinBridgeManager
 
 logger = logging.getLogger(__name__)
 
