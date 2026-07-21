@@ -23,6 +23,19 @@ for _pkg in ("music_assistant", "music_assistant.providers"):
         _mod.__package__ = _pkg
         sys.modules[_pkg] = _mod
 
+# Pytest can load this repository's namespace shim before the MA server package.
+# Propagate every discovered Music Assistant package root to the providers
+# package so imports of sibling providers keep working in the upstream test
+# harness (which symlinks this provider into a separate MA checkout).
+_ma_pkg = sys.modules["music_assistant"]
+_providers_pkg = sys.modules["music_assistant.providers"]
+for _ma_root in _ma_pkg.__path__:  # type: ignore[attr-defined]
+    _providers_root = str(Path(_ma_root) / "providers")
+    if (
+        Path(_providers_root).is_dir() and _providers_root not in _providers_pkg.__path__  # type: ignore[attr-defined]
+    ):
+        _providers_pkg.__path__.append(_providers_root)  # type: ignore[attr-defined]
+
 # Insert provider/ into sys.path so its modules are importable
 if str(_provider_path) not in sys.path:
     sys.path.insert(0, str(_provider_path))
