@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- Local proxy and shared-buffer streams now apply Music Assistant's complete per-player output plan, including DSP and output-channel filters, and report the effective output path for every shared-stream subscriber.
+
 ## [1.4.5] - 2026-07-16
 
 - fix(tests): port upstream music-assistant/server#3938 into `tests/conftest.py` — drop the `mass.players.get_plugin_sources` mock (the API was removed upstream in the AudioSource MediaItems refactor; the mock was dead weight and, being unported, made the P0 forward-sync guard fail-closed on every release sync since 2026-05-22).
