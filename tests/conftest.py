@@ -21,19 +21,19 @@ import music_assistant.providers
 # controller imports.
 music_assistant.__path__ = extend_path(music_assistant.__path__, music_assistant.__name__)
 _repo_root = Path(__file__).resolve().parents[1]
-for _ma_root in (
+for _ma_candidate in (
     Path.cwd() / "music_assistant",
     _repo_root / "ma-server" / "music_assistant",
 ):
-    _ma_root_str = str(_ma_root)
-    if _ma_root.is_dir() and _ma_root_str not in music_assistant.__path__:
-        music_assistant.__path__.append(_ma_root_str)
+    _ma_candidate_str = str(_ma_candidate)
+    if _ma_candidate.is_dir() and _ma_candidate_str not in music_assistant.__path__:
+        music_assistant.__path__.append(_ma_candidate_str)
 
 music_assistant.providers.__path__ = extend_path(
     music_assistant.providers.__path__, music_assistant.providers.__name__
 )
-for _ma_root in music_assistant.__path__:
-    _providers_root = str(Path(_ma_root) / "providers")
+for _ma_package_root in music_assistant.__path__:
+    _providers_root = str(Path(_ma_package_root) / "providers")
     if Path(_providers_root).is_dir() and _providers_root not in music_assistant.providers.__path__:
         music_assistant.providers.__path__.append(_providers_root)
 

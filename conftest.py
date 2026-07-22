@@ -11,6 +11,7 @@ from pathlib import Path
 
 # Make the provider/ directory importable as music_assistant.providers.msx_bridge
 _provider_path = Path(__file__).parent / "provider"
+_repo_root = Path(__file__).resolve().parent
 
 # Reuse the real MA packages when installed so transitive imports can reach
 # other providers. Fall back to namespace shims for lightweight test setups.
@@ -23,14 +24,27 @@ for _pkg in ("music_assistant", "music_assistant.providers"):
         _mod.__package__ = _pkg
         sys.modules[_pkg] = _mod
 
+# The reusable upstream workflow checks out MA Server inside this repository.
+# Add that deterministic location before executing the provider package, since
+# its imports can reach sibling MA providers during module initialization.
+_ma_pkg = sys.modules["music_assistant"]
+for _ma_candidate in (
+    Path.cwd() / "music_assistant",
+    _repo_root / "ma-server" / "music_assistant",
+):
+    _ma_candidate_str = str(_ma_candidate)
+    if (
+        _ma_candidate.is_dir() and _ma_candidate_str not in _ma_pkg.__path__  # type: ignore[attr-defined]
+    ):
+        _ma_pkg.__path__.append(_ma_candidate_str)  # type: ignore[attr-defined]
+
 # Pytest can load this repository's namespace shim before the MA server package.
 # Propagate every discovered Music Assistant package root to the providers
 # package so imports of sibling providers keep working in the upstream test
 # harness (which symlinks this provider into a separate MA checkout).
-_ma_pkg = sys.modules["music_assistant"]
 _providers_pkg = sys.modules["music_assistant.providers"]
-for _ma_root in _ma_pkg.__path__:  # type: ignore[attr-defined]
-    _providers_root = str(Path(_ma_root) / "providers")
+for _ma_package_root in _ma_pkg.__path__:  # type: ignore[attr-defined]
+    _providers_root = str(Path(_ma_package_root) / "providers")
     if (
         Path(_providers_root).is_dir() and _providers_root not in _providers_pkg.__path__  # type: ignore[attr-defined]
     ):
