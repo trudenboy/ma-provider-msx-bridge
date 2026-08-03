@@ -310,15 +310,16 @@ class MSXPlayer(Player):
         elif is_queue_backed and source_id:
             self._notify_new_queue(provider, source_id)
         else:
-            title, artist, image_url, duration = self._resolve_media_metadata(media)
+            # Queue-backed playback renders from the MSX native playlist, which carries
+            # its own per-track metadata; only standalone media needs it pushed here.
             next_action = f"request:interaction:/api/next/{self.player_id}"
             prev_action = f"request:interaction:/api/previous/{self.player_id}"
             provider.notify_play_started(
                 self.player_id,
-                title=title,
-                artist=artist,
-                image_url=image_url,
-                duration=duration,
+                title=media.title,
+                artist=media.artist,
+                image_url=media.image_url,
+                duration=media.stream_duration or media.duration,
                 next_action=next_action,
                 prev_action=prev_action,
             )
@@ -357,6 +358,7 @@ class MSXPlayer(Player):
         provider.notify_play_playlist(self.player_id, start_index, queue_id=source_id)
         self._playing_from_queue = True
 
+<<<<<<< ours
     def _resolve_media_metadata(
         self, media: PlayerMedia
     ) -> tuple[str | None, str | None, str | None, int | None]:
@@ -381,6 +383,21 @@ class MSXPlayer(Player):
                 if title is None and queue_item.name:
                     title = queue_item.name
         return title, artist, image_url, duration
+=======
+    def _served_duration(self) -> float | None:
+        """
+        Return the length in seconds of the audio served to the TV, if known.
+
+        The TV reports its position within that audio, which is shorter than the
+        media item itself when playback starts at a seek position.
+        """
+        if (media := self._attr_current_media) is None:
+            return None
+        duration = media.stream_duration or media.duration
+        if not isinstance(duration, (int, float)) or duration <= 0:
+            return None
+        return float(duration)
+>>>>>>> theirs
 
     def _get_group_member_ids(self) -> list[str]:
         """
