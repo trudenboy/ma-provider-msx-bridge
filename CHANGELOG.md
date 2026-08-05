@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Track duration and playback progress now use the actual stream length after seeking, so the TV no longer shows the original full-track duration for a shortened stream.
+- Built-in Sendspin links now use Music Assistant's configured core server port instead of a duplicated hardcoded value, keeping remote-access URLs aligned with the server.
 
 ## [1.4.5] - 2026-07-16
 
