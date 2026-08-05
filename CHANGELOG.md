@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Local proxy and shared-buffer streams now apply Music Assistant's complete per-player output plan, including DSP and output-channel filters, and report the effective output path for every shared-stream subscriber.
+- Pre-buffered MSX streams now accept Music Assistant convolution filters in addition to string-based ffmpeg filters.
 
 ## [1.4.5] - 2026-07-16
 
