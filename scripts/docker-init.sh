@@ -4,12 +4,11 @@
 set -e
 
 echo "==> Setting up MSX Bridge provider..."
-
 # Locate MA providers directory inside the container venv
 PROVIDERS_DIR=$(/app/venv/bin/python3 -c \
     "import music_assistant.providers, os; print(os.path.dirname(music_assistant.providers.__file__))")
 
-# Remove any existing yandex_music provider (image may bundle one), then symlink ours
+# Remove any existing provider (image may bundle one), then symlink ours
 rm -rf "${PROVIDERS_DIR}/msx_bridge"
 ln -s /tmp/provider "${PROVIDERS_DIR}/msx_bridge"
 echo "==> Provider linked: ${PROVIDERS_DIR}/msx_bridge"
