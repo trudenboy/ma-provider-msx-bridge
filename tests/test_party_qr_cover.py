@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import io
 import json
 import threading
 import time
-from collections.abc import Iterator
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, Mock
 from urllib.parse import parse_qs, urlencode, urlsplit
@@ -20,6 +18,7 @@ from aiohttp.test_utils import TestClient as AiohttpTestClient
 from aiohttp.test_utils import TestServer, make_mocked_request
 from PIL import Image
 
+from music_assistant.helpers.util import join_task
 from music_assistant.providers.msx_bridge import http_server as http_server_module
 from music_assistant.providers.msx_bridge.http_server import (
     MSXHTTPServer,
@@ -28,22 +27,10 @@ from music_assistant.providers.msx_bridge.http_server import (
 )
 from music_assistant.providers.msx_bridge.mappers import map_tracks_to_msx_playlist
 from music_assistant.providers.msx_bridge.provider import MSXBridgeProvider
+from tests.common import collect_loop_errors
 
 JOIN_URL = "http://ma.local:8095/?join=ABC123"
 COVER_URL = "http://ma.local:8095/imageproxy?path=cover.jpg"
-
-
-@contextlib.contextmanager
-def _collect_loop_errors() -> Iterator[list[dict[str, Any]]]:
-    """Capture everything reported to the running loop's exception handler."""
-    loop = asyncio.get_running_loop()
-    previous = loop.get_exception_handler()
-    reported: list[dict[str, Any]] = []
-    loop.set_exception_handler(lambda _loop, context: reported.append(context))
-    try:
-        yield reported
-    finally:
-        loop.set_exception_handler(previous)
 
 
 def _party_mock(url: str | None = JOIN_URL) -> Mock:
@@ -240,7 +227,7 @@ async def test_qr_cover_render_survives_requester_cancellation(
 
     task = server._qr_cover_task(cache_key, COVER_URL, JOIN_URL)
     assert server._qr_cover_task(cache_key, COVER_URL, JOIN_URL) is task
-    waiter = asyncio.ensure_future(asyncio.shield(task))
+    waiter = asyncio.ensure_future(join_task(task))
     await asyncio.sleep(0)
     waiter.cancel()
     release.set()
@@ -253,7 +240,7 @@ async def test_qr_cover_render_survives_requester_cancellation(
 async def test_qr_cover_render_failure_after_cancellation_logs_no_loop_error(
     provider: MSXBridgeProvider, mass_mock: Mock
 ) -> None:
-    """A render failure reaches the waiting TV without an extra loop error."""
+    """A render failing after one TV gave up reaches the waiting TV only, not the log."""
     release = asyncio.Event()
     mass_mock.get_provider = Mock(return_value=_party_mock())
     mass_mock.webserver.base_url = "http://ma.local:8095"
@@ -261,7 +248,7 @@ async def test_qr_cover_render_failure_after_cancellation_logs_no_loop_error(
     server = MSXHTTPServer(provider, 0)
     path = f"/api/party/qr-cover.png?{urlencode({'image': COVER_URL})}"
 
-    with _collect_loop_errors() as reported:
+    with collect_loop_errors() as reported:
         gave_up = asyncio.create_task(
             server._handle_party_qr_cover(make_mocked_request("GET", path))
         )
@@ -270,10 +257,12 @@ async def test_qr_cover_render_failure_after_cancellation_logs_no_loop_error(
         )
         while not server._qr_cover_inflight and not gave_up.done():
             await asyncio.sleep(0)
-        await asyncio.sleep(0)
+        await asyncio.sleep(0)  # let the second TV join the same render
         gave_up.cancel()
         with pytest.raises(asyncio.CancelledError):
             await gave_up
+        # release the fetch only once the cancellation is fully processed, so the failure
+        # reliably lands after the TV that gave up is gone
         release.set()
         with pytest.raises(web.HTTPFound) as redirect:
             await waiting
