@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.8] - 2026-08-11
+
+### Fixed
+
+- Player grouping and provider cleanup now keep the complete set of owned TVs when commands are issued by users whose player access is restricted.
+
 ## [1.4.7] - 2026-08-05
 
 ### Changed
@@ -299,4 +305,3 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## 2026-02-08
 
 - feat: add MSX Bridge Player Provider
-- Reverse-synced upstream PR #5482 (WIP)
