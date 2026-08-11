@@ -50,6 +50,17 @@ for _ma_package_root in _ma_pkg.__path__:  # type: ignore[attr-defined]
     ):
         _providers_pkg.__path__.append(_providers_root)  # type: ignore[attr-defined]
 
+# Standalone provider tests reuse shared helpers from the adjacent MA checkout.
+# Keep this provider-repository bootstrap outside tests/, which is synchronized
+# into the upstream repository and must rely on upstream's native test package.
+_tests_pkg = importlib.import_module("tests")
+for _ma_package_root in _ma_pkg.__path__:  # type: ignore[attr-defined]
+    _shared_tests_root = str(Path(_ma_package_root).parent / "tests")
+    if (
+        Path(_shared_tests_root).is_dir() and _shared_tests_root not in _tests_pkg.__path__  # type: ignore[attr-defined]
+    ):
+        _tests_pkg.__path__.append(_shared_tests_root)  # type: ignore[attr-defined]
+
 # Insert provider/ into sys.path so its modules are importable
 if str(_provider_path) not in sys.path:
     sys.path.insert(0, str(_provider_path))
