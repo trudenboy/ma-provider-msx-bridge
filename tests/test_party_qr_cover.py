@@ -3,17 +3,21 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import io
 import json
 import threading
 import time
-from typing import TYPE_CHECKING, Any
+from collections.abc import Iterator
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, Mock
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, urlencode, urlsplit
 
+import pytest
 import segno
+from aiohttp import web
 from aiohttp.test_utils import TestClient as AiohttpTestClient
-from aiohttp.test_utils import TestServer
+from aiohttp.test_utils import TestServer, make_mocked_request
 from PIL import Image
 
 from music_assistant.providers.msx_bridge import http_server as http_server_module
@@ -23,16 +27,23 @@ from music_assistant.providers.msx_bridge.http_server import (
     _stamp_qr_on_cover,
 )
 from music_assistant.providers.msx_bridge.mappers import map_tracks_to_msx_playlist
-
-if TYPE_CHECKING:
-    import pytest
 from music_assistant.providers.msx_bridge.provider import MSXBridgeProvider
-
-if TYPE_CHECKING:
-    import pytest
 
 JOIN_URL = "http://ma.local:8095/?join=ABC123"
 COVER_URL = "http://ma.local:8095/imageproxy?path=cover.jpg"
+
+
+@contextlib.contextmanager
+def _collect_loop_errors() -> Iterator[list[dict[str, Any]]]:
+    """Capture everything reported to the running loop's exception handler."""
+    loop = asyncio.get_running_loop()
+    previous = loop.get_exception_handler()
+    reported: list[dict[str, Any]] = []
+    loop.set_exception_handler(lambda _loop, context: reported.append(context))
+    try:
+        yield reported
+    finally:
+        loop.set_exception_handler(previous)
 
 
 def _party_mock(url: str | None = JOIN_URL) -> Mock:
@@ -65,6 +76,24 @@ def _http_session_mock(body: bytes, status: int = 200) -> Mock:
     resp = AsyncMock()
     resp.status = status
     resp.read = AsyncMock(return_value=body)
+    cm = MagicMock()
+    cm.__aenter__ = AsyncMock(return_value=resp)
+    cm.__aexit__ = AsyncMock(return_value=False)
+    session = Mock()
+    session.get = Mock(return_value=cm)
+    return session
+
+
+def _failing_http_session_mock(release: asyncio.Event) -> Mock:
+    """Return a mock session whose get() fails once released."""
+
+    async def _gated_read() -> bytes:
+        await release.wait()
+        raise ConnectionResetError("connection reset while fetching the cover")
+
+    resp = AsyncMock()
+    resp.status = 200
+    resp.read = _gated_read
     cm = MagicMock()
     cm.__aenter__ = AsyncMock(return_value=resp)
     cm.__aexit__ = AsyncMock(return_value=False)
@@ -219,6 +248,39 @@ async def test_qr_cover_render_survives_requester_cancellation(
 
     assert server._qr_cover_cache[cache_key] == rendered
     assert cache_key not in server._qr_cover_inflight
+
+
+async def test_qr_cover_render_failure_after_cancellation_logs_no_loop_error(
+    provider: MSXBridgeProvider, mass_mock: Mock
+) -> None:
+    """A render failure reaches the waiting TV without an extra loop error."""
+    release = asyncio.Event()
+    mass_mock.get_provider = Mock(return_value=_party_mock())
+    mass_mock.webserver.base_url = "http://ma.local:8095"
+    mass_mock.http_session = _failing_http_session_mock(release)
+    server = MSXHTTPServer(provider, 0)
+    path = f"/api/party/qr-cover.png?{urlencode({'image': COVER_URL})}"
+
+    with _collect_loop_errors() as reported:
+        gave_up = asyncio.create_task(
+            server._handle_party_qr_cover(make_mocked_request("GET", path))
+        )
+        waiting = asyncio.create_task(
+            server._handle_party_qr_cover(make_mocked_request("GET", path))
+        )
+        while not server._qr_cover_inflight and not gave_up.done():
+            await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        gave_up.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await gave_up
+        release.set()
+        with pytest.raises(web.HTTPFound) as redirect:
+            await waiting
+
+    assert str(redirect.value.location) == COVER_URL
+    assert mass_mock.http_session.get.call_count == 1
+    assert reported == []
 
 
 async def test_qr_cover_no_party_redirects_to_original(
