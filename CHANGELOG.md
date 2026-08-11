@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Cancelling a TV request while a shared Party QR cover later fails no longer emits a duplicate shielded-future error traceback.
+- Player grouping and provider cleanup now keep the complete set of owned TVs when commands are issued by users whose player access is restricted.
 
 ## [1.4.7] - 2026-08-05
 
