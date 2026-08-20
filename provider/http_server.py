@@ -107,7 +107,11 @@ async def _is_media_item_uri(uri: str) -> bool:
     Both spellings of a raw URL — bare, and wrapped as ``builtin://<media_type>/<url>`` —
     resolve to the builtin provider, which would make the server fetch and play whatever
     the caller names, so the resolved provider is what decides rather than the uri text.
-    The bridge only ever hands out uris of library or music provider items.
+
+    The menus only ever hand out uris of library or music provider items. The MA queue
+    is the exception: whatever the user queued from the MA UI ends up in the queue
+    playlist, so a builtin uri from there is vetted by the caller's own queue instead —
+    see ``MSXHTTPServer._uri_is_in_player_queue``.
     """
     if "://" not in uri:
         # keeps an item_id-shaped value away from parse_uri's local-file branch
@@ -1435,7 +1439,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
         player_id = _strip_known_extension(request.match_info["player_id"])
 
         uri = request.query.get("uri")
-        if not uri or not await _is_media_item_uri(uri):
+        if not uri:
             return web.Response(status=400, text="Invalid uri parameter")
 
         from_playlist = request.query.get("from_playlist") == "1"
@@ -1445,6 +1449,9 @@ small {{ color: #666; display: block; margin-top: 4px; }}
             return web.Response(status=404, text="Player not found")
         if rejected := self._reject_invalid_stream_token(request, player_id):
             return rejected
+        # the queue check runs last so an unauthorized caller learns nothing from it
+        if not await _is_media_item_uri(uri) and not self._uri_is_in_player_queue(player_id, uri):
+            return web.Response(status=400, text="Invalid uri parameter")
         self.provider.on_player_activity(player_id)
 
         # When MA is driving the queue (next/prev from MA UI), current_media is
@@ -2742,6 +2749,27 @@ small {{ color: #666; display: block; margin-top: 4px; }}
             player_id, display_name=display_name, ip_address=remote_ip
         )
         return player_id, device_param, player
+
+    def _uri_is_in_player_queue(self, player_id: str, uri: str) -> bool:
+        """
+        Check whether the uri is already an item in the player's own queue.
+
+        A queue item's uri was put there by MA rather than by the caller, so it is safe
+        to play even when it resolves to the builtin provider — that is how a radio
+        station added by URL reaches a TV.
+
+        :param player_id: The player whose queue vouches for the uri.
+        :param uri: The uri the caller asked to play.
+        """
+        try:
+            queue_items = self.provider.mass.player_queues.items(player_id)
+        except Exception:
+            logger.debug("No queue to vouch for %s on %s", uri, player_id, exc_info=True)
+            return False
+        return any(
+            getattr(getattr(queue_item, "media_item", None), "uri", None) == uri
+            for queue_item in queue_items
+        )
 
     def _current_media_matches_uri(self, player: MSXPlayer, track_uri: str) -> bool:
         """Check if player's current_media corresponds to the requested track URI."""

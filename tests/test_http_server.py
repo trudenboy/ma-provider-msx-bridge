@@ -889,6 +889,119 @@ async def test_msx_audio_rejects_missing_token(
         await client.close()
 
 
+def _make_queue_item(uri: str, name: str = "Radio Example") -> Mock:
+    """Build a queue item mock whose media item carries the given uri."""
+    qi = Mock()
+    qi.name = name
+    qi.media_item = Mock()
+    qi.media_item.name = name
+    qi.media_item.uri = uri
+    qi.media_item.duration = 0
+    qi.media_item.artist_str = ""
+    qi.duration = 0
+    qi.image = None
+    return qi
+
+
+async def test_queue_playlist_builtin_item_stays_playable(
+    provider: MSXBridgeProvider, mass_mock: Mock
+) -> None:
+    """
+    An item queued from the MA UI must survive the round trip to the TV.
+
+    The queue playlist takes its uris from the MA queue rather than from our own
+    menus, so a URL radio station reaches the TV as ``builtin://radio/<url>``.
+    """
+    radio_uri = "builtin://radio/http://radio.example/stream"
+    mass_mock.player_queues.items = Mock(return_value=[_make_queue_item(radio_uri)])
+
+    server = MSXHTTPServer(provider, 0)
+    client = AiohttpTestClient(TestServer(server.app))
+    await client.start_server()
+    try:
+        _make_audio_player(mass_mock)
+        resp = await client.get("/msx/queue-playlist/msx_test.json")
+        assert resp.status == 200
+        action = (await resp.json())["items"][0]["action"]
+        assert action.startswith("audio:")
+        audio_url = urlsplit(action.removeprefix("audio:"))
+
+        mass_mock.streams = Mock()
+        mass_mock.streams.get_stream = Mock(return_value=_async_iter([b"pcm"]))
+        with patch(
+            "music_assistant.providers.msx_bridge.http_server.get_ffmpeg_stream",
+            return_value=_async_iter([b"encoded"]),
+        ):
+            resp = await client.get(f"{audio_url.path}?{audio_url.query}")
+            assert resp.status == 200
+
+        mass_mock.player_queues.play_media.assert_awaited_once_with("msx_test", radio_uri)
+    finally:
+        await client.close()
+
+
+async def test_msx_audio_rejects_builtin_uri_absent_from_the_queue(
+    provider: MSXBridgeProvider, mass_mock: Mock
+) -> None:
+    """The queue only vouches for the uris it actually holds."""
+    mass_mock.player_queues.items = Mock(
+        return_value=[_make_queue_item("builtin://radio/http://radio.example/stream")]
+    )
+
+    server = MSXHTTPServer(provider, 0)
+    client = AiohttpTestClient(TestServer(server.app))
+    await client.start_server()
+    try:
+        _make_audio_player(mass_mock)
+        token = provider.get_stream_token("msx_test")
+        uri = quote("builtin://track/http://evil.example/payload.mp3", safe="")
+        resp = await client.get(f"/msx/audio/msx_test?uri={uri}&token={token}")
+        assert resp.status == 400
+        mass_mock.player_queues.play_media.assert_not_called()
+    finally:
+        await client.close()
+
+
+async def test_msx_audio_queue_fallback_runs_after_the_token_check(
+    provider: MSXBridgeProvider, mass_mock: Mock
+) -> None:
+    """An unauthorized caller must not learn what a queue holds."""
+    radio_uri = "builtin://radio/http://radio.example/stream"
+    items = Mock(return_value=[_make_queue_item(radio_uri)])
+    mass_mock.player_queues.items = items
+
+    server = MSXHTTPServer(provider, 0)
+    client = AiohttpTestClient(TestServer(server.app))
+    await client.start_server()
+    try:
+        _make_audio_player(mass_mock)
+        resp = await client.get(f"/msx/audio/msx_test?uri={quote(radio_uri, safe='')}&token=wrong")
+        assert resp.status == 403
+        items.assert_not_called()
+        mass_mock.player_queues.play_media.assert_not_called()
+    finally:
+        await client.close()
+
+
+async def test_api_play_has_no_queue_fallback(provider: MSXBridgeProvider, mass_mock: Mock) -> None:
+    """The fallback belongs to the queue-driven route only."""
+    radio_uri = "builtin://radio/http://radio.example/stream"
+    mass_mock.player_queues.items = Mock(return_value=[_make_queue_item(radio_uri)])
+
+    server = MSXHTTPServer(provider, 0)
+    client = AiohttpTestClient(TestServer(server.app))
+    await client.start_server()
+    try:
+        _make_audio_player(mass_mock)
+        resp = await client.post(
+            "/api/play", json={"track_uri": radio_uri, "player_id": "msx_test"}
+        )
+        assert resp.status == 400
+        mass_mock.player_queues.play_media.assert_not_called()
+    finally:
+        await client.close()
+
+
 async def test_msx_audio_player_not_found(http_client: TestClient[Any, Any]) -> None:
     """GET /msx/audio/nonexistent?uri=x should return 404."""
     resp = await http_client.get("/msx/audio/nonexistent?uri=library://track/1")
