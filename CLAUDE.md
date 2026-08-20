@@ -113,13 +113,13 @@ to Sphinx, and rewrite anything that slips through.
 
 ## Branching and PRs
 
-- All work-in-progress PRs target `feat/msx-bridge-player-provider` (primary development branch).
+- All work-in-progress PRs target `dev` (primary development branch).
 - Before opening a PR: run lint + tests + `pre-commit run --all-files`. CI runs `ruff format --check`, so pushing without `ruff format` is the most common red build.
 
 ## Pull Request Workflow
 
 All non-trivial changes go through a pull request — never push directly to
-`feat/msx-bridge-player-provider`. Inside a PR, follow this loop:
+`dev`. Inside a PR, follow this loop:
 
 1. **Self-review.** Run at least one self-review pass on the diff (e.g. the
    `/code-review` skill or an equivalent reviewer) before asking for human
@@ -133,12 +133,12 @@ All non-trivial changes go through a pull request — never push directly to
 3. **Changelog (+ maintainer-owned version).** *After* review feedback is
    addressed, add a `CHANGELOG.md` entry following the rules in **Changelog
    Discipline** below — in the same PR. The `VERSION` file is **owned by the
-   maintainer** (`.github/CODEOWNERS`) and protected on `feat/msx-bridge-player-provider`:
+   maintainer** (`.github/CODEOWNERS`) and protected on `dev`:
    do **not** bump it in a contributor PR — a `VERSION` change requires the
    maintainer's Code-Owner approval to merge. The maintainer sets the version
    (typically at merge/release time, matching the changelog entry), and the
    release pipeline tags and publishes automatically when the new `VERSION`
-   lands on `feat/msx-bridge-player-provider`.
+   lands on `dev`.
 4. **Ask before merging.** Always request explicit maintainer approval to
    merge. Do not self-merge or enable auto-merge without it. (Auto-merge is
    reserved for `distribute.yml`-generated wrapper-sync PRs from

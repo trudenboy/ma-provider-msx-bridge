@@ -7,7 +7,7 @@ name: Version Guard
 on:
   pull_request:
     branches:
-      - feat/msx-bridge-player-provider
+      - dev
 
 permissions:
   contents: read

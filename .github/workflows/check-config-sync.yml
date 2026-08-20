@@ -8,7 +8,7 @@ on:
       - ".github/workflows/check-config-sync.yml"
   push:
     branches:
-      - feat/msx-bridge-player-provider
+      - dev
 
 jobs:
   check:

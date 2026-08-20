@@ -10,7 +10,7 @@ export default defineConfig({
 		starlight({
 			title: 'MSX Bridge · MA Provider',
 			editLink: {
-				baseUrl: 'https://github.com/trudenboy/ma-provider-msx-bridge/edit/feat/msx-bridge-player-provider/docs-site/src/content/docs/',
+				baseUrl: 'https://github.com/trudenboy/ma-provider-msx-bridge/edit/dev/docs-site/src/content/docs/',
 			},
 			social: [
 				{ icon: 'github', label: 'GitHub', href: 'https://github.com/trudenboy/ma-provider-msx-bridge' },

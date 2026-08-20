@@ -2,7 +2,7 @@ name: Deploy Docs to GitHub Pages
 on:
   push:
     branches:
-      - feat/msx-bridge-player-provider
+      - dev
     paths:
       - "docs-site/**"
   workflow_dispatch:

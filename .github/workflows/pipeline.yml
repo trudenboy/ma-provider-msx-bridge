@@ -1,7 +1,7 @@
 name: Pipeline
 on:
   push:
-    branches: [feat/msx-bridge-player-provider]
+    branches: [dev]
     paths:
       - 'provider/**'
       - 'provider/manifest.json'

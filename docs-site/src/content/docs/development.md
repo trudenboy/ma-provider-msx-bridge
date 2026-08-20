@@ -76,7 +76,7 @@ test: add test for Z
 ## Release Process
 
 1. Bump version in `VERSION` file (e.g. `1.2.0` or `1.2.0b1`)
-2. Push to `feat/msx-bridge-player-provider` — pipeline auto-tags and releases
+2. Push to `dev` — pipeline auto-tags and releases
 3. Manual fallback: Actions → Release → Run workflow → enter version
 
 ## Shared Workspace (multi-provider)

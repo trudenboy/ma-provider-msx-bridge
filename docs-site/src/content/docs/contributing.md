@@ -48,7 +48,7 @@ PR description should include:
 PR against that copy, your change is **not lost** — a reverse-sync bot detects
 merged upstream PRs touching this provider and automatically opens a draft PR
 porting them back here, crediting you via `Co-authored-by`. Still, the smoothest
-path is to contribute **here** (against `feat/msx-bridge-player-provider`), where it lands
+path is to contribute **here** (against `dev`), where it lands
 without the cross-repo round-trip.
 
 ## License

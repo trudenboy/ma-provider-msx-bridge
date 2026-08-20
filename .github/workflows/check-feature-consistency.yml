@@ -7,7 +7,7 @@ on:
       - ".github/workflows/check-feature-consistency.yml"
   push:
     branches:
-      - feat/msx-bridge-player-provider
+      - dev
 
 jobs:
   check:
