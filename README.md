@@ -1,5 +1,16 @@
 # MSX Music Assistant Bridge
 
+
+<!-- >>> ma-provider-tools sync (readme header) — DO NOT EDIT >>> -->
+[![CI](https://github.com/trudenboy/ma-provider-msx-bridge/actions/workflows/test.yml/badge.svg)](https://github.com/trudenboy/ma-provider-msx-bridge/actions/workflows/test.yml)
+[![Release](https://img.shields.io/github/v/release/trudenboy/ma-provider-msx-bridge?display_name=tag)](https://github.com/trudenboy/ma-provider-msx-bridge/releases/latest)
+[![License](https://img.shields.io/github/license/trudenboy/ma-provider-msx-bridge)](LICENSE)
+[![Music Assistant](https://img.shields.io/badge/Music%20Assistant-9070B8?logo=python&logoColor=white)](https://www.music-assistant.io/)[![stable](https://img.shields.io/endpoint?url=https%3A%2F%2Ftrudenboy.github.io%2Fma-provider-tools%2Fbadges%2Fmsx_bridge-stable.json)](https://github.com/music-assistant/server/releases/latest)[![beta](https://img.shields.io/endpoint?url=https%3A%2F%2Ftrudenboy.github.io%2Fma-provider-tools%2Fbadges%2Fmsx_bridge-beta.json)](https://github.com/music-assistant/server/releases?q=prerelease)
+[![Stars](https://img.shields.io/github/stars/trudenboy/ma-provider-msx-bridge?style=flat&logo=github)](https://github.com/trudenboy/ma-provider-msx-bridge/stargazers)
+
+**📖 [Documentation](https://trudenboy.github.io/ma-provider-msx-bridge/)** · **🔄 [Changelog](CHANGELOG.md)** · **🐛 [Issues](https://github.com/trudenboy/ma-provider-msx-bridge/issues)** · **💬 [Discussions](https://github.com/trudenboy/ma-provider-msx-bridge/discussions)**
+<!-- <<< ma-provider-tools sync (readme header) <<< -->
+
 English | [Русский](README.ru.md)
 
 > Stream your [Music Assistant](https://music-assistant.io/) library to Smart TVs through [Media Station X](https://msx.benzac.de/) with a native TV-optimized interface.

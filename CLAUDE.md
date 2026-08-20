@@ -1,157 +1,342 @@
+<!-- ma-provider-tools: rendered from wrappers/CLAUDE.md.j2 -->
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file aligns development of the **MSX Bridge** provider with the
+upstream [`music-assistant/server`](https://github.com/music-assistant/server)
+standards. It is rendered from `wrappers/CLAUDE.md.j2` in
+[`trudenboy/ma-provider-tools`](https://github.com/trudenboy/ma-provider-tools)
+and is kept in sync across every provider repo — **do not edit it here**.
 
-## Project Overview
+Provider-specific architecture, key flows, and gotchas live in
+[`CLAUDE.local.md`](./CLAUDE.local.md). Claude Code automatically picks up both
+files when working in this repository.
 
-Music Assistant (MA) Player Provider that streams music to Smart TVs via the Media Station X (MSX) app. Implemented as an MA provider plugin — runs inside the MA server process with direct access to internal APIs.
+## AI Policy Alignment
 
-## Architecture
+This provider follows two layered AI policies:
 
+- The Open Home Foundation **upstream policy** —
+  [`music-assistant/.github/AI_POLICY.md`](https://github.com/music-assistant/.github/blob/main/AI_POLICY.md)
+  — governs everything that lands in `music-assistant/server`.
+- The **ecosystem policy** —
+  [`trudenboy/ma-provider-tools/AI_POLICY.md`](https://github.com/trudenboy/ma-provider-tools/blob/main/AI_POLICY.md)
+  — governs work inside `trudenboy/ma-provider-*` and the upstream boundary
+  mechanics.
+
+A per-provider summary lives in [`AI_POLICY.md`](./AI_POLICY.md) (rendered
+from `wrappers/AI_POLICY.md.j2`).
+
+Operational rules for AI assistants working in this repo:
+
+1. **A human owns every PR.** The contributor must be able to explain every
+   change in their own words; PRs that look like unreviewed AI output are
+   closed. AI may be change title or description of pr.
+2. **Never open, push to, comment on, or close anything in `music-assistant/*`
+   directly.** The only path is the `upstream-pr.yml` workflow, which opens
+   the PR as a draft with a human-attestation checklist.
+3. **Replies to human reviewers are written by humans.** AI may prepare drafts, polish
+   grammar and clarity; This applies only in upstream PRs **not** in our own provider-repo PRs.
+4. **Replies to AI review comments may be AI-drafted.** GitHub Copilot,
+   code-scanning bots, and similar tools post AI output; replying with
+   AI-drafted text is allowed because the conversation is AI ↔ AI. The
+   contributor must still read the AI's reply and apply judgement before
+   posting. **If a human reviewer joins the same thread, rule 3 takes over
+   from that point on** — every reply after that human comment must be
+   human-written.
+5. **AI co-author trailers** (`Co-Authored-By: <agent> ...`) are encouraged
+   in this repo's commits as honest disclosure. Use the identity of the agent
+   that actually did the work — e.g. `Co-Authored-By: Cursor
+   <cursoragent@cursor.com>`, `Co-Authored-By: Claude <model>
+   <noreply@anthropic.com>`, or the line your tool documents. Do **not** copy
+   another tool's example trailer, invent a model string, or duplicate a
+   trailer your environment already injects. Wrong attribution is worse than
+   omitting the trailer. AI-agent trailers are stripped at the upstream
+   boundary by `upstream-pr.yml.j2` so they don't appear in
+   `music-assistant/server` history; **human** `Co-Authored-By` trailers are
+   collected from the synced commit range and appended to the sync commit,
+   so contributor credit survives the squash into upstream.
+
+## Development Commands
+
+- `./scripts/setup.sh` — initial setup (venv via `uv`, dependencies, pre-commit hooks). Re-run after pulling latest code.
+- `uv run pytest` — run all tests
+- `uv run pytest provider/tests/<file>.py` — run a specific test file
+- `uv run ruff check provider/` — lint
+- `uv run ruff format provider/` — auto-format
+- `uv run mypy provider/` — type check
+- `pre-commit run --all-files` — full pre-commit gate
+
+Always run `pre-commit run --all-files` after a code change to ensure the new
+code adheres to the project standards.
+
+## Code Style
+
+### Method Order
+
+Private methods (single/double underscore, non-dunder) must live at the
+**bottom** of each class: once a private method appears, every later method in
+the class body must also be private. This is upstream music-assistant/server's
+AGENTS.md rule, enforced locally by the `check-method-order` pre-commit hook
+(`scripts/check_method_order.py`, distributed from ma-provider-tools — do not
+edit). Violations that only surface at the upstream PR are exactly what this
+hook exists to prevent.
+
+### Comments
+
+Only use comments to explain complex, multi-line blocks of code. Do not comment
+obvious operations.
+
+### Docstring Format
+
+Use Sphinx-style docstrings with `:param:` syntax. For simple functions, a
+single-line docstring is fine.
+
+Don't explain inner workings of the code in the docstrings (you can use inline
+comments for that if/when needed). The docstring should provide clarity to the
+**caller** of the function/method, not explain how it works
+technically/internally.
+
+```python
+def my_function(param1: str, param2: int, param3: bool = False) -> str:
+    """
+    Brief one-line description of the function.
+
+    :param param1: Description of what param1 is used for.
+    :param param2: Description of what param2 is used for.
+    :param param3: Description of what param3 is used for.
+    """
 ```
-Smart TV (MSX App) --HTTP--> MSXBridgeProvider (inside MA, port 8099) --internal API--> MA core
-```
 
-**Provider** (`provider/msx_bridge/`): MA Player Provider with embedded HTTP server.
-- `__init__.py` — `setup()`, `get_config_entries()` (7 config entries), provider entry point
-- `provider.py` — `MSXBridgeProvider(PlayerProvider)`: manages lifecycle, dynamic player registration, idle timeout loop, WebSocket push notifications, starts HTTP server
-- `player.py` — `MSXPlayer(Player)`: represents a Smart TV as an MA player. Stores stream URL from `play_media()` for the TV to fetch via HTTP.
-- `http_server.py` — `MSXHTTPServer`: aiohttp server with routes for MSX bootstrap, library browsing, playback control, WebSocket, and stream proxy
-- `constants.py` — config keys and defaults (7 config entries: `http_port`, `output_format`, `player_idle_timeout`, `show_stop_notification`, `abort_stream_first`, `enable_player_grouping`, `group_stream_mode`)
-- `models.py` — Pydantic models for MSX JSON API (`MsxTemplate`, `MsxItem`, `MsxContent`)
-- `mappers.py` — Converters from MA objects to MSX models (`map_track_to_msx`, `map_album_to_msx`, `map_artist_to_msx`, `map_playlist_to_msx`, `map_tracks_to_msx_playlist`)
-- `manifest.json` — provider metadata for MA
-- `static/` — static files served by aiohttp:
-  - `plugin.html` — MSX interaction plugin (detects device ID, opens WebSocket, builds menu)
-  - `sendspin-plugin.html` — Sendspin TVX Video Plugin (reserved for future use)
-  - `input.html` — MSX Input Plugin wrapper (search keyboard)
-  - `input.js` — Input Plugin logic
-  - `tvx-plugin-module.min.js` — TVX plugin module library
-  - `tvx-plugin.min.js` — TVX plugin library
-  - `web/` — Browser-based web player (index.html, web.js)
+Do **not** use Google-style (`Args:`) or bullet-style (`- param:`) docstrings.
+AI assistants tend to generate Google-style by default — explicitly steer them
+to Sphinx, and rewrite anything that slips through.
 
-### Key Flows
+## Branching and PRs
 
-**MSX Bootstrap & Navigation:**
-1. TV loads `/msx/start.json` → points to `/msx/plugin.html` as interaction plugin
-2. Plugin detects device ID via `TVXVideoPlugin.requestDeviceId()` (falls back to IP)
-3. Plugin opens WebSocket to `/ws?device_id=...` for push playback notifications
-4. Plugin requests `/msx/menu.json?device_id=...` → returns menu items (Search, Albums, Artists, Playlists, Tracks)
-5. Clicking a menu item loads a content page (e.g. `/msx/albums.json?device_id=...`) → MSX renders list
-6. All URLs carry `device_id` param so the server maps requests to the correct player
-7. Content items have `action: "content:..."` (drill to detail page), `action: "audio:..."` (single track), or `action: "playlist:..."` (MSX native playlist — loads URL, auto-starts, supports next/prev)
+- All work-in-progress PRs target `dev` (primary development branch).
+- Before opening a PR: run lint + tests + `pre-commit run --all-files`. CI runs `ruff format --check`, so pushing without `ruff format` is the most common red build.
 
-**Dynamic Player Registration:**
-1. Any MSX request calls `_ensure_player_for_request()` → extracts `device_id` or IP → derives `player_id`
-2. `provider.get_or_register_player(player_id)` creates an `MSXPlayer` on-demand if not already registered
-3. Background idle timeout loop runs every 60s → unregisters players with no activity for `player_idle_timeout` minutes (default: 30)
-4. Handles race conditions via `_pending_unregisters` events
+## Pull Request Workflow
 
-**Audio Playback (via MSX native player):**
-1. Track list items use `action: "playlist:/msx/playlist/album/{id}.json"` — MSX loads the playlist, auto-starts playback, tracks rotated so clicked track is first; native next/prev
-2. Each playlist item has `action: "audio:/msx/audio/{player_id}?uri=<uri>&from_playlist=1"`
-3. `GET /msx/audio/{player_id}?uri=...` → calls `mass.player_queues.play_media()` → waits for `MSXPlayer.wait_for_media()` (up to 10s)
-4. Streams: `mass.streams.get_stream()` → raw PCM → `get_ffmpeg_stream()` → encoded MP3/AAC/FLAC → TV
-5. `Content-Length: duration * bytes_per_sec` set for MP3 (40,000 B/s) and AAC (32,000 B/s) — FLAC omits it (non-deterministic size)
-6. **MA queue → MSX playlist:** `notify_play_playlist()` sends WS `{type:"playlist", url:"/msx/queue-playlist/{player_id}.json"}` — TV loads MA queue as MSX native playlist; same-queue track changes use `{type:"goto_index", index:N}` instead of resending
+All non-trivial changes go through a pull request — never push directly to
+`dev`. Inside a PR, follow this loop:
 
-**WebSocket Push (bidirectional MA ↔ MSX):**
-1. Plugin connects to `/ws?device_id=...` on startup
-2. MA → TV message types: `play` (title/artist/image/duration/next_action/prev_action), `stop` (sent twice for instant close), `pause`, `resume`, `playlist` (url to load), `goto_index` (index in current playlist), `seek` (position_seconds)
-3. TV → MA message types: `position` (current playback seconds → `player.update_position()`), `pause` (with position), `resume` — bidirectional protocol
-4. `_skip_ws_notify` flag prevents echo-back when MSX initiates pause/resume
-5. WS position reports override wall-clock elapsed time for 10s (more accurate than polling)
+1. **Self-review.** Run at least one self-review pass on the diff (e.g. the
+   `/code-review` skill or an equivalent reviewer) before asking for human
+   review.
+2. **Copilot triage.** Check the PR for GitHub Copilot review comments. For
+   each comment: analyze it, apply a fix when warranted, reply with a short
+   justification, and resolve the thread. Copilot is an AI reviewer, so
+   AI-drafted replies are allowed here (see *AI Policy Alignment*, rule 4).
+   Replies to a **human** reviewer chiming into the same thread must be
+   human-written from that point on.
+3. **Changelog (+ maintainer-owned version).** *After* review feedback is
+   addressed, add a `CHANGELOG.md` entry following the rules in **Changelog
+   Discipline** below — in the same PR. The `VERSION` file is **owned by the
+   maintainer** (`.github/CODEOWNERS`) and protected on `dev`:
+   do **not** bump it in a contributor PR — a `VERSION` change requires the
+   maintainer's Code-Owner approval to merge. The maintainer sets the version
+   (typically at merge/release time, matching the changelog entry), and the
+   release pipeline tags and publishes automatically when the new `VERSION`
+   lands on `dev`.
+4. **Ask before merging.** Always request explicit maintainer approval to
+   merge. Do not self-merge or enable auto-merge without it. (Auto-merge is
+   reserved for `distribute.yml`-generated wrapper-sync PRs from
+   `ma-provider-tools`.)
 
-**Direct Stream Proxy (for programmatic playback):**
-1. MA calls `play_media(media)` on `MSXPlayer` → player stores `media.uri` as `current_stream_url`
-2. TV fetches `GET /stream/{player_id}` → HTTP server streams audio via PCM → ffmpeg → encoded output
+Follow-up commits driven by review (your own pass or Copilot's) land directly
+on the PR branch — no separate PR needed.
 
-**Library REST API:**
-- TV or external client calls `/api/albums`, `/api/artists`, etc. → server calls `mass.music.*` internally
+## Upstream is Read-Only
 
-## Development Setup
+Never push to or open PRs against the upstream Music Assistant repo
+(`music-assistant/server` — the true upstream) or the integration fork
+(`trudenboy/ma-server`) without an explicit maintainer instruction. The
+provider repo is the source of truth; sync to the integration fork and
+upstream PR submission run automatically through `ma-provider-tools`
+workflows (`sync-to-fork.yml`, `upstream-pr.yml`).
 
-```bash
-# Clone MA server fork alongside this project (if not already done)
-# Use the integration branch with pending upstream PRs for the test environment
-cd /tmp/msx-ma-server && git clone https://github.com/trudenboy/ma-server.git
+**Reverse-sync (incoming).** Contributions made *upstream* against the inlined
+provider (someone editing `music_assistant/providers/msx_bridge/` directly in
+`music-assistant/server`) are detected and ported back here automatically by the
+`ma-provider-tools` reverse-sync radar. They arrive as **draft** PRs on a
+`reverse-sync/<domain>-pr<N>` branch, crediting the upstream author via
+`Co-authored-by`. A PR labelled **`needs-human`** applied with conflicts: it
+carries `<<<<<<<` markers (and the upstream change may need adapting to this
+repo's current code) — resolve them, drop the label, and treat it like any other
+PR (review, changelog, maintainer approval). `VERSION` / `translations/en.json`
+are never touched by reverse-sync; bump them as usual. Do **not** manually
+re-port a change the radar already opened a PR for.
 
-# Setup venv, install deps, symlink provider — one command does it all
-./scripts/link-to-ma.sh
-```
+This provider is intended to be inlined into
+`music_assistant/providers/msx_bridge` upstream eventually — that is the
+target shape, not a possibility. Any code that lints / type-checks here
+must lint / type-check identically upstream.
 
-### Working with the MA venv
+## Upstream PR Body Format
 
-All commands (server, tests, pre-commit, linting) must run inside the MA venv:
+When drafting or refining text for an upstream PR body in
+`music-assistant/server`, the body MUST follow upstream's
+[`PULL_REQUEST_TEMPLATE.md`](https://github.com/music-assistant/.github/blob/main/.github/PULL_REQUEST_TEMPLATE.md)
+skeleton, in this order:
 
-```bash
-# Activate the venv
-source /tmp/msx-ma-server/ma-server/.venv/bin/activate
+1. `# What does this implement/fix?` — narrative goes under this heading.
+2. `**Related issue (if applicable):**`.
+3. `## Types of changes` — tick ≥ 1 box; multi-tick is supported
+   (e.g. `bugfix` + `enhancement` + `dependencies` for cross-cutting
+   releases).
+4. `## Checklist`. The `I have read and complied with the project's
+   AI Policy` checkbox is the human-attestation checkpoint; do not
+   append a separate attestation block.
 
-# Start MA server (provider auto-loads)
-cd /tmp/msx-ma-server/ma-server && python -m music_assistant --log-level debug
+Upstream's `pr-labels.yaml` reads the ticked `## Types of changes`
+checkboxes to apply labels; the release-notes generator slots by
+label. A body without these sections silently breaks both.
 
-# Run tests
-cd /tmp/msx-ma-server/ma-server && pytest
+Per *AI Policy Alignment* rule 2, do not edit the upstream PR
+directly — produce the corrected body and the human applies it
+(via `gh api repos/music-assistant/server/pulls/<N> -X PATCH -F body=@file.md`).
 
-# Pre-commit (linting, formatting)
-cd /tmp/msx-ma-server/ma-server && pre-commit run --all-files
+## Auto-Synced Lint & Typing Config
 
-# Verify provider imports
-python -c "from music_assistant.providers.msx_bridge import setup; print('OK')"
-```
+`ruff.toml`, `[tool.mypy]`, and `[tool.codespell].skip` mirror upstream
+`music-assistant/server/pyproject.toml` and are regenerated by
+`ma-provider-tools` (`scripts/sync_upstream_config.py`, weekly cron).
+**Do not hand-edit these in the provider repo** — the
+`Check config sync` GitHub Action will fail any PR that drifts. To change
+a rule, open a PR in `trudenboy/ma-provider-tools`; once merged, the
+distribute workflow propagates the change here.
 
-## Code Standards
+Provider-specific carve-outs that do *not* drift: `python_version`,
+`packages = ["tests", "provider"]`, the `[[tool.mypy.overrides]]`
+block, and `codespell.ignore-words-list`.
 
-- **Python**: PEP 8, type hints on all functions, `from __future__ import annotations`
-- **Commits**: `type(scope): description` — types: feat, fix, docs, style, refactor, test, chore
-- **Async**: All I/O uses async/await (aiohttp)
-- **MA conventions**: Follow patterns from `_demo_player_provider` and `sendspin` providers
-- **DO NOT use subagents (Task tool) without explicit user instruction or confirmation!**
+Repo-level metadata also flows through `ma-provider-tools` (fields
+`github_description`, `github_topics`, `github_homepage`,
+`related_providers` in `providers.yml`). They drive the GitHub "About"
+block, the auto-synced README badge / quick-links / cross-links header
+(between `<!-- >>> ma-provider-tools sync (readme header) >>> -->`
+markers), and the docs-site landing hero. Do not edit GitHub repo
+settings directly — open a PR in `ma-provider-tools` instead.
 
-## Key Files Reference (MA Server)
+The **Music Assistant** badge in the README is a dynamic shields.io
+endpoint hosted at
+`https://trudenboy.github.io/ma-provider-tools/badges/<domain>.json`. A
+4-hour cron in `ma-provider-tools` (`update-ma-version-badges.yml`)
+refreshes the JSON to show which MA channel (stable / beta / dev) ships
+the provider and at what MA version. The provider's own version pin is
+included once a `VERSION` file has been synced alongside `manifest.json`
+in each channel via the existing `sync-to-fork` / `upstream-pr`
+workflows. Do not edit the badge URL or the JSON manually.
 
-| Path | Purpose |
-|------|---------|
-| `music_assistant/models/player.py` | `Player` base class |
-| `music_assistant/models/player_provider.py` | `PlayerProvider` base class |
-| `music_assistant/providers/_demo_player_provider/` | Template provider |
-| `music_assistant/providers/sendspin/` | Reference: provider with embedded HTTP server |
+## Feature Specification Discipline
 
-## Project Status
+Non-trivial features go through a written spec before code. The template
+lives at `specs/feature-spec.md` (auto-synced from
+`ma-provider-tools/wrappers/feature-spec.md.j2` — do not edit it in
+place; changes go through `ma-provider-tools`).
 
-`MSXBridgeProvider`, `MSXPlayer`, and `MSXHTTPServer` are implemented with:
-- Dynamic player registration (device ID or IP-based) with idle timeout cleanup
-- Multi-TV support (each TV gets its own player via device ID)
-- WebSocket push notifications — bidirectional: MA→TV (play/stop/pause/resume/playlist/goto_index/seek) and TV→MA (position/pause/resume)
-- Player state management (play, pause, stop, seek, volume, poll)
-- Player grouping: `SET_MEMBERS` feature, `_propagate_to_group_members()` syncs play/pause/stop across group
-- `SharedGroupStream` in `provider.py` — one ffmpeg, multiple TV readers (catch-up buffer, late-joiner support)
-- `ProviderFeature.REMOVE_PLAYER` — user can remove a player from MA UI; `ProviderFeature.SYNC_PLAYERS` when grouping enabled
-- MSX bootstrap (`/msx/start.json`, `/msx/plugin.html`, static assets)
-- MSX interaction plugin with device ID detection and WebSocket client
-- MSX native JSON content pages (`/msx/menu.json`, `/msx/albums.json`, `/msx/artists.json`, `/msx/playlists.json`, `/msx/tracks.json`, `/msx/recently-played.json`, `/msx/search.json`, `/msx/search-page.json`, `/msx/search-input.json`, `/msx/launcher.json`)
-- MSX detail pages (`/msx/albums/{id}/tracks.json`, `/msx/artists/{id}/albums.json`, `/msx/playlists/{id}/tracks.json`)
-- MSX native playlist endpoints (`/msx/playlist/album/{id}.json`, `/msx/playlist/playlist/{id}.json`, `/msx/playlist/tracks.json`, `/msx/playlist/recently-played.json`, `/msx/playlist/search.json`, `/msx/queue-playlist/{player_id}.json`)
-- Audio playback endpoint (`/msx/audio/{player_id}`) via playlist action; Content-Length set for MP3/AAC from duration; FLAC omits it
-- Stream proxy (`/stream/{player_id}`) with same PCM→ffmpeg chain
-- Library REST API (`/api/albums`, `/api/artists`, `/api/playlists`, `/api/tracks`, `/api/search`, `/api/recently-played`, `/api/lyrics/{player_id}`, `/api/queue/{player_id}`, plus detail sub-routes)
-- Playback control (`/api/play`, `/api/pause/{player_id}`, `/api/stop/{player_id}`, `/api/quick-stop/{player_id}`, `/api/next/{player_id}`, `/api/previous/{player_id}`)
-- Health endpoint (`/health`)
-- Status dashboard (`/`)
-- 141 tests: 111 unit (test_http_server 53, test_player 42, test_group_stream 20, test_provider 9, test_init 6, test_models 4, test_playlist 5, test_mappers 2) + 30 integration
-- `map_track_to_msx()` / `map_tracks_to_msx_playlist()` in `mappers.py` replace the old `_format_msx_track()` helper
-- 7 config entries: `http_port`, `output_format`, `player_idle_timeout`, `show_stop_notification`, `abort_stream_first`, `enable_player_grouping`, `group_stream_mode`
-- Browser web player (`/web`) with library browsing, playback controls, and keyboard shortcuts
-- Group stream modes: Independent (separate ffmpeg per TV) or Shared Buffer (one ffmpeg, multiple readers)
-- `on_player_disabled` override: does not unregister (player stays on Enable); still broadcasts stop for instant MSX close
+- **When required.** Every PR whose Conventional-Commit type is `feat:`
+  MUST add a new file `specs/<state>/<NNNN>-<kebab-slug>.md` derived
+  from the template. Types `fix:`, `chore:`, `docs:`, `test:`,
+  `refactor:`, `perf:`, `build:`, `ci:` are exempt. When a borderline
+  `feat:` legitimately needs no spec (e.g. a pure wire-up, a one-line
+  enum addition), state *"no spec required because <reason>"* in the
+  PR body so reviewers can confirm.
+- **Enforcement.** P0 (now): this is a documented rule that AI agents
+  and reviewers uphold. P1 (next release cycle): the rule is promoted
+  to a hard CI gate after observing false-positive patterns.
+- **T-shirt sizing** — the `size:` frontmatter declares the required
+  artifacts:
+  - **S** (≤ 10 min effort): Problem Statement + Acceptance Criteria
+    (≥ 5 bullets) + Test Plan.
+  - **M** (10–20 min): S + Sequence Diagram.
+  - **L** (> 20 min): M + Data Model.
+- **WIP = 1.** At most one spec lives in `specs/inprogress/` at any
+  time. Move it to `specs/done/` (or revert to `specs/todo/`) before
+  starting the next.
+- **Numbering.** Zero-padded 4-digit (`0001`, `0002`, …), monotonic
+  per repo. Gaps are fine.
+- **Optional `feature_id:`** in the frontmatter links the spec to a
+  `ProviderFeature` enum member. When set, the `Check feature
+  consistency` workflow cross-validates against `SUPPORTED_FEATURES`
+  in this repo and against the corresponding `providers.yml`
+  `features[].feature_id` entry in `ma-provider-tools`. A mismatch
+  fails CI.
+- **Idempotency.** All changes flow through the spec — no
+  "I'll patch it in copilot mode and update the spec later". If the
+  implementation diverges from the spec, update the spec **in the
+  same PR**.
 
-Next steps: integration testing with real MA server + MSX app, full MSX TypeScript plugin.
+## Test-Driven Development
 
-## Gotchas
+Use **red / green / refactor** TDD for all new features and bug fixes:
 
-- **Album track ordering**: `_sort_album_tracks()` uses `(disc, track_number, name)` — without `name` as tiebreaker, tracks with identical disc/number get non-deterministic order between display page and playlist endpoint (causes mismatched play).
-- **MSX `playlist:` action**: always starts from index 0 — rotate tracks so clicked track is index 0 (`msx_items[start_index:] + msx_items[:start_index]`).
-- **MSX `playlist:` vs `playlist:auto:`**: `playlist:` shows player in foreground and auto-starts; `playlist:auto:` plays in background silently.
-- **Content-Length for audio**: set for MP3 (40,000 B/s) and AAC (32,000 B/s) only — FLAC size is non-deterministic, omitting Content-Length for FLAC prevents MSX from hanging.
-- **WS echo prevention**: set `_skip_ws_notify = True` before calling MA pause/resume when MSX initiates the action, to avoid MA echoing the WS command back to the TV.
+1. **Red.** Write the test first. Confirm it **fails** before writing
+   implementation.
+2. **Green.** Write the **minimal** code to make the test pass.
+3. **Refactor.** Clean up the implementation while keeping tests green.
+
+### Rules for AI agents
+
+- **Never modify existing tests to make them pass.** If a test fails, fix
+  the implementation. If a test is genuinely wrong, explain why in the
+  commit message before changing it.
+- **Never write tautological tests** — tests that reimplement the logic
+  under test locally and assert on that local copy. Always call the real
+  function / method.
+- **Test real behaviour, not mocks.** Avoid over-mocking: if a test only
+  verifies that mocks return what they were configured to return, it
+  tests nothing. For Music Assistant providers this means: prefer real
+  fixtures (`tests/fixtures/*.json`) and `syrupy` snapshots over hand-
+  rolled mock graphs whenever the parser / mapper under test is pure.
+- **Every test must be able to fail.** If removing the implementation
+  doesn't break the test, the test is useless.
+- **Bug fix flow.** First write a test that **reproduces** the bug
+  (red), then fix it (green). The reproducer becomes the regression
+  guard.
+
+## Changelog Discipline
+
+`CHANGELOG.md` follows
+[Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and is the
+input the release pipeline reads when it composes GitHub Release notes.
+Treat the rules below as falsifiable invariants — fix the entry, do not
+relax the rule.
+
+- **Bare canonical headings only.** Use `### Added`, `### Changed`,
+  `### Deprecated`, `### Removed`, `### Fixed`, `### Security` —
+  nothing else. No `### Improved`, `### Refactored`, `### Tests`, no
+  trailing prose like `### Fixed — long sentence`.
+- **Canonical order.** Inside each version block, categories appear in
+  this order: Added → Changed → Deprecated → Removed → Fixed → Security.
+  Skip categories that are empty; never reorder.
+- **No private symbols, no internal paths in bullets.** Forbidden:
+  `_underscore_func`, `provider/foo.py`, `ClassName.method`. Allowed:
+  uppercase config keys (e.g. `CONF_QUALITY`), backticked user-facing
+  filenames (`` `pyproject.toml` ``, `` `manifest.json` ``), markdown
+  links. Internal paths rot through refactors — describe what the
+  **user** observes instead.
+- **No process-noise headings or bullets.** Things like `Code-review
+  polish`, `Round 2 fixes`, `Copilot review on PR #N`, `Tests`,
+  `Internal` belong in `git log`, not the changelog. If a review
+  surfaced a real bug, file it under `### Fixed`.
+- **No prose between `## [version]` and the first `### Category`.**
+  Release-note tooling collects bullets that appear *after* the first
+  category heading; intro paragraphs are silently dropped.
+- **One entry per version.** For the release that lands these changes
+  (`X.Y.Z` → `X.Y.(Z+1)`), add a single `## [X.Y.(Z+1)] - YYYY-MM-DD`
+  block above the existing top-most version, populated with the categories
+  the PR touches. Do not retroactively edit older version blocks. The
+  matching `VERSION` bump is applied by the maintainer (see *Pull Request
+  Workflow* step 3).
+
+## Debugging
+
+Music Assistant stores its data in `$HOME/.musicassistant/`. When debugging
+locally:
+
+- **Logs:** `$HOME/.musicassistant/musicassistant.log` (current),
+  `musicassistant.log.1`, `.log.2`, etc. for older rotated logs.
+- **Database:** `$HOME/.musicassistant/library.db` — query via `sqlite3`.
+  **Only execute SELECT queries** — never write to a live database.

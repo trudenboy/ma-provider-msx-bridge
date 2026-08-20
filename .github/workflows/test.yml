@@ -1,19 +1,22 @@
 name: Test
 on:
   push:
-    branches: [main, dev]
-  pull_request:
     branches: [main]
+  pull_request:
+    branches: [main, dev]
+  schedule:
+    - cron: "0 6 * * 1"
   workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  issues: write  # Required by report-failure job in reusable workflow
+
 jobs:
   test:
-    permissions:
-      issues: write  # required for report-failure in reusable-test.yml
     uses: trudenboy/ma-provider-tools/.github/workflows/reusable-test.yml@main
     with:
       provider_type: player_provider
