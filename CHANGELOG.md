@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Tracks queued from the Music Assistant interface that stream from a plain URL, such as a manually added radio station, play on the TV again instead of being refused by the new audio checks.
+- Tracks queued from the Music Assistant interface that stream from a plain URL, such as a manually added radio station, play on the TV again instead of being refused by the new audio checks. This also holds for a TV playing as part of a group and for entries far down a long queue.
 
 ### Security
 

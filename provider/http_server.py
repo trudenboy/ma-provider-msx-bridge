@@ -72,6 +72,10 @@ _KNOWN_EXTENSIONS = (".mp3", ".json", ".flac", ".aac")
 PARTY_CACHE_TTL = 10.0
 PARTY_CALL_TIMEOUT = 5.0
 
+# player_queues.items() serves one page at a time, so a queue longer than this is
+# walked page by page rather than trusted to arrive in one call.
+_QUEUE_SCAN_PAGE = 500
+
 # The local proxy modes encode audio themselves, so they carry the core streamserver's
 # pacing ceiling rather than handing a track over as fast as ffmpeg can produce it.
 # See the usage policy note on SINGLE_ITEM_READRATE.
@@ -108,10 +112,9 @@ async def _is_media_item_uri(uri: str) -> bool:
     resolve to the builtin provider, which would make the server fetch and play whatever
     the caller names, so the resolved provider is what decides rather than the uri text.
 
-    The menus only ever hand out uris of library or music provider items. The MA queue
-    is the exception: whatever the user queued from the MA UI ends up in the queue
-    playlist, so a builtin uri from there is vetted by the caller's own queue instead —
-    see ``MSXHTTPServer._uri_is_in_player_queue``.
+    The menus only ever hand out uris of library or music provider items. Whatever the
+    user queued from the MA interface is vetted against that queue instead, so this
+    answers for the uri text alone.
     """
     if "://" not in uri:
         # keeps an item_id-shaped value away from parse_uri's local-file branch
@@ -2752,24 +2755,27 @@ small {{ color: #666; display: block; margin-top: 4px; }}
 
     def _uri_is_in_player_queue(self, player_id: str, uri: str) -> bool:
         """
-        Check whether the uri is already an item in the player's own queue.
+        Check whether the uri is already an item in the queue this player is playing from.
 
         A queue item's uri was put there by MA rather than by the caller, so it is safe
         to play even when it resolves to the builtin provider — that is how a radio
-        station added by URL reaches a TV.
+        station added by URL reaches a TV. A grouped player follows the leader's queue,
+        which is why the active queue decides rather than the player's own id.
 
         :param player_id: The player whose queue vouches for the uri.
         :param uri: The uri the caller asked to play.
         """
-        try:
-            queue_items = self.provider.mass.player_queues.items(player_id)
-        except Exception:
-            logger.debug("No queue to vouch for %s on %s", uri, player_id, exc_info=True)
+        queue = self.provider.mass.player_queues.get_active_queue(player_id)
+        if queue is None:
             return False
-        return any(
-            getattr(getattr(queue_item, "media_item", None), "uri", None) == uri
-            for queue_item in queue_items
-        )
+        offset = 0
+        while batch := self.provider.mass.player_queues.items(
+            queue.queue_id, limit=_QUEUE_SCAN_PAGE, offset=offset
+        ):
+            if any(item.media_item is not None and item.media_item.uri == uri for item in batch):
+                return True
+            offset += len(batch)
+        return False
 
     def _current_media_matches_uri(self, player: MSXPlayer, track_uri: str) -> bool:
         """Check if player's current_media corresponds to the requested track URI."""
