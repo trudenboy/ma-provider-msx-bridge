@@ -9,6 +9,7 @@ import hashlib
 import io
 import json
 import logging
+import secrets
 import time
 from html import escape as html_escape
 from pathlib import Path
@@ -19,12 +20,18 @@ from urllib.parse import quote, urlsplit, urlunsplit
 import aiohttp
 from aiohttp import WSMsgType, web
 from music_assistant_models.enums import ContentType
+from music_assistant_models.errors import InvalidProviderURI
 from music_assistant_models.media_items import AudioFormat, Track
 
 from music_assistant.constants import SENDSPIN_SERVER_PORT
 from music_assistant.controllers.streams.audio_processing import get_media_session_id
+from music_assistant.controllers.streams.constants import (
+    SINGLE_ITEM_READRATE,
+    SINGLE_ITEM_READRATE_INITIAL_BURST,
+)
 from music_assistant.controllers.webserver.helpers.auth_middleware import ImpersonatedUser
 from music_assistant.helpers.ffmpeg import get_ffmpeg_stream
+from music_assistant.helpers.uri import parse_uri
 from music_assistant.helpers.util import join_task
 
 from .constants import (
@@ -65,6 +72,20 @@ _KNOWN_EXTENSIONS = (".mp3", ".json", ".flac", ".aac")
 PARTY_CACHE_TTL = 10.0
 PARTY_CALL_TIMEOUT = 5.0
 
+# player_queues.items() serves one page at a time, so a queue longer than this is
+# walked page by page rather than trusted to arrive in one call.
+_QUEUE_SCAN_PAGE = 500
+
+# The local proxy modes encode audio themselves, so they carry the core streamserver's
+# pacing ceiling rather than handing a track over as fast as ffmpeg can produce it.
+# See the usage policy note on SINGLE_ITEM_READRATE.
+_READRATE_ARGS = [
+    "-readrate",
+    SINGLE_ITEM_READRATE,
+    "-readrate_initial_burst",
+    SINGLE_ITEM_READRATE_INITIAL_BURST,
+]
+
 
 class PartyInfo(NamedTuple):
     """Active-party details resolved from the MA Party plugin."""
@@ -81,6 +102,33 @@ def _int_param(query: MultiMapping[str], name: str, default: int, max_val: int =
         return max(0, min(int(query.get(name, str(default))), max_val))
     except ValueError, TypeError:
         return default
+
+
+async def _is_media_item_uri(uri: str) -> bool:
+    """
+    Check that a caller-supplied uri names a media item rather than a raw stream URL.
+
+    Both spellings of a raw URL — bare, and wrapped as ``builtin://<media_type>/<url>`` —
+    resolve to the builtin provider, which would make the server fetch and play whatever
+    the caller names, so the resolved provider is what decides rather than the uri text.
+
+    The menus only ever hand out uris of library or music provider items. Whatever the
+    user queued from the MA interface is vetted against that queue instead, so this
+    answers for the uri text alone.
+    """
+    if "://" not in uri:
+        # keeps an item_id-shaped value away from parse_uri's local-file branch
+        return False
+    try:
+        _, provider_instance_id_or_domain, _ = await parse_uri(uri)
+    except InvalidProviderURI:
+        return False
+    return provider_instance_id_or_domain != "builtin"
+
+
+def _is_audio_path(path: str) -> bool:
+    """Check whether the path is one of the audio routes."""
+    return path.startswith(("/stream/", "/msx/audio/"))
 
 
 def _strip_known_extension(value: str) -> str:
@@ -223,7 +271,7 @@ class MSXHTTPServer:
         )
 
         # We always use direct stream for maximum compatibility.
-        play_path = f"/stream/{player_id}"
+        play_path = f"/stream/{player_id}?token={self.provider.get_stream_token(player_id)}"
 
         payload: dict[str, Any] = {
             "type": "play",
@@ -524,6 +572,11 @@ class MSXHTTPServer:
         The web player (/web) and MSX plugin (/msx/plugin.html) are served from the
         same origin, so browser playback-control POSTs are always same-origin.
         MSX TV app only makes GET requests. This matches MA's own webserver pattern.
+
+        The audio routes are the exception and get no header at all: a media element
+        plays a cross-origin source without CORS, and the kiosk visualizer reads the
+        stream same-origin, so withholding it costs nothing and keeps a cross-origin
+        fetch() from reading the audio.
         """
         if request.method == "OPTIONS":
             return web.Response(
@@ -534,7 +587,8 @@ class MSXHTTPServer:
                 }
             )
         response: web.StreamResponse = await handler(request)
-        response.headers["Access-Control-Allow-Origin"] = "*"
+        if not _is_audio_path(request.path):
+            response.headers["Access-Control-Allow-Origin"] = "*"
         return response
 
     # --- MSX Bootstrap Routes ---
@@ -1388,15 +1442,20 @@ small {{ color: #666; display: block; margin-top: 4px; }}
         player_id = _strip_known_extension(request.match_info["player_id"])
 
         uri = request.query.get("uri")
-        if not uri or "://" not in uri:
+        if not uri:
             return web.Response(status=400, text="Invalid uri parameter")
 
         from_playlist = request.query.get("from_playlist") == "1"
 
-        self.provider.on_player_activity(player_id)
         player = self.provider.mass.players.get_player(player_id)
         if not player or not isinstance(player, MSXPlayer):
             return web.Response(status=404, text="Player not found")
+        if rejected := self._reject_invalid_stream_token(request, player_id):
+            return rejected
+        # the queue check runs last so an unauthorized caller learns nothing from it
+        if not await _is_media_item_uri(uri) and not self._uri_is_in_player_queue(player_id, uri):
+            return web.Response(status=400, text="Invalid uri parameter")
+        self.provider.on_player_activity(player_id)
 
         # When MA is driving the queue (next/prev from MA UI), current_media is
         # already set by player.play_media() before the WS goto_index reaches MSX.
@@ -1663,6 +1722,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
                 input_format=pcm_format,
                 output_format=out_format,
                 filter_params=output_plan.filter_params,
+                extra_input_args=_READRATE_ARGS,
             )
             shared_stream = await self.provider.get_or_create_shared_stream(
                 group_id, media_uri, audio_chunks
@@ -1803,6 +1863,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
                     input_format=pcm_format,
                     output_format=out_format,
                     filter_params=filter_params,
+                    extra_input_args=_READRATE_ARGS,
                 ):
                     await chunk_queue.put(chunk)
             finally:
@@ -2029,10 +2090,12 @@ small {{ color: #666; display: block; margin-top: 4px; }}
         """Stream audio from MA to the TV using internal API."""
         player_id = _strip_known_extension(request.match_info["player_id"])
 
-        self.provider.on_player_activity(player_id)
         player = self.provider.mass.players.get_player(player_id)
         if not player or not isinstance(player, MSXPlayer):
             return web.Response(status=404, text="Player not found")
+        if rejected := self._reject_invalid_stream_token(request, player_id):
+            return rejected
+        self.provider.on_player_activity(player_id)
 
         media = player.current_media
         if not media:
@@ -2496,6 +2559,22 @@ small {{ color: #666; display: block; margin-top: 4px; }}
 
     # --- Playback Control ---
 
+    def _reject_invalid_stream_token(
+        self, request: web.Request, player_id: str
+    ) -> web.Response | None:
+        """
+        Reject an audio request that does not carry the player's own stream token.
+
+        A TV cannot send an auth header, so the token travels in the URL the bridge
+        itself generated. This stops a request that was never handed out — a web page
+        firing an <audio> tag at this LAN server. A URL that was handed out stays valid
+        until the provider reloads, so this is not a defence against a captured URL.
+        """
+        expected = self.provider.get_stream_token(player_id)
+        if not secrets.compare_digest(request.query.get("token", ""), expected):
+            return web.Response(status=403, text="Invalid or missing stream token")
+        return None
+
     @staticmethod
     def _reject_cross_site(request: web.Request) -> web.Response | None:
         """
@@ -2522,8 +2601,13 @@ small {{ color: #666; display: block; margin-top: 4px; }}
 
         track_uri = body.get("track_uri")
         player_id = body.get("player_id")
+        # the body is untyped JSON, so the type matters as much as the presence
+        if not isinstance(track_uri, str) or not isinstance(player_id, str):
+            return web.json_response({"error": "Invalid track_uri or player_id"}, status=400)
         if not track_uri or not player_id:
             return web.json_response({"error": "Missing track_uri or player_id"}, status=400)
+        if not await _is_media_item_uri(track_uri):
+            return web.json_response({"error": "Invalid track_uri"}, status=400)
 
         if self._get_msx_player(player_id) is None:
             return web.json_response({"error": "Unknown MSX player"}, status=404)
@@ -2668,6 +2752,30 @@ small {{ color: #666; display: block; margin-top: 4px; }}
             player_id, display_name=display_name, ip_address=remote_ip
         )
         return player_id, device_param, player
+
+    def _uri_is_in_player_queue(self, player_id: str, uri: str) -> bool:
+        """
+        Check whether the uri is already an item in the queue this player is playing from.
+
+        A queue item's uri was put there by MA rather than by the caller, so it is safe
+        to play even when it resolves to the builtin provider — that is how a radio
+        station added by URL reaches a TV. A grouped player follows the leader's queue,
+        which is why the active queue decides rather than the player's own id.
+
+        :param player_id: The player whose queue vouches for the uri.
+        :param uri: The uri the caller asked to play.
+        """
+        queue = self.provider.mass.player_queues.get_active_queue(player_id)
+        if queue is None:
+            return False
+        offset = 0
+        while batch := self.provider.mass.player_queues.items(
+            queue.queue_id, limit=_QUEUE_SCAN_PAGE, offset=offset
+        ):
+            if any(item.media_item is not None and item.media_item.uri == uri for item in batch):
+                return True
+            offset += len(batch)
+        return False
 
     def _current_media_matches_uri(self, player: MSXPlayer, track_uri: str) -> bool:
         """Check if player's current_media corresponds to the requested track URI."""

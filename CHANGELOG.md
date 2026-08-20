@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.10] - 2026-08-20
+
+### Changed
+
+- The local proxy playback modes now pace their output at the same ceiling as the main Music Assistant stream server.
+
+### Fixed
+
+- Tracks queued from the Music Assistant interface that stream from a plain URL, such as a manually added radio station, play on the TV again instead of being refused by the new audio checks. This also holds for a TV playing as part of a group and for entries far down a long queue.
+
+### Security
+
+- Fetching audio now requires a token that the bridge puts in the URLs it hands out, so a request that was never handed one is refused.
+- Audio requests naming a plain stream address are refused, closing a path that made the server fetch and play an arbitrary URL.
+- Audio responses no longer carry a permissive cross-origin header, so another site cannot read the audio stream.
+
 ## [1.4.9] - 2026-08-11
 
 ### Changed
