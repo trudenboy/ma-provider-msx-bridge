@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.11] - 2026-08-21
+
+### Fixed
+
+- Consecutive URL-backed radio and audio-source items selected from an existing Music Assistant queue now play without replacing the rest of that queue, preserving next/previous playback and grouped-TV queues.
+
 ## [1.4.10] - 2026-08-20
 
 ### Changed

@@ -20,7 +20,7 @@ from urllib.parse import quote, urlsplit, urlunsplit
 import aiohttp
 from aiohttp import WSMsgType, web
 from music_assistant_models.enums import ContentType
-from music_assistant_models.errors import InvalidProviderURI
+from music_assistant_models.errors import InvalidProviderURI, MusicAssistantError
 from music_assistant_models.media_items import AudioFormat, Track
 
 from music_assistant.constants import SENDSPIN_SERVER_PORT
@@ -72,10 +72,6 @@ _KNOWN_EXTENSIONS = (".mp3", ".json", ".flac", ".aac")
 PARTY_CACHE_TTL = 10.0
 PARTY_CALL_TIMEOUT = 5.0
 
-# player_queues.items() serves one page at a time, so a queue longer than this is
-# walked page by page rather than trusted to arrive in one call.
-_QUEUE_SCAN_PAGE = 500
-
 # The local proxy modes encode audio themselves, so they carry the core streamserver's
 # pacing ceiling rather than handing a track over as fast as ffmpeg can produce it.
 # See the usage policy note on SINGLE_ITEM_READRATE.
@@ -105,17 +101,7 @@ def _int_param(query: MultiMapping[str], name: str, default: int, max_val: int =
 
 
 async def _is_media_item_uri(uri: str) -> bool:
-    """
-    Check that a caller-supplied uri names a media item rather than a raw stream URL.
-
-    Both spellings of a raw URL — bare, and wrapped as ``builtin://<media_type>/<url>`` —
-    resolve to the builtin provider, which would make the server fetch and play whatever
-    the caller names, so the resolved provider is what decides rather than the uri text.
-
-    The menus only ever hand out uris of library or music provider items. Whatever the
-    user queued from the MA interface is vetted against that queue instead, so this
-    answers for the uri text alone.
-    """
+    """Check whether a URI names a non-builtin media item."""
     if "://" not in uri:
         # keeps an item_id-shaped value away from parse_uri's local-file branch
         return False
@@ -162,8 +148,11 @@ def _stamp_qr_on_cover(cover_bytes: bytes, qr_bytes: bytes) -> bytes:
     """Composite the QR into the cover's bottom-right corner; returns PNG bytes."""
     from PIL import Image  # noqa: PLC0415  # only needed when the Party plugin is used
 
-    cover = Image.open(io.BytesIO(cover_bytes)).convert("RGB")
-    qr = Image.open(io.BytesIO(qr_bytes)).convert("RGB")
+    try:
+        cover = Image.open(io.BytesIO(cover_bytes)).convert("RGB")
+        qr = Image.open(io.BytesIO(qr_bytes)).convert("RGB")
+    except Image.DecompressionBombError as err:
+        raise ValueError("image exceeds Pillow decompression limit") from err
     # ~28% of the smaller cover side keeps the QR scannable without hiding the art;
     # NEAREST preserves the hard module edges QR readers need.
     side = max(48, min(cover.width, cover.height) * 28 // 100)
@@ -374,7 +363,7 @@ class MSXHTTPServer:
             if not task.done():
                 task.cancel()
         for transport in transports:
-            with contextlib.suppress(Exception):
+            with contextlib.suppress(OSError, RuntimeError):
                 if transport and hasattr(transport, "abort"):
                     transport.abort()
         if tasks or transports:
@@ -857,7 +846,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
                 ),
                 timeout=10.0,
             )
-        except Exception:
+        except MusicAssistantError, TimeoutError:
             logger.exception("Failed to fetch albums")
             albums = []
 
@@ -888,7 +877,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
                 ),
                 timeout=10.0,
             )
-        except Exception:
+        except MusicAssistantError, TimeoutError:
             logger.exception("Failed to fetch artists")
             artists = []
 
@@ -917,7 +906,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
                 ),
                 timeout=10.0,
             )
-        except Exception:
+        except MusicAssistantError, TimeoutError:
             logger.exception("Failed to fetch playlists")
             playlists = []
 
@@ -946,7 +935,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
                 ),
                 timeout=10.0,
             )
-        except Exception:
+        except MusicAssistantError, TimeoutError:
             logger.exception("Failed to fetch tracks")
             tracks = []
 
@@ -986,7 +975,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
                 ),
                 timeout=10.0,
             )
-        except Exception:
+        except MusicAssistantError, TimeoutError:
             logger.exception("Failed to fetch recently played tracks")
             tracks = []
         playlist_base = f"{prefix}/msx/playlist/recently-played.json"
@@ -1189,7 +1178,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
             tracks = _sort_album_tracks(
                 await self.provider.mass.music.albums.tracks(item_id, provider)
             )
-        except Exception:
+        except MusicAssistantError, TimeoutError:
             logger.exception("Failed to fetch tracks for album %s", item_id)
             tracks = []
         playlist_base = f"{prefix}/msx/playlist/album/{item_id}.json?provider={provider}"
@@ -1224,7 +1213,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
         item_id = request.match_info["item_id"]
         try:
             albums = await self.provider.mass.music.artists.albums(item_id, "library")
-        except Exception:
+        except MusicAssistantError, TimeoutError:
             logger.exception("Failed to fetch albums for artist %s", item_id)
             albums = []
 
@@ -1252,7 +1241,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
             tracks = [
                 t async for t in self.provider.mass.music.playlists.tracks(item_id, "library")
             ]
-        except Exception:
+        except MusicAssistantError, TimeoutError:
             logger.exception("Failed to fetch tracks for playlist %s", item_id)
             tracks = []
         playlist_base = f"{prefix}/msx/playlist/playlist/{item_id}.json"
@@ -1293,7 +1282,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
             tracks = _sort_album_tracks(
                 await self.provider.mass.music.albums.tracks(item_id, provider_name)
             )
-        except Exception:
+        except MusicAssistantError, TimeoutError:
             logger.exception("Failed to fetch tracks for album playlist %s", item_id)
             tracks = []
         playlist = map_tracks_to_msx_playlist(
@@ -1317,7 +1306,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
             tracks = [
                 t async for t in self.provider.mass.music.playlists.tracks(item_id, "library")
             ]
-        except Exception:
+        except MusicAssistantError, TimeoutError:
             logger.exception("Failed to fetch tracks for playlist playlist %s", item_id)
             tracks = []
         playlist = map_tracks_to_msx_playlist(
@@ -1404,11 +1393,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
         queue_id = request.query.get("queue_id", player_id)
         start = _int_param(request.query, "start", 0)
 
-        try:
-            queue_items = self.provider.mass.player_queues.items(queue_id)
-        except Exception:
-            logger.exception("Failed to fetch queue items for %s", player_id)
-            queue_items = []
+        queue_items = self.provider.mass.player_queues.items(queue_id)
 
         # Convert QueueItems to track-like objects for map_tracks_to_msx_playlist
         tracks: list[Any] = []
@@ -1421,6 +1406,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
                     duration=getattr(mi, "duration", None) or getattr(qi, "duration", 0) or 0,
                     artist_str=getattr(mi, "artist_str", "") if mi else "",
                     image=getattr(qi, "image", None),
+                    queue_item_id=getattr(qi, "queue_item_id", None),
                 )
             )
 
@@ -1446,15 +1432,19 @@ small {{ color: #666; display: block; margin-top: 4px; }}
             return web.Response(status=400, text="Invalid uri parameter")
 
         from_playlist = request.query.get("from_playlist") == "1"
+        requested_queue_item_id = request.query.get("queue_item_id")
 
         player = self.provider.mass.players.get_player(player_id)
         if not player or not isinstance(player, MSXPlayer):
             return web.Response(status=404, text="Player not found")
         if rejected := self._reject_invalid_stream_token(request, player_id):
             return rejected
-        # the queue check runs last so an unauthorized caller learns nothing from it
-        if not await _is_media_item_uri(uri) and not self._uri_is_in_player_queue(player_id, uri):
-            return web.Response(status=400, text="Invalid uri parameter")
+        queue_item: tuple[str, str] | None = None
+        if not await _is_media_item_uri(uri):
+            # The queue check runs last so an unauthorized caller learns nothing from it.
+            queue_item = self._find_uri_in_active_queue(player_id, uri, requested_queue_item_id)
+            if queue_item is None:
+                return web.Response(status=400, text="Invalid uri parameter")
         self.provider.on_player_activity(player_id)
 
         # When MA is driving the queue (next/prev from MA UI), current_media is
@@ -1465,7 +1455,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
         if (
             from_playlist
             and player._playing_from_queue
-            and self._current_media_matches_uri(player, uri)
+            and self._current_media_matches_uri(player, uri, requested_queue_item_id)
         ):
             logger.debug("Queue-driven: using current_media for %s", uri)
             media = player.current_media
@@ -1481,7 +1471,10 @@ small {{ color: #666; display: block; margin-top: 4px; }}
                 async with ImpersonatedUser(
                     self.provider.mass, await self.provider.get_owner_username()
                 ):
-                    await self.provider.mass.player_queues.play_media(player_id, uri)
+                    if queue_item is not None:
+                        await self.provider.mass.player_queues.play_index(*queue_item)
+                    else:
+                        await self.provider.mass.player_queues.play_media(player_id, uri)
             finally:
                 if from_playlist:
                     player._skip_ws_notify = False
@@ -1940,7 +1933,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
             await stream_task
         except asyncio.CancelledError:
             raise
-        except Exception:
+        except MusicAssistantError, OSError, RuntimeError:
             logger.exception("Stream error for player %s", player_id)
         finally:
             self._unregister_stream(player_id, stream_task, transport)
@@ -2025,7 +2018,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
         """Send text to WebSocket; on failure warn and remove the stale client."""
         try:
             await ws.send_str(text)
-        except Exception as exc:
+        except (aiohttp.ClientConnectionError, RuntimeError) as exc:
             logger.warning("WebSocket send failed (player=%s): %s", player_id, exc)
             if player_id:
                 self._ws_clients.get(player_id, set()).discard(ws)
@@ -2305,7 +2298,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
             return empty
         try:
             lyrics, lrc_lyrics = await self.provider.mass.metadata.get_track_lyrics(track)
-        except Exception:
+        except MusicAssistantError, TimeoutError:
             lyrics, lrc_lyrics = None, None
 
         return web.json_response(
@@ -2326,11 +2319,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
             return web.json_response({"items": [], "current_index": -1})
 
         queue_id = player_id
-        try:
-            queue_items = self.provider.mass.player_queues.items(queue_id)
-        except Exception:
-            logger.debug("Failed to fetch queue items for player %s", player_id, exc_info=True)
-            queue_items = []
+        queue_items = self.provider.mass.player_queues.items(queue_id)
 
         current_uri = None
         media = player.current_media
@@ -2396,7 +2385,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
                         qr_text=getattr(config, "qr_text", None),
                         qr_version=hashlib.sha256(join_url.encode()).hexdigest()[:12],
                     )
-        except Exception:
+        except MusicAssistantError, RuntimeError, TimeoutError:
             logger.warning("Party plugin status check failed", exc_info=True)
         self._party_cache = (now, info)
         return info
@@ -2457,7 +2446,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
                 # join: a TV dropping its request must not cancel the shared
                 # render — late joiners and the cache still get the result
                 cached = await join_task(self._qr_cover_task(cache_key, image_url, party.join_url))
-            except Exception as err:
+            except (aiohttp.ClientError, OSError, RuntimeError, ValueError) as err:
                 logger.debug("QR cover composite failed for %s: %s", image_url, err)
                 raise web.HTTPFound(location=image_url) from None
         return web.Response(
@@ -2596,7 +2585,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
             return rejected
         try:
             body = await request.json()
-        except Exception:
+        except json.JSONDecodeError, UnicodeDecodeError:
             return web.json_response({"error": "Invalid JSON body"}, status=400)
 
         track_uri = body.get("track_uri")
@@ -2753,34 +2742,35 @@ small {{ color: #666; display: block; margin-top: 4px; }}
         )
         return player_id, device_param, player
 
-    def _uri_is_in_player_queue(self, player_id: str, uri: str) -> bool:
-        """
-        Check whether the uri is already an item in the queue this player is playing from.
-
-        A queue item's uri was put there by MA rather than by the caller, so it is safe
-        to play even when it resolves to the builtin provider — that is how a radio
-        station added by URL reaches a TV. A grouped player follows the leader's queue,
-        which is why the active queue decides rather than the player's own id.
-
-        :param player_id: The player whose queue vouches for the uri.
-        :param uri: The uri the caller asked to play.
-        """
+    def _find_uri_in_active_queue(
+        self, player_id: str, uri: str, queue_item_id: str | None = None
+    ) -> tuple[str, str] | None:
+        """Return the active queue and item IDs matching the request."""
+        # A grouped player follows its leader, so the active queue supplies both IDs.
         queue = self.provider.mass.player_queues.get_active_queue(player_id)
         if queue is None:
-            return False
-        offset = 0
-        while batch := self.provider.mass.player_queues.items(
-            queue.queue_id, limit=_QUEUE_SCAN_PAGE, offset=offset
-        ):
-            if any(item.media_item is not None and item.media_item.uri == uri for item in batch):
-                return True
-            offset += len(batch)
-        return False
+            return None
+        items = self.provider.mass.player_queues.items(queue.queue_id, limit=queue.items)
+        for item in items:
+            if (
+                item.media_item is not None
+                and item.media_item.uri == uri
+                and (queue_item_id is None or item.queue_item_id == queue_item_id)
+            ):
+                return queue.queue_id, item.queue_item_id
+        return None
 
-    def _current_media_matches_uri(self, player: MSXPlayer, track_uri: str) -> bool:
-        """Check if player's current_media corresponds to the requested track URI."""
+    def _current_media_matches_uri(
+        self,
+        player: MSXPlayer,
+        track_uri: str,
+        queue_item_id: str | None = None,
+    ) -> bool:
+        """Check whether current media matches the requested queue item."""
         media = player.current_media
         if not media or not media.source_id or not media.queue_item_id:
+            return False
+        if queue_item_id is not None and media.queue_item_id != queue_item_id:
             return False
         queue_item = self.provider.mass.player_queues.get_item(media.source_id, media.queue_item_id)
         if queue_item and queue_item.media_item:
