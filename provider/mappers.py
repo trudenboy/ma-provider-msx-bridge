@@ -105,12 +105,15 @@ def _build_audio_action(
     token: str,
     device_param: str = "",
     from_playlist: bool = False,
+    queue_item_id: str | None = None,
 ) -> str:
     """Build audio action URL for MSX playback."""
     # Standard HTTP streaming mode
     audio_url = f"{prefix}/msx/audio/{player_id}?uri={quote(track_uri, safe='')}&token={token}"
     if from_playlist:
         audio_url += "&from_playlist=1"
+    if queue_item_id is not None:
+        audio_url += f"&queue_item_id={quote(queue_item_id, safe='')}"
     audio_url = append_device_param(audio_url, device_param)
     return f"audio:{audio_url}"
 
@@ -209,6 +212,11 @@ def map_tracks_to_msx_playlist(
             token=token,
             device_param=device_param,
             from_playlist=True,
+            queue_item_id=(
+                track.queue_item_id
+                if isinstance(getattr(track, "queue_item_id", None), str)
+                else None
+            ),
         )
 
         msx_items.append(

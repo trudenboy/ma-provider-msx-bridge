@@ -372,6 +372,33 @@ async def test_qr_cover_fetch_failure_redirects(
         await client.close()
 
 
+async def test_qr_cover_decompression_bomb_redirects(
+    provider: MSXBridgeProvider,
+    mass_mock: Mock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An oversized Pillow image degrades to the original cover redirect."""
+    mass_mock.get_provider = Mock(return_value=_party_mock())
+    mass_mock.webserver.base_url = "http://ma.local:8095"
+    mass_mock.http_session = _http_session_mock(_black_cover_png())
+    monkeypatch.setattr(
+        Image,
+        "open",
+        Mock(side_effect=Image.DecompressionBombError("oversized cover")),
+    )
+    server = MSXHTTPServer(provider, 0)
+    client = AiohttpTestClient(TestServer(server.app))
+    await client.start_server()
+    try:
+        resp = await client.get(
+            "/api/party/qr-cover.png", params={"image": COVER_URL}, allow_redirects=False
+        )
+        assert resp.status == 302
+        assert resp.headers["Location"] == COVER_URL
+    finally:
+        await client.close()
+
+
 # --- Playlist background wiring ---
 
 

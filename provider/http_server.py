@@ -148,8 +148,11 @@ def _stamp_qr_on_cover(cover_bytes: bytes, qr_bytes: bytes) -> bytes:
     """Composite the QR into the cover's bottom-right corner; returns PNG bytes."""
     from PIL import Image  # noqa: PLC0415  # only needed when the Party plugin is used
 
-    cover = Image.open(io.BytesIO(cover_bytes)).convert("RGB")
-    qr = Image.open(io.BytesIO(qr_bytes)).convert("RGB")
+    try:
+        cover = Image.open(io.BytesIO(cover_bytes)).convert("RGB")
+        qr = Image.open(io.BytesIO(qr_bytes)).convert("RGB")
+    except Image.DecompressionBombError as err:
+        raise ValueError("image exceeds Pillow decompression limit") from err
     # ~28% of the smaller cover side keeps the QR scannable without hiding the art;
     # NEAREST preserves the hard module edges QR readers need.
     side = max(48, min(cover.width, cover.height) * 28 // 100)
@@ -1403,6 +1406,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
                     duration=getattr(mi, "duration", None) or getattr(qi, "duration", 0) or 0,
                     artist_str=getattr(mi, "artist_str", "") if mi else "",
                     image=getattr(qi, "image", None),
+                    queue_item_id=getattr(qi, "queue_item_id", None),
                 )
             )
 
@@ -1428,6 +1432,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
             return web.Response(status=400, text="Invalid uri parameter")
 
         from_playlist = request.query.get("from_playlist") == "1"
+        requested_queue_item_id = request.query.get("queue_item_id")
 
         player = self.provider.mass.players.get_player(player_id)
         if not player or not isinstance(player, MSXPlayer):
@@ -1437,7 +1442,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
         queue_item: tuple[str, str] | None = None
         if not await _is_media_item_uri(uri):
             # The queue check runs last so an unauthorized caller learns nothing from it.
-            queue_item = self._find_uri_in_active_queue(player_id, uri)
+            queue_item = self._find_uri_in_active_queue(player_id, uri, requested_queue_item_id)
             if queue_item is None:
                 return web.Response(status=400, text="Invalid uri parameter")
         self.provider.on_player_activity(player_id)
@@ -1450,7 +1455,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
         if (
             from_playlist
             and player._playing_from_queue
-            and self._current_media_matches_uri(player, uri)
+            and self._current_media_matches_uri(player, uri, requested_queue_item_id)
         ):
             logger.debug("Queue-driven: using current_media for %s", uri)
             media = player.current_media
@@ -2737,22 +2742,35 @@ small {{ color: #666; display: block; margin-top: 4px; }}
         )
         return player_id, device_param, player
 
-    def _find_uri_in_active_queue(self, player_id: str, uri: str) -> tuple[str, str] | None:
-        """Return the active queue and item IDs for the first matching URI."""
+    def _find_uri_in_active_queue(
+        self, player_id: str, uri: str, queue_item_id: str | None = None
+    ) -> tuple[str, str] | None:
+        """Return the active queue and item IDs matching the request."""
         # A grouped player follows its leader, so the active queue supplies both IDs.
         queue = self.provider.mass.player_queues.get_active_queue(player_id)
         if queue is None:
             return None
         items = self.provider.mass.player_queues.items(queue.queue_id, limit=queue.items)
         for item in items:
-            if item.media_item is not None and item.media_item.uri == uri:
+            if (
+                item.media_item is not None
+                and item.media_item.uri == uri
+                and (queue_item_id is None or item.queue_item_id == queue_item_id)
+            ):
                 return queue.queue_id, item.queue_item_id
         return None
 
-    def _current_media_matches_uri(self, player: MSXPlayer, track_uri: str) -> bool:
-        """Check if player's current_media corresponds to the requested track URI."""
+    def _current_media_matches_uri(
+        self,
+        player: MSXPlayer,
+        track_uri: str,
+        queue_item_id: str | None = None,
+    ) -> bool:
+        """Check whether current media matches the requested queue item."""
         media = player.current_media
         if not media or not media.source_id or not media.queue_item_id:
+            return False
+        if queue_item_id is not None and media.queue_item_id != queue_item_id:
             return False
         queue_item = self.provider.mass.player_queues.get_item(media.source_id, media.queue_item_id)
         if queue_item and queue_item.media_item:
