@@ -20,7 +20,7 @@ from urllib.parse import quote, urlsplit, urlunsplit
 import aiohttp
 from aiohttp import WSMsgType, web
 from music_assistant_models.enums import ContentType
-from music_assistant_models.errors import InvalidProviderURI
+from music_assistant_models.errors import InvalidProviderURI, MusicAssistantError
 from music_assistant_models.media_items import AudioFormat, Track
 
 from music_assistant.constants import SENDSPIN_SERVER_PORT
@@ -360,7 +360,7 @@ class MSXHTTPServer:
             if not task.done():
                 task.cancel()
         for transport in transports:
-            with contextlib.suppress(Exception):
+            with contextlib.suppress(OSError, RuntimeError):
                 if transport and hasattr(transport, "abort"):
                     transport.abort()
         if tasks or transports:
@@ -843,7 +843,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
                 ),
                 timeout=10.0,
             )
-        except Exception:
+        except MusicAssistantError, TimeoutError:
             logger.exception("Failed to fetch albums")
             albums = []
 
@@ -874,7 +874,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
                 ),
                 timeout=10.0,
             )
-        except Exception:
+        except MusicAssistantError, TimeoutError:
             logger.exception("Failed to fetch artists")
             artists = []
 
@@ -903,7 +903,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
                 ),
                 timeout=10.0,
             )
-        except Exception:
+        except MusicAssistantError, TimeoutError:
             logger.exception("Failed to fetch playlists")
             playlists = []
 
@@ -932,7 +932,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
                 ),
                 timeout=10.0,
             )
-        except Exception:
+        except MusicAssistantError, TimeoutError:
             logger.exception("Failed to fetch tracks")
             tracks = []
 
@@ -972,7 +972,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
                 ),
                 timeout=10.0,
             )
-        except Exception:
+        except MusicAssistantError, TimeoutError:
             logger.exception("Failed to fetch recently played tracks")
             tracks = []
         playlist_base = f"{prefix}/msx/playlist/recently-played.json"
@@ -1175,7 +1175,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
             tracks = _sort_album_tracks(
                 await self.provider.mass.music.albums.tracks(item_id, provider)
             )
-        except Exception:
+        except MusicAssistantError, TimeoutError:
             logger.exception("Failed to fetch tracks for album %s", item_id)
             tracks = []
         playlist_base = f"{prefix}/msx/playlist/album/{item_id}.json?provider={provider}"
@@ -1210,7 +1210,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
         item_id = request.match_info["item_id"]
         try:
             albums = await self.provider.mass.music.artists.albums(item_id, "library")
-        except Exception:
+        except MusicAssistantError, TimeoutError:
             logger.exception("Failed to fetch albums for artist %s", item_id)
             albums = []
 
@@ -1238,7 +1238,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
             tracks = [
                 t async for t in self.provider.mass.music.playlists.tracks(item_id, "library")
             ]
-        except Exception:
+        except MusicAssistantError, TimeoutError:
             logger.exception("Failed to fetch tracks for playlist %s", item_id)
             tracks = []
         playlist_base = f"{prefix}/msx/playlist/playlist/{item_id}.json"
@@ -1279,7 +1279,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
             tracks = _sort_album_tracks(
                 await self.provider.mass.music.albums.tracks(item_id, provider_name)
             )
-        except Exception:
+        except MusicAssistantError, TimeoutError:
             logger.exception("Failed to fetch tracks for album playlist %s", item_id)
             tracks = []
         playlist = map_tracks_to_msx_playlist(
@@ -1303,7 +1303,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
             tracks = [
                 t async for t in self.provider.mass.music.playlists.tracks(item_id, "library")
             ]
-        except Exception:
+        except MusicAssistantError, TimeoutError:
             logger.exception("Failed to fetch tracks for playlist playlist %s", item_id)
             tracks = []
         playlist = map_tracks_to_msx_playlist(
@@ -1390,11 +1390,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
         queue_id = request.query.get("queue_id", player_id)
         start = _int_param(request.query, "start", 0)
 
-        try:
-            queue_items = self.provider.mass.player_queues.items(queue_id)
-        except Exception:
-            logger.exception("Failed to fetch queue items for %s", player_id)
-            queue_items = []
+        queue_items = self.provider.mass.player_queues.items(queue_id)
 
         # Convert QueueItems to track-like objects for map_tracks_to_msx_playlist
         tracks: list[Any] = []
@@ -1932,7 +1928,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
             await stream_task
         except asyncio.CancelledError:
             raise
-        except Exception:
+        except MusicAssistantError, OSError, RuntimeError:
             logger.exception("Stream error for player %s", player_id)
         finally:
             self._unregister_stream(player_id, stream_task, transport)
@@ -2017,7 +2013,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
         """Send text to WebSocket; on failure warn and remove the stale client."""
         try:
             await ws.send_str(text)
-        except Exception as exc:
+        except (aiohttp.ClientConnectionError, RuntimeError) as exc:
             logger.warning("WebSocket send failed (player=%s): %s", player_id, exc)
             if player_id:
                 self._ws_clients.get(player_id, set()).discard(ws)
@@ -2297,7 +2293,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
             return empty
         try:
             lyrics, lrc_lyrics = await self.provider.mass.metadata.get_track_lyrics(track)
-        except Exception:
+        except MusicAssistantError, TimeoutError:
             lyrics, lrc_lyrics = None, None
 
         return web.json_response(
@@ -2318,11 +2314,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
             return web.json_response({"items": [], "current_index": -1})
 
         queue_id = player_id
-        try:
-            queue_items = self.provider.mass.player_queues.items(queue_id)
-        except Exception:
-            logger.debug("Failed to fetch queue items for player %s", player_id, exc_info=True)
-            queue_items = []
+        queue_items = self.provider.mass.player_queues.items(queue_id)
 
         current_uri = None
         media = player.current_media
@@ -2388,7 +2380,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
                         qr_text=getattr(config, "qr_text", None),
                         qr_version=hashlib.sha256(join_url.encode()).hexdigest()[:12],
                     )
-        except Exception:
+        except MusicAssistantError, RuntimeError, TimeoutError:
             logger.warning("Party plugin status check failed", exc_info=True)
         self._party_cache = (now, info)
         return info
@@ -2449,7 +2441,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
                 # join: a TV dropping its request must not cancel the shared
                 # render — late joiners and the cache still get the result
                 cached = await join_task(self._qr_cover_task(cache_key, image_url, party.join_url))
-            except Exception as err:
+            except (aiohttp.ClientError, OSError, RuntimeError, ValueError) as err:
                 logger.debug("QR cover composite failed for %s: %s", image_url, err)
                 raise web.HTTPFound(location=image_url) from None
         return web.Response(
@@ -2588,7 +2580,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
             return rejected
         try:
             body = await request.json()
-        except Exception:
+        except json.JSONDecodeError, UnicodeDecodeError:
             return web.json_response({"error": "Invalid JSON body"}, status=400)
 
         track_uri = body.get("track_uri")

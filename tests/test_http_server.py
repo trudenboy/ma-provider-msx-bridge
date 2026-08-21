@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 import shutil
@@ -11,10 +12,12 @@ from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock, Mock, call, patch
 from urllib.parse import quote, urlsplit
 
+import aiohttp
 import pytest
 from aiohttp.test_utils import TestClient as AiohttpTestClient
 from aiohttp.test_utils import TestServer
 from music_assistant_models.enums import PlaybackState
+from music_assistant_models.errors import MusicAssistantError
 from music_assistant_models.player import PlayerMedia
 
 from music_assistant.providers.msx_bridge.http_server import STATIC_DIR, MSXHTTPServer
@@ -361,6 +364,58 @@ async def test_search_missing_query(http_client: TestClient[Any, Any]) -> None:
     assert resp.status == 400
     data = await resp.json()
     assert "error" in data
+
+
+@pytest.mark.parametrize("error_type", [MusicAssistantError, TimeoutError])
+@pytest.mark.parametrize(
+    ("route", "controller_name", "method_name", "async_method", "has_placeholder"),
+    [
+        ("/msx/albums.json", "albums", "library_items", True, True),
+        ("/msx/artists.json", "artists", "library_items", True, True),
+        ("/msx/playlists.json", "playlists", "library_items", True, True),
+        ("/msx/tracks.json", "tracks", "library_items", True, True),
+        ("/msx/recently-played.json", "tracks", "library_items", True, True),
+        ("/msx/albums/album-1/tracks.json", "albums", "tracks", True, True),
+        ("/msx/artists/artist-1/albums.json", "artists", "albums", True, True),
+        ("/msx/playlists/playlist-1/tracks.json", "playlists", "tracks", False, True),
+        ("/msx/playlist/album/album-1.json", "albums", "tracks", True, False),
+        (
+            "/msx/playlist/playlist/playlist-1.json",
+            "playlists",
+            "tracks",
+            False,
+            False,
+        ),
+    ],
+)
+async def test_msx_library_pages_fail_soft_for_expected_errors(
+    provider: MSXBridgeProvider,
+    mass_mock: Mock,
+    route: str,
+    controller_name: str,
+    method_name: str,
+    async_method: bool,
+    has_placeholder: bool,
+    error_type: type[Exception],
+) -> None:
+    """Expected MA and timeout failures return an empty MSX page."""
+    controller = getattr(mass_mock.music, controller_name)
+    failing_method = (
+        AsyncMock(side_effect=error_type("library unavailable"))
+        if async_method
+        else Mock(side_effect=error_type("library unavailable"))
+    )
+    setattr(controller, method_name, failing_method)
+
+    server = MSXHTTPServer(provider, 0)
+    client = AiohttpTestClient(TestServer(server.app))
+    await client.start_server()
+    try:
+        response = await client.get(route)
+        assert response.status == 200
+        assert bool((await response.json())["items"]) is has_placeholder
+    finally:
+        await client.close()
 
 
 # --- Playback control ---
@@ -783,6 +838,90 @@ async def test_broadcast_play_path_carries_token(
     await coros[0]
     payload = json.loads(ws.send_str.call_args[0][0])
     assert payload["path"] == f"/stream/msx_test?token={token}"
+
+
+# --- Stream and WebSocket error boundaries ---
+
+
+def test_cancel_streams_continues_after_transport_abort_error(
+    provider: MSXBridgeProvider,
+) -> None:
+    """One closing transport must not prevent the remaining transports from aborting."""
+    server = MSXHTTPServer(provider, 0)
+    failing_transport = Mock()
+    failing_transport.abort.side_effect = OSError("already closed")
+    healthy_transport = Mock()
+    server._active_stream_transports["msx_test"] = {
+        failing_transport,
+        healthy_transport,
+    }
+
+    server.cancel_streams_for_player("msx_test")
+
+    failing_transport.abort.assert_called_once_with()
+    healthy_transport.abort.assert_called_once_with()
+
+
+@pytest.mark.parametrize("error_type", [MusicAssistantError, OSError, RuntimeError])
+async def test_run_stream_task_logs_expected_errors_and_unregisters(
+    provider: MSXBridgeProvider,
+    caplog: pytest.LogCaptureFixture,
+    error_type: type[Exception],
+) -> None:
+    """Expected stream failures are logged and always unregistered."""
+    server = MSXHTTPServer(provider, 0)
+
+    async def _fail() -> None:
+        raise error_type("stream failed")
+
+    stream_task = asyncio.create_task(_fail())
+    await server._run_stream_task("msx_test", stream_task, None)
+
+    assert "Stream error for player msx_test" in caplog.text
+    assert "msx_test" not in server._active_stream_tasks
+
+
+async def test_run_stream_task_propagates_unexpected_error_and_unregisters(
+    provider: MSXBridgeProvider,
+) -> None:
+    """Programming errors escape the stream boundary after cleanup."""
+    server = MSXHTTPServer(provider, 0)
+
+    async def _fail() -> None:
+        raise ValueError("bug")
+
+    stream_task = asyncio.create_task(_fail())
+    with pytest.raises(ValueError, match="bug"):
+        await server._run_stream_task("msx_test", stream_task, None)
+
+    assert "msx_test" not in server._active_stream_tasks
+
+
+async def test_ws_send_discards_client_after_connection_error(
+    provider: MSXBridgeProvider,
+) -> None:
+    """A failed WebSocket connection is removed from the subscribed clients."""
+    server = MSXHTTPServer(provider, 0)
+    ws = Mock()
+    ws.send_str = AsyncMock(side_effect=aiohttp.ClientConnectionError("closed"))
+    server._ws_clients["msx_test"] = {ws}
+
+    await server._ws_send(ws, "payload", "msx_test")
+
+    assert ws not in server._ws_clients["msx_test"]
+
+
+async def test_ws_send_propagates_unexpected_error(provider: MSXBridgeProvider) -> None:
+    """Programming errors from WebSocket serialization are not hidden."""
+    server = MSXHTTPServer(provider, 0)
+    ws = Mock()
+    ws.send_str = AsyncMock(side_effect=ValueError("bug"))
+    server._ws_clients["msx_test"] = {ws}
+
+    with pytest.raises(ValueError, match="bug"):
+        await server._ws_send(ws, "payload", "msx_test")
+
+    assert ws in server._ws_clients["msx_test"]
 
 
 # --- MSX audio endpoint ---
