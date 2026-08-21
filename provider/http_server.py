@@ -72,10 +72,6 @@ _KNOWN_EXTENSIONS = (".mp3", ".json", ".flac", ".aac")
 PARTY_CACHE_TTL = 10.0
 PARTY_CALL_TIMEOUT = 5.0
 
-# player_queues.items() serves one page at a time, so a queue longer than this is
-# walked page by page rather than trusted to arrive in one call.
-_QUEUE_SCAN_PAGE = 500
-
 # The local proxy modes encode audio themselves, so they carry the core streamserver's
 # pacing ceiling rather than handing a track over as fast as ffmpeg can produce it.
 # See the usage policy note on SINGLE_ITEM_READRATE.
@@ -105,17 +101,7 @@ def _int_param(query: MultiMapping[str], name: str, default: int, max_val: int =
 
 
 async def _is_media_item_uri(uri: str) -> bool:
-    """
-    Check that a caller-supplied uri names a media item rather than a raw stream URL.
-
-    Both spellings of a raw URL — bare, and wrapped as ``builtin://<media_type>/<url>`` —
-    resolve to the builtin provider, which would make the server fetch and play whatever
-    the caller names, so the resolved provider is what decides rather than the uri text.
-
-    The menus only ever hand out uris of library or music provider items. Whatever the
-    user queued from the MA interface is vetted against that queue instead, so this
-    answers for the uri text alone.
-    """
+    """Check whether a URI names a non-builtin media item."""
     if "://" not in uri:
         # keeps an item_id-shaped value away from parse_uri's local-file branch
         return False
@@ -1452,9 +1438,12 @@ small {{ color: #666; display: block; margin-top: 4px; }}
             return web.Response(status=404, text="Player not found")
         if rejected := self._reject_invalid_stream_token(request, player_id):
             return rejected
-        # the queue check runs last so an unauthorized caller learns nothing from it
-        if not await _is_media_item_uri(uri) and not self._uri_is_in_player_queue(player_id, uri):
-            return web.Response(status=400, text="Invalid uri parameter")
+        queue_item: tuple[str, str] | None = None
+        if not await _is_media_item_uri(uri):
+            # The queue check runs last so an unauthorized caller learns nothing from it.
+            queue_item = self._find_uri_in_active_queue(player_id, uri)
+            if queue_item is None:
+                return web.Response(status=400, text="Invalid uri parameter")
         self.provider.on_player_activity(player_id)
 
         # When MA is driving the queue (next/prev from MA UI), current_media is
@@ -1481,7 +1470,10 @@ small {{ color: #666; display: block; margin-top: 4px; }}
                 async with ImpersonatedUser(
                     self.provider.mass, await self.provider.get_owner_username()
                 ):
-                    await self.provider.mass.player_queues.play_media(player_id, uri)
+                    if queue_item is not None:
+                        await self.provider.mass.player_queues.play_index(*queue_item)
+                    else:
+                        await self.provider.mass.player_queues.play_media(player_id, uri)
             finally:
                 if from_playlist:
                     player._skip_ws_notify = False
@@ -2753,29 +2745,17 @@ small {{ color: #666; display: block; margin-top: 4px; }}
         )
         return player_id, device_param, player
 
-    def _uri_is_in_player_queue(self, player_id: str, uri: str) -> bool:
-        """
-        Check whether the uri is already an item in the queue this player is playing from.
-
-        A queue item's uri was put there by MA rather than by the caller, so it is safe
-        to play even when it resolves to the builtin provider — that is how a radio
-        station added by URL reaches a TV. A grouped player follows the leader's queue,
-        which is why the active queue decides rather than the player's own id.
-
-        :param player_id: The player whose queue vouches for the uri.
-        :param uri: The uri the caller asked to play.
-        """
+    def _find_uri_in_active_queue(self, player_id: str, uri: str) -> tuple[str, str] | None:
+        """Return the active queue and item IDs for the first matching URI."""
+        # A grouped player follows its leader, so the active queue supplies both IDs.
         queue = self.provider.mass.player_queues.get_active_queue(player_id)
         if queue is None:
-            return False
-        offset = 0
-        while batch := self.provider.mass.player_queues.items(
-            queue.queue_id, limit=_QUEUE_SCAN_PAGE, offset=offset
-        ):
-            if any(item.media_item is not None and item.media_item.uri == uri for item in batch):
-                return True
-            offset += len(batch)
-        return False
+            return None
+        items = self.provider.mass.player_queues.items(queue.queue_id, limit=queue.items)
+        for item in items:
+            if item.media_item is not None and item.media_item.uri == uri:
+                return queue.queue_id, item.queue_item_id
+        return None
 
     def _current_media_matches_uri(self, player: MSXPlayer, track_uri: str) -> bool:
         """Check if player's current_media corresponds to the requested track URI."""

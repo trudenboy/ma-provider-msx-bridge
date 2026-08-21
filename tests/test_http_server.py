@@ -8,7 +8,7 @@ import shutil
 import subprocess
 from collections.abc import AsyncGenerator
 from typing import TYPE_CHECKING, Any
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from unittest.mock import AsyncMock, MagicMock, Mock, call, patch
 from urllib.parse import quote, urlsplit
 
 import pytest
@@ -889,9 +889,12 @@ async def test_msx_audio_rejects_missing_token(
         await client.close()
 
 
-def _make_queue_item(uri: str, name: str = "Radio Example") -> Mock:
+def _make_queue_item(
+    uri: str, name: str = "Radio Example", queue_item_id: str = "queue-item-1"
+) -> Mock:
     """Build a queue item mock whose media item carries the given uri."""
     qi = Mock()
+    qi.queue_item_id = queue_item_id
     qi.name = name
     qi.media_item = Mock()
     qi.media_item.name = name
@@ -904,19 +907,63 @@ def _make_queue_item(uri: str, name: str = "Radio Example") -> Mock:
 
 
 def _wire_queue(mass_mock: Mock, queue_items: list[Mock], queue_id: str = "msx_test") -> Mock:
-    """
-    Serve the given items as the player's active queue, one page per call.
-
-    Mirrors the real controller: items are paged, and an unknown queue id yields nothing.
-    """
+    """Serve the given items as the player's active queue."""
 
     def _items(qid: str, limit: int = 500, offset: int = 0) -> list[Mock]:
         return queue_items[offset : offset + limit] if qid == queue_id else []
 
     items_mock = Mock(side_effect=_items)
     mass_mock.player_queues.items = items_mock
-    mass_mock.player_queues.get_active_queue = Mock(return_value=Mock(queue_id=queue_id))
-    return items_mock
+    active_queue = Mock(queue_id=queue_id, items=len(queue_items))
+    mass_mock.player_queues.get_active_queue = Mock(return_value=active_queue)
+    mass_mock.player_queues.play_index = AsyncMock()
+    return active_queue
+
+
+async def test_msx_audio_preserves_two_queued_builtin_items(
+    provider: MSXBridgeProvider, mass_mock: Mock
+) -> None:
+    """Selecting consecutive builtin items must not replace their active queue."""
+    first_uri = "builtin://radio/http://radio.example/first"
+    second_uri = "builtin://radio/http://radio.example/second"
+    queue_items = [
+        _make_queue_item(first_uri, queue_item_id="radio-1"),
+        _make_queue_item(second_uri, queue_item_id="radio-2"),
+    ]
+    active_queue = _wire_queue(mass_mock, queue_items)
+
+    async def _replace_queue(_player_id: str, selected_uri: str) -> None:
+        queue_items[:] = [item for item in queue_items if item.media_item.uri == selected_uri]
+
+    mass_mock.player_queues.play_media = AsyncMock(side_effect=_replace_queue)
+
+    server = MSXHTTPServer(provider, 0)
+    client = AiohttpTestClient(TestServer(server.app))
+    await client.start_server()
+    try:
+        _make_audio_player(mass_mock)
+        token = provider.get_stream_token("msx_test")
+        mass_mock.streams = Mock()
+        mass_mock.streams.get_stream = Mock(return_value=_async_iter([b"pcm"]))
+
+        for uri in (first_uri, second_uri):
+            with patch(
+                "music_assistant.providers.msx_bridge.http_server.get_ffmpeg_stream",
+                return_value=_async_iter([b"encoded"]),
+            ):
+                response = await client.get(
+                    f"/msx/audio/msx_test?uri={quote(uri, safe='')}&token={token}"
+                )
+                assert response.status == 200
+            assert [item.queue_item_id for item in queue_items] == ["radio-1", "radio-2"]
+
+        mass_mock.player_queues.play_media.assert_not_awaited()
+        assert mass_mock.player_queues.play_index.await_args_list == [
+            call(active_queue.queue_id, "radio-1"),
+            call(active_queue.queue_id, "radio-2"),
+        ]
+    finally:
+        await client.close()
 
 
 async def test_queue_playlist_builtin_item_stays_playable(
@@ -951,7 +998,8 @@ async def test_queue_playlist_builtin_item_stays_playable(
             resp = await client.get(f"{audio_url.path}?{audio_url.query}")
             assert resp.status == 200
 
-        mass_mock.player_queues.play_media.assert_awaited_once_with("msx_test", radio_uri)
+        mass_mock.player_queues.play_media.assert_not_awaited()
+        mass_mock.player_queues.play_index.assert_awaited_once_with("msx_test", "queue-item-1")
     finally:
         await client.close()
 
@@ -981,7 +1029,7 @@ async def test_msx_audio_queue_fallback_runs_after_the_token_check(
 ) -> None:
     """An unauthorized caller must not learn what a queue holds."""
     radio_uri = "builtin://radio/http://radio.example/stream"
-    items = _wire_queue(mass_mock, [_make_queue_item(radio_uri)])
+    _wire_queue(mass_mock, [_make_queue_item(radio_uri)])
 
     server = MSXHTTPServer(provider, 0)
     client = AiohttpTestClient(TestServer(server.app))
@@ -990,7 +1038,8 @@ async def test_msx_audio_queue_fallback_runs_after_the_token_check(
         _make_audio_player(mass_mock)
         resp = await client.get(f"/msx/audio/msx_test?uri={quote(radio_uri, safe='')}&token=wrong")
         assert resp.status == 403
-        items.assert_not_called()
+        mass_mock.player_queues.get_active_queue.assert_not_called()
+        mass_mock.player_queues.items.assert_not_called()
         mass_mock.player_queues.play_media.assert_not_called()
     finally:
         await client.close()
@@ -1044,19 +1093,20 @@ async def test_msx_audio_accepts_uri_from_the_group_leaders_queue(
             )
             assert resp.status == 200
 
-        mass_mock.player_queues.play_media.assert_awaited_once_with("msx_test", radio_uri)
+        mass_mock.player_queues.play_media.assert_not_awaited()
+        mass_mock.player_queues.play_index.assert_awaited_once_with("msx_leader", "queue-item-1")
     finally:
         await client.close()
 
 
-async def test_msx_audio_finds_a_uri_past_the_first_queue_page(
+async def test_msx_audio_finds_a_uri_at_the_end_of_a_long_queue(
     provider: MSXBridgeProvider, mass_mock: Mock
 ) -> None:
-    """A long queue is walked page by page instead of trusting one call to hold it all."""
+    """A builtin item at the end of a long active queue remains playable."""
     radio_uri = "builtin://radio/http://radio.example/stream"
     queue_items = [_make_queue_item(f"library://track/{i}") for i in range(500)]
-    queue_items.append(_make_queue_item(radio_uri))
-    items = _wire_queue(mass_mock, queue_items)
+    queue_items.append(_make_queue_item(radio_uri, queue_item_id="radio-501"))
+    _wire_queue(mass_mock, queue_items)
 
     server = MSXHTTPServer(provider, 0)
     client = AiohttpTestClient(TestServer(server.app))
@@ -1075,8 +1125,8 @@ async def test_msx_audio_finds_a_uri_past_the_first_queue_page(
             )
             assert resp.status == 200
 
-        assert items.call_count > 1
-        mass_mock.player_queues.play_media.assert_awaited_once_with("msx_test", radio_uri)
+        mass_mock.player_queues.play_media.assert_not_awaited()
+        mass_mock.player_queues.play_index.assert_awaited_once_with("msx_test", "radio-501")
     finally:
         await client.close()
 
@@ -1084,10 +1134,14 @@ async def test_msx_audio_finds_a_uri_past_the_first_queue_page(
 async def test_msx_audio_queue_scan_skips_items_without_a_media_item(
     provider: MSXBridgeProvider, mass_mock: Mock
 ) -> None:
-    """A queue entry that carries no media item must not break the scan."""
+    """A queue entry without media is skipped before a later matching item."""
+    radio_uri = "builtin://radio/http://radio.example/stream"
     placeholder = _make_queue_item("unused")
     placeholder.media_item = None
-    _wire_queue(mass_mock, [placeholder])
+    _wire_queue(
+        mass_mock,
+        [placeholder, _make_queue_item(radio_uri, queue_item_id="radio-2")],
+    )
 
     server = MSXHTTPServer(provider, 0)
     client = AiohttpTestClient(TestServer(server.app))
@@ -1095,10 +1149,19 @@ async def test_msx_audio_queue_scan_skips_items_without_a_media_item(
     try:
         _make_audio_player(mass_mock)
         token = provider.get_stream_token("msx_test")
-        uri = quote("builtin://radio/http://radio.example/stream", safe="")
-        resp = await client.get(f"/msx/audio/msx_test?uri={uri}&token={token}")
-        assert resp.status == 400
-        mass_mock.player_queues.play_media.assert_not_called()
+        mass_mock.streams = Mock()
+        mass_mock.streams.get_stream = Mock(return_value=_async_iter([b"pcm"]))
+        with patch(
+            "music_assistant.providers.msx_bridge.http_server.get_ffmpeg_stream",
+            return_value=_async_iter([b"encoded"]),
+        ):
+            resp = await client.get(
+                f"/msx/audio/msx_test?uri={quote(radio_uri, safe='')}&token={token}"
+            )
+            assert resp.status == 200
+
+        mass_mock.player_queues.play_media.assert_not_awaited()
+        mass_mock.player_queues.play_index.assert_awaited_once_with("msx_test", "radio-2")
     finally:
         await client.close()
 
