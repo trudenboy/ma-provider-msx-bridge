@@ -1440,7 +1440,12 @@ small {{ color: #666; display: block; margin-top: 4px; }}
         if rejected := self._reject_invalid_stream_token(request, player_id):
             return rejected
         queue_item: tuple[str, str] | None = None
-        if not await _is_media_item_uri(uri):
+        is_media_item_uri = await _is_media_item_uri(uri)
+        if from_playlist and requested_queue_item_id is not None:
+            queue_item = self._find_uri_in_active_queue(player_id, uri, requested_queue_item_id)
+            if queue_item is None:
+                return web.Response(status=400, text="Invalid uri parameter")
+        elif not is_media_item_uri:
             # The queue check runs last so an unauthorized caller learns nothing from it.
             queue_item = self._find_uri_in_active_queue(player_id, uri, requested_queue_item_id)
             if queue_item is None:
@@ -1468,12 +1473,12 @@ small {{ color: #666; display: block; margin-top: 4px; }}
             # play_media() instead of returning the previous track's media.
             player.expect_new_media()
             try:
-                async with ImpersonatedUser(
-                    self.provider.mass, await self.provider.get_owner_username()
-                ):
-                    if queue_item is not None:
-                        await self.provider.mass.player_queues.play_index(*queue_item)
-                    else:
+                if queue_item is not None:
+                    await self.provider.mass.player_queues.play_index(*queue_item)
+                else:
+                    async with ImpersonatedUser(
+                        self.provider.mass, await self.provider.get_owner_username()
+                    ):
                         await self.provider.mass.player_queues.play_media(player_id, uri)
             finally:
                 if from_playlist:

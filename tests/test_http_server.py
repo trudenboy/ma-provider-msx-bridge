@@ -1105,6 +1105,88 @@ async def test_msx_audio_preserves_two_queued_builtin_items(
         await client.close()
 
 
+async def test_msx_audio_retries_preserve_queued_provider_item(
+    provider: MSXBridgeProvider, mass_mock: Mock
+) -> None:
+    """Repeated TV requests must keep a provider item in its existing queue."""
+    previous_uri = "yandex_music://track/previous"
+    selected_uri = "yandex_music://track/selected"
+    queue_items = [
+        _make_queue_item(previous_uri, name="Previous", queue_item_id="previous"),
+        _make_queue_item(selected_uri, name="Selected", queue_item_id="selected"),
+    ]
+    _wire_queue(mass_mock, queue_items)
+
+    player, media = _make_audio_player(mass_mock)
+    player._playing_from_queue = True
+    player.current_media = PlayerMedia(
+        uri=previous_uri,
+        source_id="msx_test",
+        queue_item_id="previous",
+        duration=180,
+    )
+    media.uri = selected_uri
+    media.source_id = "msx_test"
+    media.queue_item_id = "selected"
+
+    def _get_item(_queue_id: str, queue_item_id: str) -> Mock | None:
+        return next(
+            (item for item in queue_items if item.queue_item_id == queue_item_id),
+            None,
+        )
+
+    async def _play_index(_queue_id: str, queue_item_id: str) -> None:
+        player.current_media = PlayerMedia(
+            uri=selected_uri,
+            source_id="msx_test",
+            queue_item_id=queue_item_id,
+            duration=180,
+        )
+
+    async def _play_media(_player_id: str, uri: str) -> None:
+        duplicate_id = f"duplicate-{len(queue_items)}"
+        queue_items.append(_make_queue_item(uri, queue_item_id=duplicate_id))
+        player.current_media = PlayerMedia(
+            uri=uri,
+            source_id="msx_test",
+            queue_item_id=duplicate_id,
+            duration=180,
+        )
+
+    mass_mock.player_queues.get_item = Mock(side_effect=_get_item)
+    mass_mock.player_queues.play_index = AsyncMock(side_effect=_play_index)
+    mass_mock.player_queues.play_media = AsyncMock(side_effect=_play_media)
+    mass_mock.streams = Mock()
+    mass_mock.streams.get_stream = Mock(return_value=_async_iter([b"pcm"]))
+
+    server = MSXHTTPServer(provider, 0)
+    client = AiohttpTestClient(TestServer(server.app))
+    await client.start_server()
+    try:
+        token = provider.get_stream_token("msx_test")
+        request_path = (
+            f"/msx/audio/msx_test?uri={quote(selected_uri, safe='')}"
+            f"&token={token}&from_playlist=1&queue_item_id=selected"
+        )
+        with patch.object(
+            provider,
+            "get_owner_username",
+            AsyncMock(return_value="admin"),
+        ):
+            for _ in range(2):
+                with patch(
+                    "music_assistant.providers.msx_bridge.http_server.get_ffmpeg_stream",
+                    return_value=_async_iter([b"encoded"]),
+                ):
+                    response = await client.get(request_path)
+                    assert response.status == 200
+
+        assert [item.queue_item_id for item in queue_items] == ["previous", "selected"]
+        assert player.current_media.queue_item_id == "selected"
+    finally:
+        await client.close()
+
+
 async def test_queue_playlist_builtin_item_stays_playable(
     provider: MSXBridgeProvider, mass_mock: Mock
 ) -> None:
