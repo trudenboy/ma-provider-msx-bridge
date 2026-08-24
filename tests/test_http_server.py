@@ -526,8 +526,7 @@ async def test_play_context_prefers_start_index_for_duplicate_uri(
     try:
         with patch.object(player, "wait_for_media", AsyncMock(return_value=player.current_media)):
             resp = await client.get(
-                "/api/play-context/msx_test"
-                "?uri=library://album/9&start=2&track=library://track/11"
+                "/api/play-context/msx_test?uri=library://album/9&start=2&track=library://track/11"
             )
         assert resp.status == 200
         mass_mock.player_queues.play_index.assert_awaited_once_with("msx_test", "c")
