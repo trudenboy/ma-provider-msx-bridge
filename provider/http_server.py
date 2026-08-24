@@ -2014,7 +2014,8 @@ small {{ color: #666; display: block; margin-top: 4px; }}
                 target_id = found[1]
         if target_id is None and start > 0 and start < len(items):
             target_id = items[start].queue_item_id
-        if target_id is not None:
+        current_id = getattr(player.current_media, "queue_item_id", None)
+        if target_id is not None and target_id != current_id:
             await self.provider.mass.player_queues.play_index(queue.queue_id, target_id)
 
     def _queue_playlist_action(self, request: web.Request, player_id: str) -> str:
