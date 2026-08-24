@@ -58,6 +58,14 @@ if TYPE_CHECKING:
 _render_qr = render_qr
 _stamp_qr_on_cover = stamp_qr_on_cover
 
+__all__ = [
+    "STATIC_DIR",
+    "MSXHTTPServer",
+    "PartyInfo",
+    "_render_qr",
+    "_stamp_qr_on_cover",
+]
+
 logger = logging.getLogger(__name__)
 
 STATIC_DIR = Path(__file__).parent / "static"

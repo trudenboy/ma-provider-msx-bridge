@@ -454,7 +454,6 @@ async def test_play_context_enqueues_container_then_index(
 ) -> None:
     """GET /api/play-context plays the container, then jumps to start index."""
     player = _register_msx_player(mass_mock, provider, "msx_test")
-    player.wait_for_media = AsyncMock(return_value=player.current_media)
     items = [
         _make_queue_item("library://track/11", queue_item_id="a"),
         _make_queue_item("library://track/12", queue_item_id="b"),
@@ -466,7 +465,8 @@ async def test_play_context_enqueues_container_then_index(
     client = AiohttpTestClient(TestServer(server.app))
     await client.start_server()
     try:
-        resp = await client.get("/api/play-context/msx_test?uri=library://album/9&start=2")
+        with patch.object(player, "wait_for_media", AsyncMock(return_value=player.current_media)):
+            resp = await client.get("/api/play-context/msx_test?uri=library://album/9&start=2")
         assert resp.status == 200
         mass_mock.player_queues.play_media.assert_awaited_once_with("msx_test", "library://album/9")
         mass_mock.player_queues.play_index.assert_awaited_once_with("msx_test", "c")

@@ -18,6 +18,8 @@ from music_assistant_models.enums import ConfigEntryType
 from music_assistant.models.player_provider import PlayerProvider
 
 from .audio_stream import SharedGroupStream
+
+__all__ = ["MSXBridgeProvider", "SharedGroupStream"]
 from .constants import (
     CONF_ENABLE_GROUPING,
     CONF_ENABLE_SENDSPIN_BRIDGE,
