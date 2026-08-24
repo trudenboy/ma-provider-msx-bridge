@@ -21,8 +21,6 @@ def queue_nav_properties(player_id: str, prefix: str = "") -> dict[str, str]:
     next_action = f"execute:{prefix}/api/next/{player_id}"
     prev_action = f"execute:{prefix}/api/previous/{player_id}"
     return {
-        "control:retune": "restart",
-        "progress:position": "0",
         "button:next:icon": "default",
         "button:next:action": next_action,
         "button:prev:icon": "default",

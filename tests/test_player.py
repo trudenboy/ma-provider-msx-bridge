@@ -679,6 +679,34 @@ async def test_update_position_accepts_report_after_seek(player: MSXPlayer) -> N
     assert player._attr_elapsed_time == 121.0
 
 
+async def test_update_position_rebases_after_tv_seek(player: MSXPlayer) -> None:
+    """A forward jump after a fresh report is a TV seek, not a stale clock."""
+    media = Mock(spec=PlayerMedia)
+    media.uri = "library://track/1"
+    media.title = None
+    media.artist = None
+    media.image_url = None
+    media.duration = 180
+    media.stream_duration = None
+    media.source_id = None
+    media.queue_item_id = None
+    with patch.object(player.provider, "notify_play_started"):
+        await player.play_media(media)
+    player.update_position(1.0)
+    player.update_position(80.0)
+    assert player._attr_elapsed_time == 80.0
+
+
+def test_suppress_ws_notify_nests(player: MSXPlayer) -> None:
+    """Overlapping suppress contexts must stay suppressed until the last exit."""
+    with player.suppress_ws_notify():
+        assert player._skip_ws_notify is True
+        with player.suppress_ws_notify():
+            assert player._skip_ws_notify is True
+        assert player._skip_ws_notify is True
+    assert player._skip_ws_notify is False
+
+
 def test_update_position(player: MSXPlayer) -> None:
     """update_position should set elapsed_time and mark WS timestamp when PLAYING."""
     player._attr_playback_state = PlaybackState.PLAYING

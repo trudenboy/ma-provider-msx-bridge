@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.13] - 2026-08-24
+
+### Fixed
+
+- Seeking on the TV itself now updates Music Assistant progress instead of being treated as leftover time from the previous track.
+- Clicking a track that appears more than once in an album or playlist starts that occurrence, not the first match.
+- Grouped TVs no longer keep playing the previous track when the queue moves on.
+- A play request with an unknown JSON charset is rejected as invalid instead of failing as a server error.
+
 ## [1.4.12] - 2026-08-24
 
 ### Changed
