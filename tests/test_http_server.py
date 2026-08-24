@@ -7,7 +7,8 @@ import json
 import re
 import shutil
 import subprocess
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Iterator
+from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock, Mock, call, patch
 from urllib.parse import parse_qs, quote, urlsplit
@@ -732,6 +733,16 @@ def _make_audio_player(mass_mock: Mock) -> tuple[MagicMock, PlayerMedia]:
     player.player_id = "msx_test"
     player.output_format = "mp3"
     player._skip_ws_notify = False
+
+    @contextmanager
+    def _suppress() -> Iterator[None]:
+        player._skip_ws_notify = True
+        try:
+            yield
+        finally:
+            player._skip_ws_notify = False
+
+    player.suppress_ws_notify = _suppress
     media = PlayerMedia(
         uri="library://track/1",
         title=None,
