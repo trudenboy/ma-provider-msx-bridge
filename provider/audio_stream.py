@@ -240,7 +240,7 @@ class SharedGroupStream:
                 )
             async with self._lock:
                 for player_id, q in list(self.subscribers.items()):
-                    _queue_eof(q)
+                    await _queue_eof(q)
                     logger.debug(
                         "[SharedStream:%s] Sent EOF to subscriber %s",
                         self.group_id,
@@ -523,7 +523,7 @@ class AudioPipeline:
                 ):
                     await chunk_queue.put(chunk)
             finally:
-                _queue_eof(chunk_queue)
+                await _queue_eof(chunk_queue)
 
         producer_task: asyncio.Task[None] | None = None
         total_bytes = 0
@@ -611,14 +611,9 @@ class AudioPipeline:
             del self.active_stream_transports[player_id]
 
 
-def _queue_eof(queue: asyncio.Queue[bytes | None]) -> None:
-    """Enqueue the stream sentinel, making room if the queue is full."""
-    try:
-        queue.put_nowait(None)
-    except asyncio.QueueFull:
-        with contextlib.suppress(asyncio.QueueEmpty):
-            queue.get_nowait()
-        queue.put_nowait(None)
+async def _queue_eof(queue: asyncio.Queue[bytes | None]) -> None:
+    """Enqueue the stream sentinel, waiting if the consumer is behind."""
+    await queue.put(None)
 
 
 def rewrite_stream_host(request: web.Request, url: str) -> str:

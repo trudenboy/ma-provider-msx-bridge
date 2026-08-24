@@ -526,11 +526,33 @@ async def test_play_context_prefers_start_index_for_duplicate_uri(
     try:
         with patch.object(player, "wait_for_media", AsyncMock(return_value=player.current_media)):
             resp = await client.get(
-                "/api/play-context/msx_test"
-                "?uri=library://album/9&start=2&track=library://track/11"
+                "/api/play-context/msx_test?uri=library://album/9&start=2&track=library://track/11"
             )
         assert resp.status == 200
         mass_mock.player_queues.play_index.assert_awaited_once_with("msx_test", "c")
+    finally:
+        await client.close()
+
+
+async def test_play_context_skips_index_when_already_current(
+    provider: MSXBridgeProvider, mass_mock: Mock
+) -> None:
+    """play-context must not call play_index when play_media already selected the item."""
+    player = _register_msx_player(mass_mock, provider, "msx_test")
+    items = [_make_queue_item("library://track/11", queue_item_id="a")]
+    _wire_queue(mass_mock, items)
+    mass_mock.player_queues.play_media = AsyncMock()
+    player._attr_current_media = PlayerMedia(uri="library://track/11", queue_item_id="a")
+    server = MSXHTTPServer(provider, 0)
+    client = AiohttpTestClient(TestServer(server.app))
+    await client.start_server()
+    try:
+        with patch.object(player, "wait_for_media", AsyncMock(return_value=player.current_media)):
+            resp = await client.get(
+                "/api/play-context/msx_test?uri=library://track/11&start=0&track=library://track/11"
+            )
+        assert resp.status == 200
+        mass_mock.player_queues.play_index.assert_not_awaited()
     finally:
         await client.close()
 

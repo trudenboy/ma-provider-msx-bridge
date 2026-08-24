@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.14] - 2026-08-24
+
+### Fixed
+
+- Starting a track that is already the current queue item no longer restarts playback.
+- Slow TVs no longer lose the last audio of a track when the stream ends.
+
 ## [1.4.13] - 2026-08-24
 
 ### Fixed
