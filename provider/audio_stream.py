@@ -146,7 +146,12 @@ class SharedGroupStream:
                 chunks_sent += 1
 
             while True:
-                next_chunk = await q.get()
+                try:
+                    next_chunk = await asyncio.wait_for(q.get(), timeout=0.5)
+                except TimeoutError:
+                    if self.finished:
+                        break
+                    continue
                 if next_chunk is None:
                     logger.debug(
                         "[SharedStream:%s] EOF received for subscriber %s",
@@ -239,13 +244,14 @@ class SharedGroupStream:
                     self.group_id,
                 )
             async with self._lock:
-                for player_id, q in list(self.subscribers.items()):
-                    await _queue_eof(q)
-                    logger.debug(
-                        "[SharedStream:%s] Sent EOF to subscriber %s",
-                        self.group_id,
-                        player_id,
-                    )
+                pending = list(self.subscribers.items())
+            for player_id, q in pending:
+                _signal_eof(q)
+                logger.debug(
+                    "[SharedStream:%s] Sent EOF to subscriber %s",
+                    self.group_id,
+                    player_id,
+                )
 
 
 class AudioPipeline:
@@ -511,6 +517,7 @@ class AudioPipeline:
         """Pre-buffer audio chunks, then send HTTP headers and stream remaining data."""
         player_id = player.player_id
         chunk_queue: asyncio.Queue[bytes | None] = asyncio.Queue(maxsize=32)
+        producer_done = asyncio.Event()
 
         async def producer() -> None:
             try:
@@ -523,13 +530,14 @@ class AudioPipeline:
                 ):
                     await chunk_queue.put(chunk)
             finally:
-                await _queue_eof(chunk_queue)
+                producer_done.set()
+                _signal_eof(chunk_queue)
 
         producer_task: asyncio.Task[None] | None = None
         total_bytes = 0
         try:
             producer_task = asyncio.create_task(producer())
-            pre_buffer, ended = await _collect_prebuffer(chunk_queue)
+            pre_buffer, ended = await _collect_prebuffer(chunk_queue, producer_done)
 
             if not player.current_media and not pre_buffer:
                 return
@@ -543,7 +551,12 @@ class AudioPipeline:
                 return
 
             while True:
-                chunk = await chunk_queue.get()
+                try:
+                    chunk = await asyncio.wait_for(chunk_queue.get(), timeout=0.5)
+                except TimeoutError:
+                    if producer_done.is_set():
+                        break
+                    continue
                 if chunk is None:
                     break
                 await response.write(chunk)
@@ -611,9 +624,10 @@ class AudioPipeline:
             del self.active_stream_transports[player_id]
 
 
-async def _queue_eof(queue: asyncio.Queue[bytes | None]) -> None:
-    """Enqueue the stream sentinel, waiting if the consumer is behind."""
-    await queue.put(None)
+def _signal_eof(queue: asyncio.Queue[bytes | None]) -> None:
+    """Best-effort EOF; consumers also stop when the producer is finished."""
+    with contextlib.suppress(asyncio.QueueFull):
+        queue.put_nowait(None)
 
 
 def rewrite_stream_host(request: web.Request, url: str) -> str:
@@ -630,12 +644,21 @@ def rewrite_stream_host(request: web.Request, url: str) -> str:
 
 async def _collect_prebuffer(
     chunk_queue: asyncio.Queue[bytes | None],
+    done: asyncio.Event | None = None,
 ) -> tuple[list[bytes], bool]:
     """Collect chunks until PRE_BUFFER_BYTES or EOF. Returns (chunks, ended)."""
     pre_buffer: list[bytes] = []
     pre_buffer_size = 0
     while pre_buffer_size < PRE_BUFFER_BYTES:
-        chunk = await chunk_queue.get()
+        if done is None:
+            chunk = await chunk_queue.get()
+        else:
+            try:
+                chunk = await asyncio.wait_for(chunk_queue.get(), timeout=0.2)
+            except TimeoutError:
+                if done.is_set() and chunk_queue.empty():
+                    return pre_buffer, True
+                continue
         if chunk is None:
             return pre_buffer, True
         pre_buffer.append(chunk)

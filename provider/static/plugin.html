@@ -69,6 +69,7 @@
     var positionStartValue = 0;
     var pausedByServer = false;
     var resumedByServer = false;
+    var seekedByServer = false;
     var pausedAtPosition = 0;
     var monitoredElement = null;
     var mediaObserver = null;
@@ -164,6 +165,7 @@
                 } else if (msg.type === "seek" && msg.position != null && typeof tvx.InteractionPlugin.executeAction === "function") {
                     var seekSecs = Math.round(msg.position);
                     startPositionTimer(seekSecs);
+                    seekedByServer = true;
                     tvx.InteractionPlugin.executeAction("player:seek:" + seekSecs);
                 } else if (msg.type === "goto_index" && msg.index != null && typeof tvx.InteractionPlugin.executeAction === "function") {
                     resetPlaybackClock();
@@ -251,8 +253,14 @@
     }
 
     function onMediaSeeked() {
+        if (seekedByServer) {
+            seekedByServer = false;
+            return;
+        }
         if (monitoredElement) {
-            startPositionTimer(monitoredElement.currentTime);
+            var pos = monitoredElement.currentTime;
+            startPositionTimer(pos);
+            sendWsMessage({ type: "seek", position: pos });
         }
     }
 

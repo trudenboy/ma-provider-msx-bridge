@@ -1979,6 +1979,23 @@ async def test_msx_queue_playlist_with_start_index(
         await client.close()
 
 
+async def test_msx_queue_playlist_reads_full_queue(
+    provider: MSXBridgeProvider, mass_mock: Mock
+) -> None:
+    """Queue playlists must ask for every item, not the default 500-item page."""
+    mass_mock.player_queues.get = Mock(return_value=Mock(items=800, current_index=0))
+    mass_mock.player_queues.items = Mock(return_value=[])
+    server = MSXHTTPServer(provider, 0)
+    client = AiohttpTestClient(TestServer(server.app))
+    await client.start_server()
+    try:
+        resp = await client.get("/msx/queue-playlist/msx_test.json?start=0")
+        assert resp.status == 200
+        mass_mock.player_queues.items.assert_called_with("msx_test", limit=800)
+    finally:
+        await client.close()
+
+
 async def test_msx_queue_playlist_empty_queue(provider: MSXBridgeProvider, mass_mock: Mock) -> None:
     """GET /msx/queue-playlist with empty queue should return empty playlist."""
     mass_mock.player_queues.items = Mock(return_value=[])

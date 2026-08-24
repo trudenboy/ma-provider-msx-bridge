@@ -679,6 +679,25 @@ async def test_update_position_accepts_report_after_seek(player: MSXPlayer) -> N
     assert player._attr_elapsed_time == 121.0
 
 
+async def test_note_tv_seek_trusts_jump_before_first_report(player: MSXPlayer) -> None:
+    """A TV seek before any position report must not be treated as stale."""
+    media = Mock(spec=PlayerMedia)
+    media.uri = "library://track/1"
+    media.title = None
+    media.artist = None
+    media.image_url = None
+    media.duration = 180
+    media.stream_duration = None
+    media.source_id = None
+    media.queue_item_id = None
+    with patch.object(player.provider, "notify_play_started"):
+        await player.play_media(media)
+    player.note_tv_seek(80.0)
+    assert player._attr_elapsed_time == 80.0
+    player.update_position(81.0)
+    assert player._attr_elapsed_time == 81.0
+
+
 async def test_update_position_rebases_after_tv_seek(player: MSXPlayer) -> None:
     """A forward jump after a fresh report is a TV seek, not a stale clock."""
     media = Mock(spec=PlayerMedia)

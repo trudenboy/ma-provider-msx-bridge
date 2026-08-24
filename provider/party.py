@@ -118,13 +118,13 @@ class PartyAdapter:
         )
 
     async def handle_qr_cover(
-        self, request: web.Request, *, request_prefix: str, extra_bases: list[str]
+        self, request: web.Request, *, extra_bases: list[str]
     ) -> web.Response:
         """Serve a cover image with the party QR stamped into its corner (PNG)."""
         image_url = request.query.get("image", "")
         if not image_url:
             return web.Response(status=400, text="Missing image parameter")
-        if not is_allowed_cover_source(image_url, [request_prefix, *extra_bases]):
+        if not is_allowed_cover_source(image_url, extra_bases):
             return web.Response(status=400, text="Image source not permitted")
         party = await self.get_active_party()
         if party is None:

@@ -249,6 +249,15 @@ class MSXPlayer(Player):
         self._last_ws_position = time.monotonic()
         self.update_state()
 
+    def note_tv_seek(self, position: float) -> None:
+        """Trust a TV-initiated seek even before the first position report."""
+        if self._attr_playback_state != PlaybackState.PLAYING:
+            return
+        self._accepted_position = True
+        if self._track_started_at > 0:
+            self._track_started_at = time.monotonic() - max(0.0, float(position))
+        self.update_position(position)
+
     async def poll(self) -> None:
         """
         Poll player for state updates.
@@ -366,7 +375,13 @@ class MSXPlayer(Player):
         queue = self.mass.player_queues.get(source_id)
         ma_index = getattr(queue, "current_index", 0) if queue else 0
         try:
-            current_size = len(self.mass.player_queues.items(source_id))
+            queue = self.mass.player_queues.get(source_id)
+            limit = getattr(queue, "items", None)
+            current_size = len(
+                self.mass.player_queues.items(
+                    source_id, limit=limit if isinstance(limit, int) and limit > 0 else 500
+                )
+            )
         except Exception:
             self.logger.debug("Failed to get queue size for %s", source_id, exc_info=True)
             current_size = self._playlist_size
@@ -379,7 +394,12 @@ class MSXPlayer(Player):
         queue = self.mass.player_queues.get(source_id)
         start_index = getattr(queue, "current_index", 0) if queue else 0
         try:
-            self._playlist_size = len(self.mass.player_queues.items(source_id))
+            limit = getattr(queue, "items", None)
+            self._playlist_size = len(
+                self.mass.player_queues.items(
+                    source_id, limit=limit if isinstance(limit, int) and limit > 0 else 500
+                )
+            )
         except Exception:
             self.logger.debug("Failed to get queue size for %s", source_id, exc_info=True)
             self._playlist_size = 0
