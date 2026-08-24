@@ -175,7 +175,7 @@ class PartyAdapter:
             if isinstance(raw_len, (str, bytes, int)):
                 try:
                     declared = int(raw_len)
-                except (TypeError, ValueError):
+                except TypeError, ValueError:
                     declared = 0
                 if declared > COVER_FETCH_MAX_BYTES:
                     raise ValueError("cover exceeds size limit")
