@@ -17,7 +17,6 @@ from music_assistant_models.errors import MusicAssistantError
 from music_assistant_models.media_items import Track
 
 from music_assistant.constants import SENDSPIN_SERVER_PORT
-from music_assistant.controllers.webserver.helpers.auth_middleware import ImpersonatedUser
 
 from .audio_stream import AudioPipeline, build_audio_params, resolve_served_duration
 from .constants import (
@@ -1875,8 +1874,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
         if self._get_msx_player(player_id) is None:
             return web.json_response({"error": "Unknown MSX player"}, status=404)
 
-        async with ImpersonatedUser(self.provider.mass, await self.provider.get_owner_username()):
-            await self.provider.mass.player_queues.play_media(player_id, track_uri)
+        await self.provider.mass.player_queues.play_media(player_id, track_uri)
         return web.json_response({"status": "ok"})
 
     async def _handle_pause(self, request: web.Request) -> web.Response:

@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING, Any
 
 from music_assistant_models.errors import InvalidProviderURI
 
-from music_assistant.controllers.webserver.helpers.auth_middleware import ImpersonatedUser
 from music_assistant.helpers.uri import parse_uri
 
 if TYPE_CHECKING:
@@ -133,11 +132,10 @@ async def prepare_msx_audio(
     if from_playlist:
         player._skip_ws_notify = True
     try:
-        async with ImpersonatedUser(provider.mass, await provider.get_owner_username()):
-            if queue_item is not None:
-                await provider.mass.player_queues.play_index(*queue_item)
-            else:
-                await provider.mass.player_queues.play_media(player.player_id, uri)
+        if queue_item is not None:
+            await provider.mass.player_queues.play_index(*queue_item)
+        else:
+            await provider.mass.player_queues.play_media(player.player_id, uri)
     finally:
         if from_playlist:
             player._skip_ws_notify = False

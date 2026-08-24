@@ -1433,7 +1433,32 @@ async def test_msx_audio_per_track_mode(provider: MSXBridgeProvider, mass_mock: 
         mass_mock.streams.get_stream.assert_called_once()
         _args, _pos, kwargs = mass_mock.streams.get_stream.mock_calls[0]
         assert kwargs.get("force_flow_mode") is False
+    finally:
+        await client.close()
 
+
+async def test_msx_audio_enqueues_without_impersonation(
+    provider: MSXBridgeProvider, mass_mock: Mock
+) -> None:
+    """MSX /msx/audio has no request user; enqueue must not go through ImpersonatedUser."""
+    server = MSXHTTPServer(provider, 0)
+    client = AiohttpTestClient(TestServer(server.app))
+    await client.start_server()
+    try:
+        _make_audio_player(mass_mock)
+        token = provider.get_stream_token("msx_test")
+        mass_mock.streams = Mock()
+        mass_mock.streams.get_stream = Mock(return_value=_async_iter([b"pcm"]))
+        mass_mock.player_queues.play_media = AsyncMock()
+
+        with patch(
+            "music_assistant.providers.msx_bridge.audio_stream.get_ffmpeg_stream",
+            return_value=_async_iter([b"encoded"]),
+        ):
+            resp = await client.get(f"/msx/audio/msx_test?uri=library://track/1&token={token}")
+
+        assert resp.status == 200
+        mass_mock.player_queues.play_media.assert_awaited_once()
     finally:
         await client.close()
 
