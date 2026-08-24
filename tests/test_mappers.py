@@ -78,6 +78,7 @@ def test_map_track_to_msx_play_context() -> None:
     assert item.action.startswith("execute:http://localhost/api/play-context/msx_123")
     assert "uri=library%3A%2F%2Falbum%2F9" in item.action
     assert "start=3" in item.action
+    assert "track=library%3A%2F%2Ftrack%2F1" in item.action
     assert "device_id=abc" in item.action
 
 

@@ -51,9 +51,12 @@ def play_context_action(
     context_uri: str,
     start: int,
     device_param: str = "",
+    track_uri: str | None = None,
 ) -> str:
     """Build a request that enqueues a container/track into the MA queue."""
     url = f"{prefix}/api/play-context/{player_id}?uri={quote(context_uri, safe='')}&start={start}"
+    if track_uri:
+        url += f"&track={quote(track_uri, safe='')}"
     return f"execute:{append_device_param(url, device_param)}"
 
 
@@ -225,7 +228,14 @@ def map_track_to_msx(
 
     nav = queue_nav_properties(player_id, prefix)
     if context_uri:
-        action = play_context_action(prefix, player_id, context_uri, context_start, device_param)
+        action = play_context_action(
+            prefix,
+            player_id,
+            context_uri,
+            context_start,
+            device_param,
+            track_uri=getattr(track, "uri", None),
+        )
     elif playlist_url:
         action = f"playlist:{playlist_url}"
     else:

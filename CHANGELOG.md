@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Library and Yandex tracks already in the queue are no longer appended again on each next.
 - The TV playlist is rotated so the current Music Assistant item is first, so next no longer jumps to the wrong track.
 - Music Assistant progress no longer keeps the previous track's position after a skip.
+- Seeking no longer makes later TV position reports look stale.
+- Next, previous, and album/playlist start from the TV no longer load the playlist twice.
 
 ## [1.4.11] - 2026-08-21
 

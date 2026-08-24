@@ -658,6 +658,27 @@ async def test_update_position_ignores_stale_report_after_track_change(
     assert player._attr_elapsed_time == 0.4
 
 
+async def test_update_position_accepts_report_after_seek(player: MSXPlayer) -> None:
+    """Seek must rebase the stale-position baseline so later reports stay valid."""
+    media = Mock(spec=PlayerMedia)
+    media.uri = "library://track/1"
+    media.title = None
+    media.artist = None
+    media.image_url = None
+    media.duration = 180
+    media.stream_duration = None
+    media.source_id = None
+    media.queue_item_id = None
+    with (
+        patch.object(player.provider, "notify_play_started"),
+        patch.object(player.provider, "notify_seek"),
+    ):
+        await player.play_media(media)
+        await player.seek(120)
+    player.update_position(121.0)
+    assert player._attr_elapsed_time == 121.0
+
+
 def test_update_position(player: MSXPlayer) -> None:
     """update_position should set elapsed_time and mark WS timestamp when PLAYING."""
     player._attr_playback_state = PlaybackState.PLAYING

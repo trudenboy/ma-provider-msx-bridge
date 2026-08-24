@@ -43,6 +43,7 @@ from .party import PartyAdapter, PartyInfo, render_qr, stamp_qr_on_cover
 from .player import MSXPlayer
 from .queue_handshake import (
     PrepareFailure,
+    find_uri_in_active_queue,
     is_media_item_uri,
     prepare_msx_audio,
     queue_items_to_tracks,
@@ -1886,18 +1887,14 @@ small {{ color: #666; display: block; margin-top: 4px; }}
         if not isinstance(uri, str) or not uri or not await is_media_item_uri(uri):
             return _msx_execute_error(400, "Invalid uri")
         start = _int_param(request.query, "start", 0)
+        track_uri = request.query.get("track")
+        if track_uri and not await is_media_item_uri(track_uri):
+            track_uri = None
         self.provider.on_player_activity(player_id)
-        player.expect_new_media()
-        await self.provider.mass.player_queues.play_media(player_id, uri)
-        if start > 0:
-            await player.wait_for_media(timeout=10.0)
-            queue = self.provider.mass.player_queues.get_active_queue(player_id)
-            if queue is not None:
-                items = list(self.provider.mass.player_queues.items(queue.queue_id))
-                if start < len(items):
-                    await self.provider.mass.player_queues.play_index(
-                        queue.queue_id, items[start].queue_item_id
-                    )
+        with player.suppress_ws_notify():
+            player.expect_new_media()
+            await self.provider.mass.player_queues.play_media(player_id, uri)
+            await self._start_play_context(player_id, player, track_uri=track_uri, start=start)
         return _msx_execute_ok(self._queue_playlist_action(request, player_id))
 
     async def _handle_play(self, request: web.Request) -> web.Response:
@@ -1967,10 +1964,12 @@ small {{ color: #666; display: block; margin-top: 4px; }}
         if rejected := self._reject_cross_site(request):
             return rejected
         player_id = _strip_known_extension(request.match_info["player_id"])
-        if self._get_msx_player(player_id) is None:
+        player = self._get_msx_player(player_id)
+        if player is None:
             return web.json_response({"error": "Unknown MSX player"}, status=404)
         self.provider.on_player_activity(player_id)
-        await self.provider.mass.players.cmd_next_track(player_id)
+        with player.suppress_ws_notify():
+            await self.provider.mass.players.cmd_next_track(player_id)
         return _msx_execute_ok(self._queue_playlist_action(request, player_id))
 
     async def _handle_previous(self, request: web.Request) -> web.Response:
@@ -1978,13 +1977,42 @@ small {{ color: #666; display: block; margin-top: 4px; }}
         if rejected := self._reject_cross_site(request):
             return rejected
         player_id = _strip_known_extension(request.match_info["player_id"])
-        if self._get_msx_player(player_id) is None:
+        player = self._get_msx_player(player_id)
+        if player is None:
             return web.json_response({"error": "Unknown MSX player"}, status=404)
         self.provider.on_player_activity(player_id)
-        await self.provider.mass.players.cmd_previous_track(player_id)
+        with player.suppress_ws_notify():
+            await self.provider.mass.players.cmd_previous_track(player_id)
         return _msx_execute_ok(self._queue_playlist_action(request, player_id))
 
     # --- Helpers ---
+
+    async def _start_play_context(
+        self,
+        player_id: str,
+        player: MSXPlayer,
+        *,
+        track_uri: str | None,
+        start: int,
+    ) -> None:
+        """Jump to the selected track after enqueuing a container."""
+        if track_uri or start > 0:
+            await player.wait_for_media(timeout=10.0)
+        queue = self.provider.mass.player_queues.get_active_queue(player_id)
+        if queue is None:
+            return
+        player.mark_queue_playback(queue.queue_id)
+        target_id: str | None = None
+        if track_uri:
+            found = find_uri_in_active_queue(self.provider.mass, player_id, track_uri)
+            if found:
+                target_id = found[1]
+        if target_id is None and start > 0:
+            items = list(self.provider.mass.player_queues.items(queue.queue_id, limit=queue.items))
+            if start < len(items):
+                target_id = items[start].queue_item_id
+        if target_id is not None:
+            await self.provider.mass.player_queues.play_index(queue.queue_id, target_id)
 
     def _queue_playlist_action(self, request: web.Request, player_id: str) -> str:
         """Build a playlist: action rotated so the current MA item is index 0."""
@@ -1992,10 +2020,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
         queue = self.provider.mass.player_queues.get_active_queue(player_id)
         queue_id = queue.queue_id if queue is not None else player_id
         start = int(getattr(queue, "current_index", 0) or 0) if queue is not None else 0
-        url = (
-            f"{prefix}/msx/queue-playlist/{player_id}.json"
-            f"?start={start}&queue_id={queue_id}"
-        )
+        url = f"{prefix}/msx/queue-playlist/{player_id}.json?start={start}&queue_id={queue_id}"
         device_id = request.query.get("device_id")
         if device_id:
             url = f"{url}&device_id={quote(device_id, safe='')}"

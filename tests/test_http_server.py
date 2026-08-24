@@ -479,6 +479,32 @@ async def test_play_context_enqueues_container_then_index(
         await client.close()
 
 
+async def test_play_context_starts_at_track_uri(
+    provider: MSXBridgeProvider, mass_mock: Mock
+) -> None:
+    """GET /api/play-context prefers the selected track over the numeric index."""
+    player = _register_msx_player(mass_mock, provider, "msx_test")
+    items = [
+        _make_queue_item("library://track/11", queue_item_id="a"),
+        _make_queue_item("library://track/12", queue_item_id="b"),
+        _make_queue_item("library://track/13", queue_item_id="c"),
+    ]
+    _wire_queue(mass_mock, items)
+    mass_mock.player_queues.play_media = AsyncMock()
+    server = MSXHTTPServer(provider, 0)
+    client = AiohttpTestClient(TestServer(server.app))
+    await client.start_server()
+    try:
+        with patch.object(player, "wait_for_media", AsyncMock(return_value=player.current_media)):
+            resp = await client.get(
+                "/api/play-context/msx_test?uri=library://album/9&start=0&track=library://track/13"
+            )
+        assert resp.status == 200
+        mass_mock.player_queues.play_index.assert_awaited_once_with("msx_test", "c")
+    finally:
+        await client.close()
+
+
 async def test_play_unknown_player(provider: MSXBridgeProvider) -> None:
     """POST /api/play with unknown player_id should return 404."""
     server = MSXHTTPServer(provider, 0)

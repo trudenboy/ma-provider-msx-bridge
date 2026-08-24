@@ -211,6 +211,8 @@ class MSXPlayer(Player):
         self._attr_elapsed_time = float(position_seconds)
         self._attr_elapsed_time_last_updated = time.time()
         self._last_ws_position = None
+        if self._track_started_at > 0:
+            self._track_started_at = time.monotonic() - float(position_seconds)
         self.update_state()
         if not self._skip_ws_notify:
             cast("MSXBridgeProvider", self.provider).notify_seek(self.player_id, position_seconds)
