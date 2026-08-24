@@ -312,15 +312,6 @@ class MSXPlayer(Player):
                 return None
         return self._attr_current_media
 
-    @property
-    def _skip_ws_notify(self) -> bool:
-        """True while at least one suppress_ws_notify() context is active."""
-        return self._skip_ws_depth > 0
-
-    @_skip_ws_notify.setter
-    def _skip_ws_notify(self, value: bool) -> None:
-        self._skip_ws_depth = 1 if value else 0
-
     @contextmanager
     def suppress_ws_notify(self) -> Iterator[None]:
         """Suppress MA→MSX WebSocket echo while MSX is driving playback."""
@@ -334,6 +325,15 @@ class MSXPlayer(Player):
         """Remember that MSX is rendering this MA queue as a native playlist."""
         self._playing_from_queue = True
         self._queue_source_id = queue_id
+
+    @property
+    def _skip_ws_notify(self) -> bool:
+        """True while at least one suppress_ws_notify() context is active."""
+        return self._skip_ws_depth > 0
+
+    @_skip_ws_notify.setter
+    def _skip_ws_notify(self, value: bool) -> None:
+        self._skip_ws_depth = 1 if value else 0
 
     def _notify_msx_playback(self, media: PlayerMedia) -> None:
         """Send WS notification to MSX about the new playback state."""
