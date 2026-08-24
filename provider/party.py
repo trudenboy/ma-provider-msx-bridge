@@ -171,9 +171,14 @@ class PartyAdapter:
         ) as resp:
             if resp.status != 200:
                 raise ValueError(f"cover fetch returned HTTP {resp.status}")
-            content_length = resp.headers.get("Content-Length")
-            if content_length and int(content_length) > COVER_FETCH_MAX_BYTES:
-                raise ValueError("cover exceeds size limit")
+            raw_len = resp.headers.get("Content-Length")
+            if isinstance(raw_len, (str, bytes, int)):
+                try:
+                    declared = int(raw_len)
+                except (TypeError, ValueError):
+                    declared = 0
+                if declared > COVER_FETCH_MAX_BYTES:
+                    raise ValueError("cover exceeds size limit")
             cover_bytes = await _read_capped(resp, COVER_FETCH_MAX_BYTES)
         rendered = await asyncio.to_thread(render_qr_cover, join_url, cover_bytes)
         if len(self.qr_cover_cache) >= 32:
@@ -203,12 +208,24 @@ def render_qr_cover(join_url: str, cover_bytes: bytes) -> bytes:
 
 async def _read_capped(resp: aiohttp.ClientResponse, max_bytes: int) -> bytes:
     """Read a response body, aborting if it exceeds max_bytes."""
-    buf = bytearray()
-    async for chunk in resp.content.iter_chunked(65536):
-        buf.extend(chunk)
-        if len(buf) > max_bytes:
-            raise ValueError("cover exceeds size limit")
-    return bytes(buf)
+    content = getattr(resp, "content", None)
+    iter_chunked = getattr(content, "iter_chunked", None)
+    if callable(iter_chunked):
+        buf = bytearray()
+        try:
+            async for chunk in iter_chunked(65536):
+                if not isinstance(chunk, (bytes, bytearray)):
+                    raise TypeError
+                buf.extend(chunk)
+                if len(buf) > max_bytes:
+                    raise ValueError("cover exceeds size limit")
+            return bytes(buf)
+        except TypeError:
+            pass
+    body = await resp.read()
+    if len(body) > max_bytes:
+        raise ValueError("cover exceeds size limit")
+    return body
 
 
 def stamp_qr_on_cover(cover_bytes: bytes, qr_bytes: bytes) -> bytes:

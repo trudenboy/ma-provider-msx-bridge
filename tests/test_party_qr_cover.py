@@ -26,6 +26,7 @@ from music_assistant.providers.msx_bridge.http_server import (
     _stamp_qr_on_cover,
 )
 from music_assistant.providers.msx_bridge.mappers import map_tracks_to_msx_playlist
+from music_assistant.providers.msx_bridge.party import COVER_FETCH_MAX_BYTES
 from music_assistant.providers.msx_bridge.provider import MSXBridgeProvider
 from tests.common import collect_loop_errors
 
@@ -318,8 +319,6 @@ async def test_qr_cover_rejects_oversized_body(
     provider: MSXBridgeProvider, mass_mock: Mock
 ) -> None:
     """A cover larger than the fetch cap must not be decoded."""
-    from music_assistant.providers.msx_bridge.party import COVER_FETCH_MAX_BYTES
-
     mass_mock.get_provider = Mock(return_value=_party_mock())
     mass_mock.webserver.base_url = "http://ma.local:8095"
     mass_mock.http_session = _http_session_mock(_black_cover_png())
