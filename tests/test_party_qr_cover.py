@@ -26,6 +26,7 @@ from music_assistant.providers.msx_bridge.http_server import (
     _stamp_qr_on_cover,
 )
 from music_assistant.providers.msx_bridge.mappers import map_tracks_to_msx_playlist
+from music_assistant.providers.msx_bridge.party import COVER_FETCH_MAX_BYTES
 from music_assistant.providers.msx_bridge.provider import MSXBridgeProvider
 from tests.common import collect_loop_errors
 
@@ -310,6 +311,28 @@ async def test_qr_cover_ignores_spoofed_request_host(
         )
         assert resp.status == 400
         mass_mock.http_session.get.assert_not_called()
+    finally:
+        await client.close()
+
+
+async def test_qr_cover_rejects_oversized_body(
+    provider: MSXBridgeProvider, mass_mock: Mock
+) -> None:
+    """A cover larger than the fetch cap must not be decoded."""
+    mass_mock.get_provider = Mock(return_value=_party_mock())
+    mass_mock.webserver.base_url = "http://ma.local:8095"
+    mass_mock.http_session = _http_session_mock(_black_cover_png())
+    resp = mass_mock.http_session.get.return_value.__aenter__.return_value
+    resp.headers = {"Content-Length": str(COVER_FETCH_MAX_BYTES + 1)}
+    server = MSXHTTPServer(provider, 0)
+    client = AiohttpTestClient(TestServer(server.app))
+    await client.start_server()
+    try:
+        result = await client.get(
+            "/api/party/qr-cover.png", params={"image": COVER_URL}, allow_redirects=False
+        )
+        assert result.status == 302
+        resp.read.assert_not_called()
     finally:
         await client.close()
 

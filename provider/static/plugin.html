@@ -153,10 +153,12 @@
                     var audioUrl = BRIDGE + msg.path;
                     var audioAction = "audio:" + audioUrl;
                     tvx.InteractionPlugin.executeAction(audioAction, data);
+                    scanForMediaElements();
                 } else if (msg.type === "playlist" && msg.url && typeof tvx.InteractionPlugin.executeAction === "function") {
                     var playlistUrl = BRIDGE + addDeviceParam(msg.url, deviceId);
                     resetPlaybackClock();
                     tvx.InteractionPlugin.executeAction("playlist:" + playlistUrl);
+                    scanForMediaElements();
                 } else if (msg.type === "sendspin" && msg.url && typeof tvx.InteractionPlugin.executeAction === "function") {
                     // Sendspin bridge stream start: open the web kiosk in Sendspin
                     // mode so its JS client takes over synchronized playback.
@@ -170,6 +172,7 @@
                 } else if (msg.type === "goto_index" && msg.index != null && typeof tvx.InteractionPlugin.executeAction === "function") {
                     resetPlaybackClock();
                     tvx.InteractionPlugin.executeAction("player:goto:index:" + msg.index);
+                    scanForMediaElements();
                 } else if (msg.type === "play_update" && typeof tvx.InteractionPlugin.executeAction === "function") {
                     // Update metadata of the currently playing item without restarting audio.
                     // 'player:set-data' or 'player:update' is not supported on all MSX clients.
@@ -299,7 +302,12 @@
             mediaObserver = new MutationObserver(function() {
                 scanForMediaElements();
             });
-            mediaObserver.observe(document.body, { childList: true, subtree: true });
+            mediaObserver.observe(document.body, {
+                childList: true,
+                subtree: true,
+                attributes: true,
+                attributeFilter: ["src"]
+            });
         }
     }
 

@@ -17,7 +17,7 @@ import aiohttp
 import pytest
 from aiohttp.test_utils import TestClient as AiohttpTestClient
 from aiohttp.test_utils import TestServer
-from music_assistant_models.enums import PlaybackState
+from music_assistant_models.enums import PlaybackState, RepeatMode
 from music_assistant_models.errors import MusicAssistantError
 from music_assistant_models.player import PlayerMedia
 
@@ -632,6 +632,52 @@ async def test_quick_stop(provider: MSXBridgeProvider, mass_mock: Mock) -> None:
         assert resp.status == 200
         mass_mock.players.cmd_stop.assert_awaited_once_with("msx_test")
         mock_notify.assert_called_once_with("msx_test")
+    finally:
+        await client.close()
+
+
+async def test_next_at_queue_end_does_not_reload_playlist(
+    provider: MSXBridgeProvider, mass_mock: Mock
+) -> None:
+    """Complete/next at the last item must not restart that track."""
+    _register_msx_player(mass_mock, provider, "msx_test")
+    mass_mock.player_queues.get_active_queue = Mock(
+        return_value=Mock(current_index=4, repeat_mode=RepeatMode.OFF)
+    )
+    server = MSXHTTPServer(provider, 0)
+    client = AiohttpTestClient(TestServer(server.app))
+    await client.start_server()
+    try:
+        resp = await client.get("/api/next/msx_test")
+        assert resp.status == 200
+        data = await resp.json()
+        assert data["response"]["data"]["action"] == "[]"
+    finally:
+        await client.close()
+
+
+async def test_next_reloads_playlist_when_queue_advances(
+    provider: MSXBridgeProvider, mass_mock: Mock
+) -> None:
+    """Next that moves the queue must return a rotated playlist action."""
+    _register_msx_player(mass_mock, provider, "msx_test")
+    indexes = [0]
+
+    def _queue(*_a: object, **_k: object) -> Mock:
+        idx = indexes[0]
+        if idx == 0:
+            indexes[0] = 1
+        return Mock(current_index=idx, repeat_mode=RepeatMode.OFF, queue_id="msx_test", items=2)
+
+    mass_mock.player_queues.get_active_queue = Mock(side_effect=_queue)
+    server = MSXHTTPServer(provider, 0)
+    client = AiohttpTestClient(TestServer(server.app))
+    await client.start_server()
+    try:
+        resp = await client.get("/api/next/msx_test")
+        assert resp.status == 200
+        data = await resp.json()
+        assert "/msx/queue-playlist/msx_test.json" in data["response"]["data"]["action"]
     finally:
         await client.close()
 

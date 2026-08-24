@@ -13,6 +13,7 @@ from urllib.parse import quote
 
 import aiohttp
 from aiohttp import WSMsgType, web
+from music_assistant_models.enums import RepeatMode
 from music_assistant_models.errors import MusicAssistantError
 from music_assistant_models.media_items import Track
 
@@ -669,7 +670,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
                 MsxItem(
                     label="MSX Player",
                     icon="msx-white-soft:tv",
-                    action=f"menu:request:interaction:init@{prefix}/msx/plugin.html?v=18",
+                    action=f"menu:request:interaction:init@{prefix}/msx/plugin.html?v=19",
                 ),
                 MsxItem(
                     label="Web Kiosk",
@@ -1990,8 +1991,11 @@ small {{ color: #666; display: block; margin-top: 4px; }}
         if player is None:
             return web.json_response({"error": "Unknown MSX player"}, status=404)
         self.provider.on_player_activity(player_id)
+        before = self._queue_index(player_id)
         with player.suppress_ws_notify():
             await self.provider.mass.players.cmd_next_track(player_id)
+        if not self._queue_advanced(player_id, before):
+            return _msx_execute_ok()
         return _msx_execute_ok(self._queue_playlist_action(request, player_id))
 
     async def _handle_previous(self, request: web.Request) -> web.Response:
@@ -2039,6 +2043,21 @@ small {{ color: #666; display: block; margin-top: 4px; }}
         current_id = getattr(player.current_media, "queue_item_id", None)
         if target_id is not None and target_id != current_id:
             await self.provider.mass.player_queues.play_index(queue.queue_id, target_id)
+
+    def _queue_index(self, player_id: str) -> int | None:
+        """Return the active queue's current index, if any."""
+        queue = self.provider.mass.player_queues.get_active_queue(player_id)
+        if queue is None:
+            return None
+        return getattr(queue, "current_index", None)
+
+    def _queue_advanced(self, player_id: str, before: int | None) -> bool:
+        """Return whether next/previous changed the item, or repeat-one restarted it."""
+        queue = self.provider.mass.player_queues.get_active_queue(player_id)
+        after = getattr(queue, "current_index", None) if queue is not None else None
+        if before != after:
+            return True
+        return getattr(queue, "repeat_mode", None) == RepeatMode.ONE
 
     def _queue_playlist_action(self, request: web.Request, player_id: str) -> str:
         """Build a playlist: action rotated so the current MA item is index 0."""

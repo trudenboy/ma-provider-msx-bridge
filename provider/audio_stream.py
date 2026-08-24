@@ -52,10 +52,11 @@ class SharedGroupStream:
     Late joiners receive buffered data first (catch-up), then live chunks.
     """
 
-    def __init__(self, group_id: str, media_uri: str) -> None:
+    def __init__(self, group_id: str, media_uri: str, session_id: str = "") -> None:
         """Initialize shared stream for a group."""
         self.group_id = group_id
         self.media_uri = media_uri
+        self.session_id = session_id
         self.buffer: deque[bytes] = deque(maxlen=512)  # ~15s @ 40KB/s MP3
         self.subscribers: dict[str, asyncio.Queue[bytes | None]] = {}
         self.producer_task: asyncio.Task[None] | None = None
@@ -350,9 +351,12 @@ class AudioPipeline:
         """Serve audio from a shared group stream."""
         player_id = player.player_id
         media_uri = getattr(media, "uri", "") or str(media)
+        session_id = get_media_session_id(media) or getattr(media, "queue_item_id", None) or ""
 
         existing_stream = self.provider.get_shared_stream(group_id)
-        if existing_stream is not None and existing_stream.media_uri != media_uri:
+        if existing_stream is not None and (
+            existing_stream.media_uri != media_uri or existing_stream.session_id != session_id
+        ):
             existing_stream = None
         is_leader = player_id == group_id
 
@@ -390,7 +394,7 @@ class AudioPipeline:
                 extra_input_args=READRATE_ARGS,
             )
             shared_stream = await self.provider.get_or_create_shared_stream(
-                group_id, media_uri, audio_chunks
+                group_id, media_uri, audio_chunks, session_id=session_id
             )
             shared_stream.output_plan = output_plan
         else:
@@ -403,7 +407,11 @@ class AudioPipeline:
             for _ in range(30):
                 await asyncio.sleep(0.1)
                 shared_stream = self.provider.get_shared_stream(group_id)
-                if shared_stream is not None and shared_stream.media_uri == media_uri:
+                if (
+                    shared_stream is not None
+                    and shared_stream.media_uri == media_uri
+                    and shared_stream.session_id == session_id
+                ):
                     break
                 shared_stream = None
             if shared_stream is None:
