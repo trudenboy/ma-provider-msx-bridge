@@ -3,93 +3,75 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
-import functools
-import hashlib
-import io
 import json
 import logging
 import secrets
-import time
 from html import escape as html_escape
 from pathlib import Path
-from types import SimpleNamespace
-from typing import TYPE_CHECKING, Any, NamedTuple, cast
-from urllib.parse import quote, urlsplit, urlunsplit
+from typing import TYPE_CHECKING, Any, cast
+from urllib.parse import quote
 
 import aiohttp
 from aiohttp import WSMsgType, web
-from music_assistant_models.enums import ContentType
-from music_assistant_models.errors import InvalidProviderURI, MusicAssistantError
-from music_assistant_models.media_items import AudioFormat, Track
+from music_assistant_models.errors import MusicAssistantError
+from music_assistant_models.media_items import Track
 
 from music_assistant.constants import SENDSPIN_SERVER_PORT
-from music_assistant.controllers.streams.audio_processing import get_media_session_id
-from music_assistant.controllers.streams.constants import (
-    SINGLE_ITEM_READRATE,
-    SINGLE_ITEM_READRATE_INITIAL_BURST,
-)
-from music_assistant.controllers.webserver.helpers.auth_middleware import ImpersonatedUser
-from music_assistant.helpers.ffmpeg import get_ffmpeg_stream
-from music_assistant.helpers.uri import parse_uri
-from music_assistant.helpers.util import join_task
 
+from .audio_stream import AudioPipeline, build_audio_params, resolve_served_duration
 from .constants import (
     CONF_SHOW_STOP_NOTIFICATION,
     DEFAULT_SHOW_STOP_NOTIFICATION,
     MSX_PLAYER_ID_PREFIX,
     PLAYER_ID_SANITIZE_RE,
-    PRE_BUFFER_BYTES,
 )
 from .mappers import (
     append_device_param,
+    container_uri,
+    dump_msx,
     get_image_url,
     map_album_to_msx,
     map_artist_to_msx,
     map_playlist_to_msx,
     map_track_to_msx,
     map_tracks_to_msx_playlist,
+    msx_list_page,
+    sort_album_tracks,
 )
 from .models import MsxContent, MsxItem, MsxTemplate
+from .party import PartyAdapter, PartyInfo, render_qr, stamp_qr_on_cover
 from .player import MSXPlayer
+from .queue_handshake import (
+    PrepareFailure,
+    find_uri_in_active_queue,
+    is_media_item_uri,
+    prepare_msx_audio,
+    queue_items_to_tracks,
+)
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
-
     from multidict import MultiMapping
     from music_assistant_models.player import PlayerMedia
 
-    from music_assistant.helpers.dsp import ComplexFilter
-
     from .provider import MSXBridgeProvider
+
+# Test-facing aliases for the party adapter's render helpers.
+_render_qr = render_qr
+_stamp_qr_on_cover = stamp_qr_on_cover
+
+__all__ = [
+    "STATIC_DIR",
+    "MSXHTTPServer",
+    "PartyInfo",
+    "_render_qr",
+    "_stamp_qr_on_cover",
+]
 
 logger = logging.getLogger(__name__)
 
 STATIC_DIR = Path(__file__).parent / "static"
 
 _KNOWN_EXTENSIONS = (".mp3", ".json", ".flac", ".aac")
-
-PARTY_CACHE_TTL = 10.0
-PARTY_CALL_TIMEOUT = 5.0
-
-# The local proxy modes encode audio themselves, so they carry the core streamserver's
-# pacing ceiling rather than handing a track over as fast as ffmpeg can produce it.
-# See the usage policy note on SINGLE_ITEM_READRATE.
-_READRATE_ARGS = [
-    "-readrate",
-    SINGLE_ITEM_READRATE,
-    "-readrate_initial_burst",
-    SINGLE_ITEM_READRATE_INITIAL_BURST,
-]
-
-
-class PartyInfo(NamedTuple):
-    """Active-party details resolved from the MA Party plugin."""
-
-    join_url: str
-    name: str | None
-    qr_text: str | None
-    qr_version: str
 
 
 def _int_param(query: MultiMapping[str], name: str, default: int, max_val: int = 10000) -> int:
@@ -100,21 +82,23 @@ def _int_param(query: MultiMapping[str], name: str, default: int, max_val: int =
         return default
 
 
-async def _is_media_item_uri(uri: str) -> bool:
-    """Check whether a URI names a non-builtin media item."""
-    if "://" not in uri:
-        # keeps an item_id-shaped value away from parse_uri's local-file branch
-        return False
-    try:
-        _, provider_instance_id_or_domain, _ = await parse_uri(uri)
-    except InvalidProviderURI:
-        return False
-    return provider_instance_id_or_domain != "builtin"
-
-
 def _is_audio_path(path: str) -> bool:
     """Check whether the path is one of the audio routes."""
     return path.startswith(("/stream/", "/msx/audio/"))
+
+
+def _msx_execute_ok(action: str = "[]") -> web.Response:
+    """Wrap a follow-up action for MSX ``execute:{URL}``."""
+    return web.json_response(
+        {"response": {"status": 200, "text": "OK", "message": None, "data": {"action": action}}}
+    )
+
+
+def _msx_execute_error(status: int, message: str) -> web.Response:
+    """Return an MSX-visible execute error while keeping HTTP 200."""
+    return web.json_response(
+        {"response": {"status": status, "text": "Error", "message": message, "data": None}}
+    )
 
 
 def _strip_known_extension(value: str) -> str:
@@ -123,63 +107,6 @@ def _strip_known_extension(value: str) -> str:
         if value.endswith(ext):
             return value[: -len(ext)]
     return value
-
-
-@functools.lru_cache(maxsize=4)
-def _render_qr(join_url: str, kind: str) -> bytes:
-    """
-    Render the join URL as a QR image (blocking on a miss; run in a worker thread).
-
-    Results are memoized — the output only changes when the join code rotates.
-    """
-    import segno  # noqa: PLC0415  # only needed when the Party plugin is used
-
-    buf = io.BytesIO()
-    segno.make(join_url, error="m").save(buf, kind=kind, scale=8)
-    return buf.getvalue()
-
-
-def _render_qr_cover(join_url: str, cover_bytes: bytes) -> bytes:
-    """Render the QR and composite it onto the cover (blocking; run in a worker thread)."""
-    return _stamp_qr_on_cover(cover_bytes, _render_qr(join_url, "png"))
-
-
-def _stamp_qr_on_cover(cover_bytes: bytes, qr_bytes: bytes) -> bytes:
-    """Composite the QR into the cover's bottom-right corner; returns PNG bytes."""
-    from PIL import Image  # noqa: PLC0415  # only needed when the Party plugin is used
-
-    try:
-        cover = Image.open(io.BytesIO(cover_bytes)).convert("RGB")
-        qr = Image.open(io.BytesIO(qr_bytes)).convert("RGB")
-    except Image.DecompressionBombError as err:
-        raise ValueError("image exceeds Pillow decompression limit") from err
-    # ~28% of the smaller cover side keeps the QR scannable without hiding the art;
-    # NEAREST preserves the hard module edges QR readers need.
-    side = max(48, min(cover.width, cover.height) * 28 // 100)
-    qr = qr.resize((side, side), Image.Resampling.NEAREST)
-    margin = side // 8
-    cover.paste(qr, (cover.width - side - margin, cover.height - side - margin))
-    out = io.BytesIO()
-    cover.save(out, format="PNG")
-    return out.getvalue()
-
-
-def _sort_album_tracks(tracks: list[Any]) -> list[Any]:
-    """
-    Sort album tracks deterministically.
-
-    MA sorts by (disc_number, track_number) but tracks with identical values
-    get non-deterministic ordering between calls. Adding name as a tiebreaker
-    ensures the display page and playlist endpoint always agree on track order.
-    """
-    return sorted(
-        tracks,
-        key=lambda t: (
-            getattr(t, "disc_number", 0) or 0,
-            getattr(t, "track_number", 0) or 0,
-            getattr(t, "name", "") or "",
-        ),
-    )
 
 
 class MSXHTTPServer:
@@ -192,11 +119,10 @@ class MSXHTTPServer:
         self.app = web.Application(middlewares=[self._cors_middleware])
         self._runner: web.AppRunner | None = None
         self._ws_clients: dict[str, set[web.WebSocketResponse]] = {}
-        self._active_stream_tasks: dict[str, set[asyncio.Task[None]]] = {}
-        self._active_stream_transports: dict[str, set[Any]] = {}
-        self._party_cache: tuple[float, PartyInfo | None] | None = None
-        self._qr_cover_cache: dict[tuple[str, str], bytes] = {}
-        self._qr_cover_inflight: dict[tuple[str, str], asyncio.Task[bytes]] = {}
+        self.audio = AudioPipeline(provider)
+        self.party = PartyAdapter(provider)
+        self._active_stream_tasks = self.audio.active_stream_tasks
+        self._active_stream_transports = self.audio.active_stream_transports
         self._client_prefixes: dict[str, str] = {}
         self._setup_routes()
 
@@ -275,10 +201,8 @@ class MSXHTTPServer:
             # During a party the play background carries the join QR (MSX has
             # no overlays); the endpoint falls back to the original image when
             # the party is over, so a stale cache entry here is harmless.
-            if self._cached_party() and (client_prefix := self._client_prefixes.get(player_id)):
-                image_url = (
-                    f"{client_prefix}/api/party/qr-cover.png?image={quote(image_url, safe='')}"
-                )
+            if client_prefix := self._client_prefixes.get(player_id):
+                image_url = self.party.rewrite_play_image(image_url, client_prefix)
             payload["image_url"] = image_url
         if duration is not None:
             payload["duration"] = duration
@@ -357,22 +281,7 @@ class MSXHTTPServer:
 
     def cancel_streams_for_player(self, player_id: str) -> None:
         """Cancel stream tasks and abort connections for the given player."""
-        tasks = self._active_stream_tasks.pop(player_id, set())
-        transports = self._active_stream_transports.pop(player_id, set())
-        for task in tasks:
-            if not task.done():
-                task.cancel()
-        for transport in transports:
-            with contextlib.suppress(OSError, RuntimeError):
-                if transport and hasattr(transport, "abort"):
-                    transport.abort()
-        if tasks or transports:
-            logger.debug(
-                "Cancelled %d task(s), aborted %d transport(s) for player %s",
-                len(tasks),
-                len(transports),
-                player_id,
-            )
+        self.audio.cancel_streams_for_player(player_id)
 
     def broadcast_pause(self, player_id: str) -> None:
         """Notify subscribed WebSocket clients to pause playback."""
@@ -544,6 +453,7 @@ class MSXHTTPServer:
             ("/api/pause/{player_id}", self._handle_pause),
             ("/api/stop/{player_id}", self._handle_stop),
             ("/api/quick-stop/{player_id}", self._handle_quick_stop),
+            ("/api/play-context/{player_id}", self._handle_play_context),
             ("/api/next/{player_id}", self._handle_next),
             ("/api/previous/{player_id}", self._handle_previous),
         ):
@@ -751,7 +661,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
                 MsxItem(
                     label="MSX Player",
                     icon="msx-white-soft:tv",
-                    action=f"menu:request:interaction:init@{prefix}/msx/plugin.html?v=8",
+                    action=f"menu:request:interaction:init@{prefix}/msx/plugin.html?v=12",
                 ),
                 MsxItem(
                     label="Web Kiosk",
@@ -760,7 +670,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
                 ),
             ],
         )
-        return web.json_response(content.model_dump(by_alias=True, exclude_none=True))
+        return web.json_response(dump_msx(content))
 
     def _serve_static(self, filename: str) -> Any:
         """Create a handler that serves a static file from the static directory."""
@@ -831,7 +741,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
                 for label, icon, url in items
             ],
         )
-        return web.json_response(content.model_dump(by_alias=True, exclude_none=True))
+        return web.json_response(dump_msx(content))
 
     async def _handle_msx_albums(self, request: web.Request) -> web.Response:
         """Return albums as an MSX content page."""
@@ -853,16 +763,16 @@ small {{ color: #666; display: block; margin-top: 4px; }}
         items = await asyncio.gather(
             *(map_album_to_msx(a, prefix, self.provider, device_param) for a in albums)
         )
-        content = MsxContent(
-            headline="Albums",
-            template=MsxTemplate(
-                type="separate",
-                layout="0,0,3,4",
-                color="msx-glass",
-            ),
-            items=items if items else [MsxItem(title="No albums found")],
+        return web.json_response(
+            dump_msx(
+                msx_list_page(
+                    "Albums",
+                    items,
+                    empty_title="No albums found",
+                    layout="0,0,3,4",
+                )
+            )
         )
-        return web.json_response(content.model_dump(by_alias=True, exclude_none=True))
 
     async def _handle_msx_artists(self, request: web.Request) -> web.Response:
         """Return artists as an MSX content page."""
@@ -882,16 +792,16 @@ small {{ color: #666; display: block; margin-top: 4px; }}
             artists = []
 
         items = [map_artist_to_msx(a, prefix, self.provider, device_param) for a in artists]
-        content = MsxContent(
-            headline="Artists",
-            template=MsxTemplate(
-                type="separate",
-                layout="0,0,2,3",
-                color="msx-glass",
-            ),
-            items=items if items else [MsxItem(title="No artists found")],
+        return web.json_response(
+            dump_msx(
+                msx_list_page(
+                    "Artists",
+                    items,
+                    empty_title="No artists found",
+                    layout="0,0,2,3",
+                )
+            )
         )
-        return web.json_response(content.model_dump(by_alias=True, exclude_none=True))
 
     async def _handle_msx_playlists(self, request: web.Request) -> web.Response:
         """Return playlists as an MSX content page."""
@@ -920,7 +830,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
             ),
             items=items if items else [MsxItem(title="No playlists found")],
         )
-        return web.json_response(content.model_dump(by_alias=True, exclude_none=True))
+        return web.json_response(dump_msx(content))
 
     async def _handle_msx_tracks(self, request: web.Request) -> web.Response:
         """Return tracks as an MSX content page."""
@@ -939,8 +849,6 @@ small {{ color: #666; display: block; margin-top: 4px; }}
             logger.exception("Failed to fetch tracks")
             tracks = []
 
-        playlist_base = f"{prefix}/msx/playlist/tracks.json?limit={limit}&offset={offset}"
-        playlist_base = append_device_param(playlist_base, device_param)
         items = [
             map_track_to_msx(
                 t,
@@ -948,9 +856,9 @@ small {{ color: #666; display: block; margin-top: 4px; }}
                 player_id,
                 self.provider,
                 device_param,
-                playlist_url=f"{playlist_base}&start={idx}",
+                context_uri=t.uri,
             )
-            for idx, t in enumerate(tracks)
+            for t in tracks
         ]
         content = MsxContent(
             headline="Tracks",
@@ -962,7 +870,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
             ),
             items=items if items else [MsxItem(title="No tracks found")],
         )
-        return web.json_response(content.model_dump(by_alias=True, exclude_none=True))
+        return web.json_response(dump_msx(content))
 
     async def _handle_msx_recently_played(self, request: web.Request) -> web.Response:
         """Return recently played tracks as an MSX content page."""
@@ -978,8 +886,6 @@ small {{ color: #666; display: block; margin-top: 4px; }}
         except MusicAssistantError, TimeoutError:
             logger.exception("Failed to fetch recently played tracks")
             tracks = []
-        playlist_base = f"{prefix}/msx/playlist/recently-played.json"
-        playlist_base = append_device_param(playlist_base, device_param)
         items = [
             map_track_to_msx(
                 t,
@@ -987,9 +893,9 @@ small {{ color: #666; display: block; margin-top: 4px; }}
                 player_id,
                 self.provider,
                 device_param,
-                playlist_url=f"{playlist_base}{'&' if '?' in playlist_base else '?'}start={idx}",
+                context_uri=t.uri,
             )
-            for idx, t in enumerate(tracks)
+            for t in tracks
         ]
         content = MsxContent(
             headline="Recently played",
@@ -1001,7 +907,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
             ),
             items=items if items else [MsxItem(title="No recently played tracks")],
         )
-        return web.json_response(content.model_dump(by_alias=True, exclude_none=True))
+        return web.json_response(dump_msx(content))
 
     async def _handle_msx_search_page(self, request: web.Request) -> web.Response:
         """Return a content page whose page-level action launches the Input Plugin keyboard."""
@@ -1032,7 +938,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
                 )
             ],
         )
-        return web.json_response(content.model_dump(by_alias=True, exclude_none=True))
+        return web.json_response(dump_msx(content))
 
     async def _handle_msx_search_input(self, request: web.Request) -> web.Response:
         """Return search results for the MSX Input Plugin (search keyboard)."""
@@ -1050,7 +956,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
                 ),
                 items=[MsxItem(title="Start typing to search")],
             )
-            return web.json_response(content.model_dump(by_alias=True, exclude_none=True))
+            return web.json_response(dump_msx(content))
 
         limit = _int_param(request.query, "limit", 20)
         items = await self._build_search_items(
@@ -1071,7 +977,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
             ),
             items=items if items else [MsxItem(title="No results found")],
         )
-        return web.json_response(content.model_dump(by_alias=True, exclude_none=True))
+        return web.json_response(dump_msx(content))
 
     async def _handle_msx_search(self, request: web.Request) -> web.Response:
         """Return search results as an MSX content page."""
@@ -1080,10 +986,12 @@ small {{ color: #666; display: block; margin-top: 4px; }}
         query = request.query.get("q", "")
         if not query:
             return web.json_response(
-                MsxContent(
-                    headline="Search",
-                    items=[MsxItem(title="Please enter a search query")],
-                ).model_dump(by_alias=True, exclude_none=True)
+                dump_msx(
+                    MsxContent(
+                        headline="Search",
+                        items=[MsxItem(title="Please enter a search query")],
+                    )
+                )
             )
 
         limit = _int_param(request.query, "limit", 20)
@@ -1104,7 +1012,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
             ),
             items=items if items else [MsxItem(title="No results found")],
         )
-        return web.json_response(content.model_dump(by_alias=True, exclude_none=True))
+        return web.json_response(dump_msx(content))
 
     async def _handle_msx_party(self, request: web.Request) -> web.Response:
         """Return MSX page with the party QR code, or a hint when no party is active."""
@@ -1127,7 +1035,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
             template=MsxTemplate(type="separate", layout="0,0,4,4"),
             items=[item],
         )
-        return web.json_response(content.model_dump(by_alias=True, exclude_none=True))
+        return web.json_response(dump_msx(content))
 
     async def _build_search_items(
         self,
@@ -1150,16 +1058,14 @@ small {{ color: #666; display: block; margin-top: 4px; }}
             item.label = f"Album — {getattr(album, 'artist_str', '')}"
             item.icon = "msx-white-soft:album"
             items.append(item)
-        playlist_base = f"{prefix}/msx/playlist/search.json?q={quote(query, safe='')}"
-        playlist_base = append_device_param(playlist_base, device_param)
-        for idx, track in enumerate(results.tracks):
+        for track in results.tracks:
             item = map_track_to_msx(
                 track,
                 prefix,
                 player_id,
                 self.provider,
                 device_param,
-                playlist_url=f"{playlist_base}&start={idx}",
+                context_uri=track.uri,
             )
             item.label = f"Track — {getattr(track, 'artist_str', '')}"
             item.icon = "msx-white-soft:audiotrack"
@@ -1175,14 +1081,13 @@ small {{ color: #666; display: block; margin-top: 4px; }}
         item_id = request.match_info["item_id"]
         provider = request.query.get("provider", "library")
         try:
-            tracks = _sort_album_tracks(
+            tracks = sort_album_tracks(
                 await self.provider.mass.music.albums.tracks(item_id, provider)
             )
         except MusicAssistantError, TimeoutError:
             logger.exception("Failed to fetch tracks for album %s", item_id)
             tracks = []
-        playlist_base = f"{prefix}/msx/playlist/album/{item_id}.json?provider={provider}"
-        playlist_base = append_device_param(playlist_base, device_param)
+        album_uri = container_uri("album", item_id, provider)
         items = [
             map_track_to_msx(
                 t,
@@ -1190,7 +1095,8 @@ small {{ color: #666; display: block; margin-top: 4px; }}
                 player_id,
                 self.provider,
                 device_param,
-                playlist_url=f"{playlist_base}&start={idx}",
+                context_uri=album_uri,
+                context_start=idx,
             )
             for idx, t in enumerate(tracks)
         ]
@@ -1204,7 +1110,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
             ),
             items=items if items else [MsxItem(title="No tracks found")],
         )
-        return web.json_response(content.model_dump(by_alias=True, exclude_none=True))
+        return web.json_response(dump_msx(content))
 
     async def _handle_msx_artist_albums(self, request: web.Request) -> web.Response:
         """Return albums for an artist as an MSX content page."""
@@ -1230,7 +1136,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
             ),
             items=items if items else [MsxItem(title="No albums found")],
         )
-        return web.json_response(content.model_dump(by_alias=True, exclude_none=True))
+        return web.json_response(dump_msx(content))
 
     async def _handle_msx_playlist_tracks(self, request: web.Request) -> web.Response:
         """Return tracks for a playlist as an MSX content page."""
@@ -1244,8 +1150,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
         except MusicAssistantError, TimeoutError:
             logger.exception("Failed to fetch tracks for playlist %s", item_id)
             tracks = []
-        playlist_base = f"{prefix}/msx/playlist/playlist/{item_id}.json"
-        playlist_base = append_device_param(playlist_base, device_param)
+        playlist_uri = container_uri("playlist", item_id)
         items = [
             map_track_to_msx(
                 t,
@@ -1253,7 +1158,8 @@ small {{ color: #666; display: block; margin-top: 4px; }}
                 player_id,
                 self.provider,
                 device_param,
-                playlist_url=f"{playlist_base}{'&' if '?' in playlist_base else '?'}start={idx}",
+                context_uri=playlist_uri,
+                context_start=idx,
             )
             for idx, t in enumerate(tracks)
         ]
@@ -1267,7 +1173,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
             ),
             items=items if items else [MsxItem(title="No tracks found")],
         )
-        return web.json_response(content.model_dump(by_alias=True, exclude_none=True))
+        return web.json_response(dump_msx(content))
 
     # --- MSX Playlist Endpoints ---
 
@@ -1279,7 +1185,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
         provider_name = request.query.get("provider", "library")
         start = _int_param(request.query, "start", 0)
         try:
-            tracks = _sort_album_tracks(
+            tracks = sort_album_tracks(
                 await self.provider.mass.music.albums.tracks(item_id, provider_name)
             )
         except MusicAssistantError, TimeoutError:
@@ -1294,7 +1200,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
             device_param,
             qr_cover_base=await self._qr_cover_base(prefix),
         )
-        return web.json_response(playlist.model_dump(by_alias=True, exclude_none=True))
+        return web.json_response(dump_msx(playlist))
 
     async def _handle_msx_playlist_playlist(self, request: web.Request) -> web.Response:
         """Return playlist tracks as an MSX playlist JSON."""
@@ -1318,7 +1224,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
             device_param,
             qr_cover_base=await self._qr_cover_base(prefix),
         )
-        return web.json_response(playlist.model_dump(by_alias=True, exclude_none=True))
+        return web.json_response(dump_msx(playlist))
 
     async def _handle_msx_tracks_playlist(self, request: web.Request) -> web.Response:
         """Return library tracks as an MSX playlist JSON."""
@@ -1339,7 +1245,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
             device_param,
             qr_cover_base=await self._qr_cover_base(prefix),
         )
-        return web.json_response(playlist.model_dump(by_alias=True, exclude_none=True))
+        return web.json_response(dump_msx(playlist))
 
     async def _handle_msx_recently_played_playlist(self, request: web.Request) -> web.Response:
         """Return recently played tracks as an MSX playlist JSON."""
@@ -1358,7 +1264,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
             device_param,
             qr_cover_base=await self._qr_cover_base(prefix),
         )
-        return web.json_response(playlist.model_dump(by_alias=True, exclude_none=True))
+        return web.json_response(dump_msx(playlist))
 
     async def _handle_msx_search_playlist(self, request: web.Request) -> web.Response:
         """Return search track results as an MSX playlist JSON."""
@@ -1367,9 +1273,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
         query = request.query.get("q", "")
         start = _int_param(request.query, "start", 0)
         if not query:
-            return web.json_response(
-                MsxContent(items=[]).model_dump(by_alias=True, exclude_none=True)
-            )
+            return web.json_response(dump_msx(MsxContent(items=[])))
         limit = _int_param(request.query, "limit", 20)
         results = await self.provider.mass.music.search(query, limit=limit)
         playlist = map_tracks_to_msx_playlist(
@@ -1381,7 +1285,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
             device_param,
             qr_cover_base=await self._qr_cover_base(prefix),
         )
-        return web.json_response(playlist.model_dump(by_alias=True, exclude_none=True))
+        return web.json_response(dump_msx(playlist))
 
     # --- MSX Queue Playlist ---
 
@@ -1391,24 +1295,13 @@ small {{ color: #666; display: block; margin-top: 4px; }}
         prefix = self._get_prefix(request)
         player_id = request.match_info["player_id"]
         queue_id = request.query.get("queue_id", player_id)
-        start = _int_param(request.query, "start", 0)
+        if "start" in request.query:
+            start = _int_param(request.query, "start", 0)
+        else:
+            queue = self.provider.mass.player_queues.get(queue_id)
+            start = int(getattr(queue, "current_index", 0) or 0)
 
-        queue_items = self.provider.mass.player_queues.items(queue_id)
-
-        # Convert QueueItems to track-like objects for map_tracks_to_msx_playlist
-        tracks: list[Any] = []
-        for qi in queue_items:
-            mi = getattr(qi, "media_item", None)
-            tracks.append(
-                SimpleNamespace(
-                    name=getattr(mi, "name", None) or getattr(qi, "name", "") or "",
-                    uri=getattr(mi, "uri", None) or "",
-                    duration=getattr(mi, "duration", None) or getattr(qi, "duration", 0) or 0,
-                    artist_str=getattr(mi, "artist_str", "") if mi else "",
-                    image=getattr(qi, "image", None),
-                    queue_item_id=getattr(qi, "queue_item_id", None),
-                )
-            )
+        tracks = queue_items_to_tracks(self.provider.mass.player_queues.items(queue_id))
 
         playlist = map_tracks_to_msx_playlist(
             tracks,
@@ -1419,7 +1312,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
             device_param,
             qr_cover_base=await self._qr_cover_base(prefix),
         )
-        return web.json_response(playlist.model_dump(by_alias=True, exclude_none=True))
+        return web.json_response(dump_msx(playlist))
 
     # --- MSX Audio Playback ---
 
@@ -1439,118 +1332,35 @@ small {{ color: #666; display: block; margin-top: 4px; }}
             return web.Response(status=404, text="Player not found")
         if rejected := self._reject_invalid_stream_token(request, player_id):
             return rejected
-        queue_item: tuple[str, str] | None = None
-        if not await _is_media_item_uri(uri):
-            # The queue check runs last so an unauthorized caller learns nothing from it.
-            queue_item = self._find_uri_in_active_queue(player_id, uri, requested_queue_item_id)
-            if queue_item is None:
-                return web.Response(status=400, text="Invalid uri parameter")
-        self.provider.on_player_activity(player_id)
-
-        # When MA is driving the queue (next/prev from MA UI), current_media is
-        # already set by player.play_media() before the WS goto_index reaches MSX.
-        # Re-enqueuing would recreate the queue from the track URI, destroying it.
-        # We verify by checking that current_media's queue item URI matches the
-        # requested track URI — if not, MSX auto-advanced and we must re-enqueue.
-        if (
-            from_playlist
-            and player._playing_from_queue
-            and self._current_media_matches_uri(player, uri, requested_queue_item_id)
-        ):
-            logger.debug("Queue-driven: using current_media for %s", uri)
-            media = player.current_media
-        else:
-            # Suppress WS broadcast when called from MSX playlist to avoid conflicts
-            if from_playlist:
-                player._skip_ws_notify = True
-
-            # Arm BEFORE enqueuing so wait_for_media() waits for the new track's
-            # play_media() instead of returning the previous track's media.
-            player.expect_new_media()
-            try:
-                async with ImpersonatedUser(
-                    self.provider.mass, await self.provider.get_owner_username()
-                ):
-                    if queue_item is not None:
-                        await self.provider.mass.player_queues.play_index(*queue_item)
-                    else:
-                        await self.provider.mass.player_queues.play_media(player_id, uri)
-            finally:
-                if from_playlist:
-                    player._skip_ws_notify = False
-
-            # Wait for play_media() to signal media is ready (replaces 10s polling loop)
-            media = await player.wait_for_media(timeout=10.0)
-
-        if not media:
-            return web.Response(status=504, text="Playback setup timeout")
+        prepared = await prepare_msx_audio(
+            self.provider,
+            player,
+            uri,
+            from_playlist=from_playlist,
+            queue_item_id=requested_queue_item_id,
+        )
+        if isinstance(prepared, PrepareFailure):
+            return web.Response(status=prepared.status, text=prepared.text)
 
         return await self._serve_audio_stream(
             request,
             player,
-            media,
-            duration=self._resolve_served_duration(media),
+            prepared,
+            duration=resolve_served_duration(self.provider.mass, prepared),
         )
 
     # --- Audio Streaming Infrastructure ---
 
     def _resolve_served_duration(self, media: PlayerMedia) -> int:
-        """
-        Return the length in seconds of the audio served for the given media, or 0 if unknown.
-
-        This is what the Content-Length header is derived from, so it describes
-        the audio we actually serve rather than the media item: starting
-        playback at a seek position yields a shorter stream.
-
-        :param media: The media being served.
-        """
-        duration = media.stream_duration or media.duration or 0
-        if not duration and media.source_id and media.queue_item_id:
-            queue_item = self.provider.mass.player_queues.get_item(
-                media.source_id, media.queue_item_id
-            )
-            if queue_item:
-                if queue_item.media_item:
-                    duration = getattr(queue_item.media_item, "duration", None) or duration
-                if not duration and queue_item.duration:
-                    duration = queue_item.duration
-        return int(duration)
+        """Return the length in seconds of the audio served for the given media."""
+        return resolve_served_duration(self.provider.mass, media)
 
     @staticmethod
     def _build_audio_params(
         output_format_str: str, duration: int
-    ) -> tuple[AudioFormat, AudioFormat, dict[str, str]]:
+    ) -> tuple[Any, Any, dict[str, str]]:
         """Build PCM input format, encoded output format, and HTTP headers."""
-        pcm_format = AudioFormat(
-            content_type=ContentType.PCM_S16LE,
-            sample_rate=44100,
-            bit_depth=16,
-            channels=2,
-        )
-        content_type_map: dict[str, tuple[ContentType, str]] = {
-            "mp3": (ContentType.MP3, "audio/mpeg"),
-            "aac": (ContentType.AAC, "audio/aac"),
-            "flac": (ContentType.FLAC, "audio/flac"),
-        }
-        codec, mime_type = content_type_map.get(output_format_str, (ContentType.MP3, "audio/mpeg"))
-        out_format = AudioFormat(
-            content_type=codec,
-            sample_rate=44100,
-            bit_depth=16,
-            channels=2,
-        )
-        bitrate_map = {"mp3": 40_000, "aac": 32_000}
-        bytes_per_sec = bitrate_map.get(output_format_str, 0)
-        headers: dict[str, str] = {
-            "Content-Type": mime_type,
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "Accept-Ranges": "none",
-        }
-        if duration and bytes_per_sec:
-            capped_duration = min(float(duration), 43200)  # cap at 12h
-            headers["Content-Length"] = str(int(capped_duration * bytes_per_sec))
-        return pcm_format, out_format, headers
+        return build_audio_params(output_format_str, duration)
 
     async def _serve_audio_stream(
         self,
@@ -1559,104 +1369,8 @@ small {{ color: #666; display: block; margin-top: 4px; }}
         media: Any,
         duration: int = 0,
     ) -> web.StreamResponse:
-        """
-        Unified method to stream audio from MA to MSX via ffmpeg.
-
-        Supports three modes based on provider configuration:
-        1. Independent (default): Each player gets its own ffmpeg stream
-        2. Shared Buffer: Group members share one ffmpeg process via SharedGroupStream
-        3. MA Redirect: 302 redirect to MA Streamserver (requires MA 2.6+)
-
-        Pre-buffers audio data before sending HTTP headers so MSX receives
-        the response and initial audio burst simultaneously, preventing
-        stutter/restart from an empty initial buffer.
-        """
-        player_id = player.player_id
-
-        # --- Mode 1: MA Redirect ---
-        if self.provider.is_redirect_stream_mode():
-            redirect_url = await self.provider.get_ma_stream_url(player_id, media)
-            if redirect_url:
-                redirect_url = self._rewrite_stream_host(request, redirect_url)
-                logger.info(
-                    "[StreamMode:redirect] Player %s -> MA Streamserver: %s",
-                    player_id,
-                    redirect_url,
-                )
-                raise web.HTTPFound(location=redirect_url)
-            # Fallback to independent mode if redirect fails
-            logger.warning(
-                "[StreamMode:redirect] Failed to get MA URL for %s, "
-                "falling back to independent mode",
-                player_id,
-            )
-
-        # Resolve effective output format: per-player config overrides provider default.
-        # CONF_ENTRY_OUTPUT_CODEC_DEFAULT_MP3 uses key "output_codec"; fall back to
-        # player.output_format (set from provider-level config during registration).
-        # Only the proxy paths below need this — in redirect mode the MA streamserver
-        # applies the same per-player codec config itself.
-        effective_format = cast(
-            "str",
-            player.config.get_value("output_codec", player.output_format),
-        )
-
-        pcm_format, out_format, headers = self._build_audio_params(
-            effective_format,
-            duration,
-        )
-
-        # --- Mode 2: Shared Buffer (for groups) ---
-        group_id = self.provider.get_group_id_for_player(player)
-        if group_id and self.provider.is_shared_stream_mode():
-            logger.info(
-                "[StreamMode:shared] Player %s in group %s, using shared stream",
-                player_id,
-                group_id,
-            )
-            return await self._serve_shared_stream(
-                request, player, media, group_id, pcm_format, out_format, headers
-            )
-
-        # --- Mode 3: Independent (default) ---
-        logger.debug(
-            "[StreamMode:independent] Serving audio %s: format=%s, duration=%s",
-            player_id,
-            effective_format,
-            duration,
-        )
-
-        audio_source = self.provider.mass.streams.get_stream(
-            media,
-            pcm_format,
-            force_flow_mode=False,
-        )
-        output_plan = self.provider.mass.streams.audio.get_player_output_plan(
-            player_id,
-            pcm_format,
-            out_format,
-            queue_id=getattr(media, "source_id", None),
-            session_id=get_media_session_id(media),
-            queue_item_id=getattr(media, "queue_item_id", None),
-        )
-
-        response = web.StreamResponse(status=200, headers=headers)
-        stream_task: asyncio.Task[None] = asyncio.create_task(
-            self._stream_with_prebuffer(
-                request,
-                response,
-                player,
-                headers,
-                audio_source,
-                pcm_format,
-                out_format,
-                output_plan.filter_params,
-            )
-        )
-        transport = getattr(request, "transport", None)
-        await self._run_stream_task(player_id, stream_task, transport)
-
-        return response
+        """Serve this player's current media on this request."""
+        return await self.audio.serve(request, player, media, duration)
 
     async def _serve_shared_stream(
         self,
@@ -1664,262 +1378,28 @@ small {{ color: #666; display: block; margin-top: 4px; }}
         player: MSXPlayer,
         media: Any,
         group_id: str,
-        pcm_format: AudioFormat,
-        out_format: AudioFormat,
+        pcm_format: Any,
+        out_format: Any,
         headers: dict[str, str],
     ) -> web.StreamResponse:
-        """
-        Serve audio from a shared group stream.
-
-        Multiple players in a group read from the same SharedGroupStream,
-        which has a single ffmpeg producer.
-        """
-        player_id = player.player_id
-        media_uri = getattr(media, "uri", "") or str(media)
-
-        # Check if we need to create a new shared stream (leader creates it)
-        existing_stream = self.provider._shared_streams.get(group_id)
-        is_leader = player_id == group_id
-
-        if existing_stream and not existing_stream.finished:
-            # Reuse existing stream
-            logger.debug(
-                "[SharedStream] Player %s subscribing to existing stream for group %s",
-                player_id,
-                group_id,
-            )
-            shared_stream = existing_stream
-        elif is_leader:
-            # Leader creates the shared stream
-            logger.info(
-                "[SharedStream] Leader %s creating shared stream for group %s",
-                player_id,
-                group_id,
-            )
-            audio_source = self.provider.mass.streams.get_stream(
-                media,
-                pcm_format,
-                force_flow_mode=False,
-            )
-            output_plan = self.provider.mass.streams.audio.get_player_output_plan(
-                player_id,
-                pcm_format,
-                out_format,
-                queue_id=getattr(media, "source_id", None),
-                session_id=get_media_session_id(media),
-                queue_item_id=getattr(media, "queue_item_id", None),
-            )
-            # Create ffmpeg chunk generator
-            audio_chunks = get_ffmpeg_stream(
-                audio_input=audio_source,
-                input_format=pcm_format,
-                output_format=out_format,
-                filter_params=output_plan.filter_params,
-                extra_input_args=_READRATE_ARGS,
-            )
-            shared_stream = await self.provider.get_or_create_shared_stream(
-                group_id, media_uri, audio_chunks
-            )
-            shared_stream.output_plan = output_plan
-        else:
-            # Member but no existing stream - wait briefly for leader
-            logger.info(
-                "[SharedStream] Member %s waiting for leader to create stream for group %s",
-                player_id,
-                group_id,
-            )
-            for _ in range(30):  # Wait up to 3 seconds
-                await asyncio.sleep(0.1)
-                existing_stream = self.provider._shared_streams.get(group_id)
-                if existing_stream and not existing_stream.finished:
-                    shared_stream = existing_stream
-                    break
-            else:
-                # Timeout - fallback to independent stream
-                logger.warning(
-                    "[SharedStream] Timeout waiting for leader stream, "
-                    "falling back to independent for %s",
-                    player_id,
-                )
-                return await self._serve_independent_stream(
-                    request, player, media, pcm_format, out_format, headers
-                )
-
-        queue_id = getattr(media, "source_id", None)
-        session_id = get_media_session_id(media)
-        if (
-            shared_stream.output_plan is not None
-            and queue_id is not None
-            and session_id is not None
-        ):
-            self.provider.mass.streams.audio_processing.update_output(
-                player_id,
-                shared_stream.output_plan,
-                queue_id=queue_id,
-                session_id=session_id,
-                queue_item_id=getattr(media, "queue_item_id", None),
-            )
-
-        # Subscribe to shared stream
-        response = web.StreamResponse(status=200, headers=headers)
-        await response.prepare(request)
-
-        total_bytes = 0
-        try:
-            async for chunk in shared_stream.subscribe(player_id):
-                await response.write(chunk)
-                total_bytes += len(chunk)
-        except ConnectionResetError, BrokenPipeError, ConnectionAbortedError:
-            logger.debug(
-                "[SharedStream] Client %s disconnected after %d bytes",
-                player_id,
-                total_bytes,
-            )
-        except asyncio.CancelledError:
-            logger.debug("[SharedStream] Stream cancelled for %s", player_id)
-            raise
-
-        logger.info(
-            "[SharedStream] Player %s finished, wrote %d bytes",
-            player_id,
-            total_bytes,
+        """Serve audio from a shared group stream."""
+        return await self.audio.serve_shared(
+            request, player, media, group_id, pcm_format, out_format, headers
         )
-        return response
 
     async def _serve_independent_stream(
         self,
         request: web.Request,
         player: MSXPlayer,
         media: Any,
-        pcm_format: AudioFormat,
-        out_format: AudioFormat,
+        pcm_format: Any,
+        out_format: Any,
         headers: dict[str, str],
     ) -> web.StreamResponse:
         """Serve audio via independent ffmpeg stream (fallback)."""
-        player_id = player.player_id
-        logger.debug(
-            "[StreamMode:independent] Fallback stream for %s",
-            player_id,
+        return await self.audio.serve_independent(
+            request, player, media, pcm_format, out_format, headers
         )
-
-        audio_source = self.provider.mass.streams.get_stream(
-            media,
-            pcm_format,
-            force_flow_mode=False,
-        )
-        output_plan = self.provider.mass.streams.audio.get_player_output_plan(
-            player_id,
-            pcm_format,
-            out_format,
-            queue_id=getattr(media, "source_id", None),
-            session_id=get_media_session_id(media),
-            queue_item_id=getattr(media, "queue_item_id", None),
-        )
-
-        response = web.StreamResponse(status=200, headers=headers)
-        stream_task: asyncio.Task[None] = asyncio.create_task(
-            self._stream_with_prebuffer(
-                request,
-                response,
-                player,
-                headers,
-                audio_source,
-                pcm_format,
-                out_format,
-                output_plan.filter_params,
-            )
-        )
-        transport = getattr(request, "transport", None)
-        await self._run_stream_task(player_id, stream_task, transport)
-
-        return response
-
-    async def _stream_with_prebuffer(
-        self,
-        request: web.Request,
-        response: web.StreamResponse,
-        player: MSXPlayer,
-        headers: dict[str, str],
-        audio_source: Any,
-        pcm_format: AudioFormat,
-        out_format: AudioFormat,
-        filter_params: Sequence[str | ComplexFilter],
-    ) -> None:
-        """Pre-buffer audio chunks, then send HTTP headers and stream remaining data."""
-        player_id = player.player_id
-        chunk_queue: asyncio.Queue[bytes | None] = asyncio.Queue(maxsize=32)
-
-        async def producer() -> None:
-            try:
-                async for chunk in get_ffmpeg_stream(
-                    audio_input=audio_source,
-                    input_format=pcm_format,
-                    output_format=out_format,
-                    filter_params=filter_params,
-                    extra_input_args=_READRATE_ARGS,
-                ):
-                    await chunk_queue.put(chunk)
-            finally:
-                with contextlib.suppress(asyncio.QueueFull):
-                    chunk_queue.put_nowait(None)
-
-        producer_task: asyncio.Task[None] | None = None
-        total_bytes = 0
-        try:
-            producer_task = asyncio.create_task(producer())
-
-            # Phase 1: Pre-buffer — collect chunks until we have enough data
-            pre_buffer: list[bytes] = []
-            pre_buffer_size = 0
-            while pre_buffer_size < PRE_BUFFER_BYTES:
-                chunk = await chunk_queue.get()
-                if chunk is None:
-                    break
-                pre_buffer.append(chunk)
-                pre_buffer_size += len(chunk)
-
-            # Re-check: stop may have been called while buffering
-            if not player.current_media and not pre_buffer:
-                return
-
-            # NOW send HTTP headers + pre-buffer burst
-            await response.prepare(request)
-            for buf_chunk in pre_buffer:
-                await response.write(buf_chunk)
-                total_bytes += len(buf_chunk)
-
-            # If pre-buffer ended with sentinel, we're done
-            if chunk is None:
-                return
-
-            # Phase 2: Stream remaining chunks normally
-            while True:
-                chunk = await chunk_queue.get()
-                if chunk is None:
-                    break
-                await response.write(chunk)
-                total_bytes += len(chunk)
-        except ConnectionResetError, BrokenPipeError, ConnectionAbortedError:
-            logger.debug("Client disconnected from stream %s", player_id)
-        except asyncio.CancelledError:
-            logger.debug("Stream cancelled for player %s", player_id)
-            raise
-        finally:
-            if producer_task and not producer_task.done():
-                producer_task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await producer_task
-            content_length = headers.get("Content-Length")
-            if content_length:
-                logger.debug(
-                    "Stream %s: wrote %d bytes, Content-Length=%s, diff=%d",
-                    player_id,
-                    total_bytes,
-                    content_length,
-                    total_bytes - int(content_length),
-                )
-            else:
-                logger.debug("Stream %s finished: wrote %d bytes", player_id, total_bytes)
 
     async def _run_stream_task(
         self,
@@ -1928,17 +1408,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
         transport: Any,
     ) -> None:
         """Run a stream task with registration and error handling."""
-        self._register_stream(player_id, stream_task, transport)
-        try:
-            await stream_task
-        except asyncio.CancelledError:
-            raise
-        except MusicAssistantError, OSError, RuntimeError:
-            logger.exception("Stream error for player %s", player_id)
-        finally:
-            self._unregister_stream(player_id, stream_task, transport)
-
-    # --- WebSocket, Broadcast & Health ---
+        await self.audio.run_stream_task(player_id, stream_task, transport)
 
     async def _handle_health(self, request: web.Request) -> web.Response:
         """Health check endpoint."""
@@ -1992,25 +1462,11 @@ small {{ color: #666; display: block; margin-top: 4px; }}
 
     def _register_stream(self, player_id: str, task: asyncio.Task[None], transport: Any) -> None:
         """Register active stream task and transport for cancel on stop."""
-        if player_id not in self._active_stream_tasks:
-            self._active_stream_tasks[player_id] = set()
-            self._active_stream_transports[player_id] = set()
-        if task:
-            self._active_stream_tasks[player_id].add(task)
-        if transport:
-            self._active_stream_transports[player_id].add(transport)
+        self.audio.register_stream(player_id, task, transport)
 
     def _unregister_stream(self, player_id: str, task: asyncio.Task[None], transport: Any) -> None:
         """Unregister stream when done (from finally block)."""
-        if player_id not in self._active_stream_tasks:
-            return
-        if task:
-            self._active_stream_tasks[player_id].discard(task)
-        if transport:
-            self._active_stream_transports[player_id].discard(transport)
-        if not self._active_stream_tasks[player_id]:
-            del self._active_stream_tasks[player_id]
-            del self._active_stream_transports[player_id]
+        self.audio.unregister_stream(player_id, task, transport)
 
     async def _ws_send(
         self, ws: web.WebSocketResponse, text: str, player_id: str | None = None
@@ -2028,22 +1484,16 @@ small {{ color: #666; display: block; margin-top: 4px; }}
         player = self.provider.mass.players.get_player(player_id)
         if not (player and isinstance(player, MSXPlayer)):
             return
-        player._skip_ws_notify = True
-        try:
+        with player.suppress_ws_notify():
             await self.provider.mass.players.cmd_pause(player_id)
-        finally:
-            player._skip_ws_notify = False
 
     async def _cmd_play_no_echo(self, player_id: str) -> None:
         """Resume player without echoing back to MSX."""
         player = self.provider.mass.players.get_player(player_id)
         if not (player and isinstance(player, MSXPlayer)):
             return
-        player._skip_ws_notify = True
-        try:
+        with player.suppress_ws_notify():
             await self.provider.mass.players.cmd_play(player_id)
-        finally:
-            player._skip_ws_notify = False
 
     def _handle_ws_message(self, player_id: str, data: str) -> None:
         """Process an inbound WebSocket message from MSX."""
@@ -2354,197 +1804,43 @@ small {{ color: #666; display: block; margin-top: 4px; }}
 
     def _cached_party(self) -> PartyInfo | None:
         """Return the last cached party state without refreshing (sync contexts)."""
-        return self._party_cache[1] if self._party_cache else None
+        return self.party.cached_party()
 
     async def _qr_cover_base(self, prefix: str) -> str | None:
         """Return the QR-cover endpoint base when a party is active, else None."""
-        if await self._get_active_party() is None:
-            return None
-        return f"{prefix}/api/party/qr-cover.png"
+        return await self.party.qr_cover_base(prefix)
 
     async def _get_active_party(self) -> PartyInfo | None:
-        """
-        Return details of the active party, or None when no party is active.
+        """Return details of the active party, or None when no party is active."""
+        return await self.party.get_active_party()
 
-        Never raises: a broken or slow Party plugin degrades to "no party" so
-        the core UI (menu, kiosk) keeps working. Results are cached briefly.
-        """
-        now = time.monotonic()
-        if self._party_cache is not None and now - self._party_cache[0] < PARTY_CACHE_TTL:
-            return self._party_cache[1]
-        info: PartyInfo | None = None
-        try:
-            party = cast("Any", self.provider.mass.get_provider("party"))
-            if party is not None:
-                join_url = await asyncio.wait_for(party.get_party_url(), PARTY_CALL_TIMEOUT)
-                if join_url:
-                    config = await asyncio.wait_for(party.get_party_config(), PARTY_CALL_TIMEOUT)
-                    info = PartyInfo(
-                        join_url=join_url,
-                        name=getattr(config, "party_name", None),
-                        qr_text=getattr(config, "qr_text", None),
-                        qr_version=hashlib.sha256(join_url.encode()).hexdigest()[:12],
-                    )
-        except MusicAssistantError, RuntimeError, TimeoutError:
-            logger.warning("Party plugin status check failed", exc_info=True)
-        self._party_cache = (now, info)
-        return info
-
-    async def _handle_party_status(self, _request: web.Request) -> web.Response:
+    async def _handle_party_status(self, request: web.Request) -> web.Response:
         """Return party status for the kiosk overlay."""
-        party = await self._get_active_party()
-        if party is None:
-            return web.json_response({"active": False})
-        # the join URL itself is deliberately not exposed — clients only get the QR
-        # image URL (relative, so it works behind reverse proxies) plus an opaque
-        # version so they refetch the image only when the join code rotates
-        return web.json_response(
-            {
-                "active": True,
-                "name": party.name,
-                "qr_text": party.qr_text,
-                "qr_url": "/api/party/qr.svg",
-                "qr_version": party.qr_version,
-            }
-        )
+        return await self.party.handle_status(request)
 
     async def _handle_party_qr(self, request: web.Request) -> web.Response:
         """Serve the guest join URL as a QR code image (SVG or PNG by route)."""
-        party = await self._get_active_party()
-        if party is None:
-            return web.Response(status=404, text="No active party")
-        kind = "png" if request.path.endswith(".png") else "svg"
-        body = await asyncio.to_thread(_render_qr, party.join_url, kind)
-        return web.Response(
-            body=body,
-            content_type="image/png" if kind == "png" else "image/svg+xml",
-            headers={"Cache-Control": "no-store"},
-        )
+        return await self.party.handle_qr(request)
 
     async def _handle_party_qr_cover(self, request: web.Request) -> web.Response:
-        """
-        Serve a cover image with the party QR stamped into its corner (PNG).
-
-        MSX cannot render overlays, so during a party the playback background
-        is routed through this endpoint. Degrades to a redirect to the
-        original image when the party ended, the source is not ours, or the
-        fetch/composite fails — stale playlist JSON on TVs keeps working.
-        """
-        image_url = request.query.get("image", "")
-        if not image_url:
-            return web.Response(status=400, text="Missing image parameter")
-        # Reject non-MA sources outright — redirecting would be an open
-        # redirect and fetching would be an SSRF proxy.
-        if not self._is_allowed_cover_source(request, image_url):
-            return web.Response(status=400, text="Image source not permitted")
-        party = await self._get_active_party()
-        if party is None:
-            raise web.HTTPFound(location=image_url)
-        cache_key = (image_url, party.qr_version)
-        if (cached := self._qr_cover_cache.get(cache_key)) is None:
-            try:
-                # join: a TV dropping its request must not cancel the shared
-                # render — late joiners and the cache still get the result
-                cached = await join_task(self._qr_cover_task(cache_key, image_url, party.join_url))
-            except (aiohttp.ClientError, OSError, RuntimeError, ValueError) as err:
-                logger.debug("QR cover composite failed for %s: %s", image_url, err)
-                raise web.HTTPFound(location=image_url) from None
-        return web.Response(
-            body=cached,
-            content_type="image/png",
-            headers={"Cache-Control": "no-store"},
-        )
-
-    def _qr_cover_task(
-        self, cache_key: tuple[str, str], image_url: str, join_url: str
-    ) -> asyncio.Task[bytes]:
-        """Return the in-flight render task for this cover, starting one if needed."""
-        if (task := self._qr_cover_inflight.get(cache_key)) is None:
-            task = asyncio.create_task(self._fetch_and_render_cover(cache_key, image_url, join_url))
-            self._qr_cover_inflight[cache_key] = task
-
-            def _cleanup(finished: asyncio.Task[bytes]) -> None:
-                self._qr_cover_inflight.pop(cache_key, None)
-                # consume the exception so a task whose waiters were all
-                # cancelled never logs "exception was never retrieved"
-                if not finished.cancelled():
-                    finished.exception()
-
-            task.add_done_callback(_cleanup)
-        return task
-
-    async def _fetch_and_render_cover(
-        self, cache_key: tuple[str, str], image_url: str, join_url: str
-    ) -> bytes:
-        """Fetch the cover, composite the QR onto it, and cache the PNG."""
-        async with self.provider.mass.http_session.get(
-            image_url,
-            timeout=aiohttp.ClientTimeout(total=10),
-            allow_redirects=False,
-        ) as resp:
-            if resp.status != 200:
-                raise ValueError(f"cover fetch returned HTTP {resp.status}")
-            cover_bytes = await resp.read()
-        # PIL decode/re-encode blocks; on this loop it would stall audio
-        # streaming for every player, so hop to a worker thread
-        rendered = await asyncio.to_thread(_render_qr_cover, join_url, cover_bytes)
-        # QR rotation changes the cache key; keep the cache tiny and bounded
-        if len(self._qr_cover_cache) >= 32:
-            self._qr_cover_cache.clear()
-        self._qr_cover_cache[cache_key] = rendered
-        return rendered
-
-    @staticmethod
-    def _rewrite_stream_host(request: web.Request, url: str) -> str:
-        """
-        Point a stream URL at the host the client already uses to reach us.
-
-        The MA streamserver advertises its own IP, which is unreachable for
-        the TV when MA runs behind Docker/NAT. The host the TV used for this
-        request is known-good, so only the URL's host is replaced — scheme,
-        port, path and query are preserved.
-        """
-        client_host = request.url.host
-        if not client_host:
-            return url
-        parts = urlsplit(url)
-        if ":" in client_host:  # IPv6 literals need brackets in a netloc
-            client_host = f"[{client_host}]"
-        netloc = f"{client_host}:{parts.port}" if parts.port else client_host
-        return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
-
-    @staticmethod
-    def _url_origin(url: str) -> tuple[str, str | None, int | None]:
-        """Return (scheme, hostname, port); raises ValueError on malformed URLs."""
-        parts = urlsplit(url)
-        # .port is lazy and raises on garbage like "host:8095.evil.example"
-        return (parts.scheme, parts.hostname, parts.port)
-
-    def _is_allowed_cover_source(self, request: web.Request, image_url: str) -> bool:
-        """Only composite covers served by this provider or MA itself (no open proxy)."""
-        try:
-            target_origin = self._url_origin(image_url)
-        except ValueError:
-            return False
-        if target_origin[0] not in ("http", "https") or not target_origin[1]:
-            return False
-        allowed_bases = [self._get_prefix(request)]
+        """Serve a cover image with the party QR stamped into its corner (PNG)."""
+        extra_bases: list[str] = []
         for source in (
             getattr(self.provider.mass, "webserver", None),
             getattr(self.provider.mass, "streams", None),
         ):
             base_url = getattr(source, "base_url", None)
             if isinstance(base_url, str) and base_url.startswith("http"):
-                allowed_bases.append(base_url)
-        # Compare parsed origins, not string prefixes: "http://ma:8095.evil.com"
-        # must not pass for the allowed base "http://ma:8095".
-        for base in allowed_bases:
-            try:
-                if target_origin == self._url_origin(base):
-                    return True
-            except ValueError:
-                continue
-        return False
+                extra_bases.append(base_url)
+        return await self.party.handle_qr_cover(
+            request, request_prefix=self._get_prefix(request), extra_bases=extra_bases
+        )
+
+    def _qr_cover_task(
+        self, cache_key: tuple[str, str], image_url: str, join_url: str
+    ) -> asyncio.Task[bytes]:
+        """Return the in-flight render task for this cover, starting one if needed."""
+        return self.party.qr_cover_task(cache_key, image_url, join_url)
 
     # --- Playback Control ---
 
@@ -2579,6 +1875,28 @@ small {{ color: #666; display: block; margin-top: 4px; }}
             return web.json_response({"error": "Cross-site request rejected"}, status=403)
         return None
 
+    async def _handle_play_context(self, request: web.Request) -> web.Response:
+        """Enqueue a container or track into the MA queue and start at the given index."""
+        if rejected := self._reject_cross_site(request):
+            return rejected
+        player_id = _strip_known_extension(request.match_info["player_id"])
+        player = self._get_msx_player(player_id)
+        if player is None:
+            return _msx_execute_error(404, "Unknown MSX player")
+        uri = request.query.get("uri")
+        if not isinstance(uri, str) or not uri or not await is_media_item_uri(uri):
+            return _msx_execute_error(400, "Invalid uri")
+        start = _int_param(request.query, "start", 0)
+        track_uri = request.query.get("track")
+        if track_uri and not await is_media_item_uri(track_uri):
+            track_uri = None
+        self.provider.on_player_activity(player_id)
+        with player.suppress_ws_notify():
+            player.expect_new_media()
+            await self.provider.mass.player_queues.play_media(player_id, uri)
+            await self._start_play_context(player_id, player, track_uri=track_uri, start=start)
+        return _msx_execute_ok(self._queue_playlist_action(request, player_id))
+
     async def _handle_play(self, request: web.Request) -> web.Response:
         """Start playback of a track."""
         if rejected := self._reject_cross_site(request):
@@ -2595,14 +1913,13 @@ small {{ color: #666; display: block; margin-top: 4px; }}
             return web.json_response({"error": "Invalid track_uri or player_id"}, status=400)
         if not track_uri or not player_id:
             return web.json_response({"error": "Missing track_uri or player_id"}, status=400)
-        if not await _is_media_item_uri(track_uri):
+        if not await is_media_item_uri(track_uri):
             return web.json_response({"error": "Invalid track_uri"}, status=400)
 
         if self._get_msx_player(player_id) is None:
             return web.json_response({"error": "Unknown MSX player"}, status=404)
 
-        async with ImpersonatedUser(self.provider.mass, await self.provider.get_owner_username()):
-            await self.provider.mass.player_queues.play_media(player_id, track_uri)
+        await self.provider.mass.player_queues.play_media(player_id, track_uri)
         return web.json_response({"status": "ok"})
 
     async def _handle_pause(self, request: web.Request) -> web.Response:
@@ -2647,24 +1964,67 @@ small {{ color: #666; display: block; margin-top: 4px; }}
         if rejected := self._reject_cross_site(request):
             return rejected
         player_id = _strip_known_extension(request.match_info["player_id"])
-        if self._get_msx_player(player_id) is None:
+        player = self._get_msx_player(player_id)
+        if player is None:
             return web.json_response({"error": "Unknown MSX player"}, status=404)
         self.provider.on_player_activity(player_id)
-        await self.provider.mass.players.cmd_next_track(player_id)
-        return web.json_response({"status": "ok"})
+        with player.suppress_ws_notify():
+            await self.provider.mass.players.cmd_next_track(player_id)
+        return _msx_execute_ok(self._queue_playlist_action(request, player_id))
 
     async def _handle_previous(self, request: web.Request) -> web.Response:
         """Skip to previous track."""
         if rejected := self._reject_cross_site(request):
             return rejected
         player_id = _strip_known_extension(request.match_info["player_id"])
-        if self._get_msx_player(player_id) is None:
+        player = self._get_msx_player(player_id)
+        if player is None:
             return web.json_response({"error": "Unknown MSX player"}, status=404)
         self.provider.on_player_activity(player_id)
-        await self.provider.mass.players.cmd_previous_track(player_id)
-        return web.json_response({"status": "ok"})
+        with player.suppress_ws_notify():
+            await self.provider.mass.players.cmd_previous_track(player_id)
+        return _msx_execute_ok(self._queue_playlist_action(request, player_id))
 
     # --- Helpers ---
+
+    async def _start_play_context(
+        self,
+        player_id: str,
+        player: MSXPlayer,
+        *,
+        track_uri: str | None,
+        start: int,
+    ) -> None:
+        """Jump to the selected track after enqueuing a container."""
+        if track_uri or start > 0:
+            await player.wait_for_media(timeout=10.0)
+        queue = self.provider.mass.player_queues.get_active_queue(player_id)
+        if queue is None:
+            return
+        player.mark_queue_playback(queue.queue_id)
+        target_id: str | None = None
+        if track_uri:
+            found = find_uri_in_active_queue(self.provider.mass, player_id, track_uri)
+            if found:
+                target_id = found[1]
+        if target_id is None and start > 0:
+            items = list(self.provider.mass.player_queues.items(queue.queue_id, limit=queue.items))
+            if start < len(items):
+                target_id = items[start].queue_item_id
+        if target_id is not None:
+            await self.provider.mass.player_queues.play_index(queue.queue_id, target_id)
+
+    def _queue_playlist_action(self, request: web.Request, player_id: str) -> str:
+        """Build a playlist: action rotated so the current MA item is index 0."""
+        prefix = self._get_prefix(request)
+        queue = self.provider.mass.player_queues.get_active_queue(player_id)
+        queue_id = queue.queue_id if queue is not None else player_id
+        start = int(getattr(queue, "current_index", 0) or 0) if queue is not None else 0
+        url = f"{prefix}/msx/queue-playlist/{player_id}.json?start={start}&queue_id={queue_id}"
+        device_id = request.query.get("device_id")
+        if device_id:
+            url = f"{url}&device_id={quote(device_id, safe='')}"
+        return f"playlist:{url}"
 
     def _get_msx_player(self, player_id: str) -> MSXPlayer | None:
         """Return the MSXPlayer for player_id if it belongs to this provider, else None."""
@@ -2734,48 +2094,13 @@ small {{ color: #666; display: block; margin-top: 4px; }}
         remote_ip = request.remote
         # Web player clients pass source=web to distinguish from MSX TV players
         prefix_label = "WEB TV" if request.query.get("source") == "web" else "MSX TV"
-        display_name = self.provider._player_display_name_from_id(
+        display_name = self.provider.player_display_name(
             player_id, prefix_label=prefix_label, remote_ip=remote_ip
         )
         player = await self.provider.get_or_register_player(
             player_id, display_name=display_name, ip_address=remote_ip
         )
         return player_id, device_param, player
-
-    def _find_uri_in_active_queue(
-        self, player_id: str, uri: str, queue_item_id: str | None = None
-    ) -> tuple[str, str] | None:
-        """Return the active queue and item IDs matching the request."""
-        # A grouped player follows its leader, so the active queue supplies both IDs.
-        queue = self.provider.mass.player_queues.get_active_queue(player_id)
-        if queue is None:
-            return None
-        items = self.provider.mass.player_queues.items(queue.queue_id, limit=queue.items)
-        for item in items:
-            if (
-                item.media_item is not None
-                and item.media_item.uri == uri
-                and (queue_item_id is None or item.queue_item_id == queue_item_id)
-            ):
-                return queue.queue_id, item.queue_item_id
-        return None
-
-    def _current_media_matches_uri(
-        self,
-        player: MSXPlayer,
-        track_uri: str,
-        queue_item_id: str | None = None,
-    ) -> bool:
-        """Check whether current media matches the requested queue item."""
-        media = player.current_media
-        if not media or not media.source_id or not media.queue_item_id:
-            return False
-        if queue_item_id is not None and media.queue_item_id != queue_item_id:
-            return False
-        queue_item = self.provider.mass.player_queues.get_item(media.source_id, media.queue_item_id)
-        if queue_item and queue_item.media_item:
-            return getattr(queue_item.media_item, "uri", None) == track_uri
-        return False
 
     def _format_track(self, track: Any) -> dict[str, Any]:
         """Format a track object for the API response."""
@@ -2790,3 +2115,22 @@ small {{ color: #666; display: block; margin-top: 4px; }}
             else None,
             "uri": track.uri,
         }
+
+    @property
+    def _party_cache(self) -> tuple[float, PartyInfo | None] | None:
+        """Test-facing alias for the party adapter cache."""
+        return self.party.cache
+
+    @_party_cache.setter
+    def _party_cache(self, value: tuple[float, PartyInfo | None] | None) -> None:
+        self.party.cache = value
+
+    @property
+    def _qr_cover_cache(self) -> dict[tuple[str, str], bytes]:
+        """Test-facing alias for the party QR-cover cache."""
+        return self.party.qr_cover_cache
+
+    @property
+    def _qr_cover_inflight(self) -> dict[tuple[str, str], asyncio.Task[bytes]]:
+        """Test-facing alias for in-flight QR-cover renders."""
+        return self.party.qr_cover_inflight

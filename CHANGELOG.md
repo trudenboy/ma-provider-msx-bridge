@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.12] - 2026-08-24
+
+### Changed
+
+- Starting a track from MSX now enqueues the album or playlist into the Music Assistant queue. Next, previous, and track-complete on the TV follow that queue instead of the native MSX list.
+
+### Fixed
+
+- Playing from the TV no longer fails with a missing authentication session.
+- Library and Yandex tracks already in the queue are no longer appended again on each next.
+- The TV playlist is rotated so the current Music Assistant item is first, so next no longer jumps to the wrong track.
+- Music Assistant progress no longer keeps the previous track's position after a skip.
+- Seeking no longer makes later TV position reports look stale.
+- Next, previous, and album/playlist start from the TV no longer load the playlist twice.
+
 ## [1.4.11] - 2026-08-21
 
 ### Fixed

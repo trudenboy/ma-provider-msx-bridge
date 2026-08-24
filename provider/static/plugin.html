@@ -50,6 +50,12 @@
         if (action.indexOf("request:interaction:/") === 0) {
             return action.replace("request:interaction:/", "request:interaction:" + BRIDGE + "/");
         }
+        if (action.indexOf("request:/") === 0) {
+            return action.replace("request:/", "request:" + BRIDGE + "/");
+        }
+        if (action.indexOf("execute:/") === 0) {
+            return action.replace("execute:/", "execute:" + BRIDGE + "/");
+        }
         if (action.indexOf("/") === 0) {
             return BRIDGE + action;
         }
@@ -74,18 +80,25 @@
         }
     }
 
+    function resetPlaybackClock() {
+        detachMediaListeners();
+        pausedAtPosition = 0;
+        startPositionTimer(0);
+    }
+
     function startPositionTimer(startPosition) {
         stopPositionTimer();
         positionStartValue = startPosition || 0;
         positionStartTime = Date.now() / 1000;
         positionTimer = setInterval(function() {
             if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
-                var position;
+                var elapsed = positionStartValue + ((Date.now() / 1000) - positionStartTime);
+                var position = elapsed;
                 if (monitoredElement && !monitoredElement.paused) {
-                    position = monitoredElement.currentTime;
-                } else {
-                    var elapsed = (Date.now() / 1000) - positionStartTime;
-                    position = positionStartValue + elapsed;
+                    var mediaPos = monitoredElement.currentTime;
+                    if (mediaPos <= elapsed + 2) {
+                        position = mediaPos;
+                    }
                 }
                 try {
                     wsConnection.send(JSON.stringify({ type: "position", position: position }));
@@ -134,14 +147,14 @@
                     if (msg.duration != null && msg.duration > 0) data.duration = msg.duration;
                     if (msg.next_action) data.nextAction = resolveAction(msg.next_action);
                     if (msg.prev_action) data.prevAction = resolveAction(msg.prev_action);
-                    startPositionTimer(0);
+                    resetPlaybackClock();
 
                     var audioUrl = BRIDGE + msg.path;
                     var audioAction = "audio:" + audioUrl;
                     tvx.InteractionPlugin.executeAction(audioAction, data);
                 } else if (msg.type === "playlist" && msg.url && typeof tvx.InteractionPlugin.executeAction === "function") {
                     var playlistUrl = BRIDGE + addDeviceParam(msg.url, deviceId);
-                    startPositionTimer(0);
+                    resetPlaybackClock();
                     tvx.InteractionPlugin.executeAction("playlist:" + playlistUrl);
                 } else if (msg.type === "sendspin" && msg.url && typeof tvx.InteractionPlugin.executeAction === "function") {
                     // Sendspin bridge stream start: open the web kiosk in Sendspin
@@ -153,7 +166,7 @@
                     startPositionTimer(seekSecs);
                     tvx.InteractionPlugin.executeAction("player:seek:" + seekSecs);
                 } else if (msg.type === "goto_index" && msg.index != null && typeof tvx.InteractionPlugin.executeAction === "function") {
-                    startPositionTimer(0);
+                    resetPlaybackClock();
                     tvx.InteractionPlugin.executeAction("player:goto:index:" + msg.index);
                 } else if (msg.type === "play_update" && typeof tvx.InteractionPlugin.executeAction === "function") {
                     // Update metadata of the currently playing item without restarting audio.
