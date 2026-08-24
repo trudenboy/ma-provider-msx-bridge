@@ -74,6 +74,14 @@ STATIC_DIR = Path(__file__).parent / "static"
 _KNOWN_EXTENSIONS = (".mp3", ".json", ".flac", ".aac")
 
 
+def _queue_item_limit(queue: Any) -> int:
+    """Return how many items to read from an in-memory MA queue."""
+    count = getattr(queue, "items", None)
+    if isinstance(count, int) and count > 0:
+        return count
+    return 500
+
+
 def _int_param(query: MultiMapping[str], name: str, default: int, max_val: int = 10000) -> int:
     """Parse an integer query parameter safely, clamping to [0, max_val]."""
     try:
@@ -661,7 +669,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
                 MsxItem(
                     label="MSX Player",
                     icon="msx-white-soft:tv",
-                    action=f"menu:request:interaction:init@{prefix}/msx/plugin.html?v=17",
+                    action=f"menu:request:interaction:init@{prefix}/msx/plugin.html?v=18",
                 ),
                 MsxItem(
                     label="Web Kiosk",
@@ -1295,13 +1303,15 @@ small {{ color: #666; display: block; margin-top: 4px; }}
         prefix = self._get_prefix(request)
         player_id = request.match_info["player_id"]
         queue_id = request.query.get("queue_id", player_id)
+        queue = self.provider.mass.player_queues.get(queue_id)
         if "start" in request.query:
             start = _int_param(request.query, "start", 0)
         else:
-            queue = self.provider.mass.player_queues.get(queue_id)
             start = int(getattr(queue, "current_index", 0) or 0)
 
-        tracks = queue_items_to_tracks(self.provider.mass.player_queues.items(queue_id))
+        tracks = queue_items_to_tracks(
+            self.provider.mass.player_queues.items(queue_id, limit=_queue_item_limit(queue))
+        )
 
         playlist = map_tracks_to_msx_playlist(
             tracks,
@@ -1523,6 +1533,17 @@ small {{ color: #666; display: block; margin-top: 4px; }}
             player = self.provider.mass.players.get_player(player_id)
             if player and isinstance(player, MSXPlayer):
                 self.provider.mass.create_task(self._cmd_play_no_echo(player_id))
+                self.provider.on_player_activity(player_id)
+        elif msg_type == "seek":
+            position = msg.get("position")
+            player = self.provider.mass.players.get_player(player_id)
+            if (
+                player
+                and isinstance(player, MSXPlayer)
+                and position is not None
+                and isinstance(position, (int, float))
+            ):
+                player.note_tv_seek(float(position))
                 self.provider.on_player_activity(player_id)
         else:
             logger.debug("Unknown WS message type from %s: %s", player_id, msg_type)
@@ -1769,7 +1790,10 @@ small {{ color: #666; display: block; margin-top: 4px; }}
             return web.json_response({"items": [], "current_index": -1})
 
         queue_id = player_id
-        queue_items = self.provider.mass.player_queues.items(queue_id)
+        queue = self.provider.mass.player_queues.get(queue_id)
+        queue_items = self.provider.mass.player_queues.items(
+            queue_id, limit=_queue_item_limit(queue)
+        )
 
         current_uri = None
         media = player.current_media
@@ -1832,9 +1856,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
             base_url = getattr(source, "base_url", None)
             if isinstance(base_url, str) and base_url.startswith("http"):
                 extra_bases.append(base_url)
-        return await self.party.handle_qr_cover(
-            request, request_prefix=self._get_prefix(request), extra_bases=extra_bases
-        )
+        return await self.party.handle_qr_cover(request, extra_bases=extra_bases)
 
     def _qr_cover_task(
         self, cache_key: tuple[str, str], image_url: str, join_url: str

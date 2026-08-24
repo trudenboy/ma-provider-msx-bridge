@@ -290,6 +290,30 @@ async def test_qr_cover_no_party_redirects_to_original(
         await client.close()
 
 
+async def test_qr_cover_ignores_spoofed_request_host(
+    provider: MSXBridgeProvider, mass_mock: Mock
+) -> None:
+    """A crafted Host header must not allow fetching from that host."""
+    mass_mock.get_provider = Mock(return_value=_party_mock())
+    mass_mock.webserver.base_url = "http://ma.local:8095"
+    mass_mock.http_session = _http_session_mock(_black_cover_png())
+    server = MSXHTTPServer(provider, 0)
+    client = AiohttpTestClient(TestServer(server.app))
+    await client.start_server()
+    try:
+        evil = "http://attacker.example:8099/img.png"
+        resp = await client.get(
+            "/api/party/qr-cover.png",
+            params={"image": evil},
+            headers={"Host": "attacker.example:8099"},
+            allow_redirects=False,
+        )
+        assert resp.status == 400
+        mass_mock.http_session.get.assert_not_called()
+    finally:
+        await client.close()
+
+
 async def test_qr_cover_disallowed_source_rejected(
     provider: MSXBridgeProvider, mass_mock: Mock
 ) -> None:
