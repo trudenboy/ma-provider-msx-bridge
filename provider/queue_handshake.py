@@ -153,16 +153,18 @@ async def _prepare_msx_audio_locked(
         return media
 
     player.expect_new_media()
-    if from_playlist:
-        player._skip_ws_notify = True
-    try:
+
+    async def _enqueue() -> None:
         if queue_item is not None:
             await provider.mass.player_queues.play_index(*queue_item)
         else:
             await provider.mass.player_queues.play_media(player.player_id, uri)
-    finally:
-        if from_playlist:
-            player._skip_ws_notify = False
+
+    if from_playlist:
+        with player.suppress_ws_notify():
+            await _enqueue()
+    else:
+        await _enqueue()
 
     media = await player.wait_for_media(timeout=10.0)
     if not media:

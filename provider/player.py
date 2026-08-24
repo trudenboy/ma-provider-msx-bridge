@@ -26,7 +26,8 @@ class MSXPlayer(Player):
 
     current_stream_url: str | None = None
     output_format: str = "mp3"
-    _skip_ws_notify: bool = False
+    _skip_ws_depth: int = 0
+    _accepted_position: bool = False
     _propagating: bool = False
     _playing_from_queue: bool = False
     _queue_source_id: str | None = None
@@ -73,6 +74,8 @@ class MSXPlayer(Player):
         self._attr_volume_level = 100
         self.output_format = output_format
         self._media_ready = asyncio.Event()
+        self._skip_ws_depth = 0
+        self._accepted_position = False
 
     @property
     def requires_flow_mode(self) -> bool:
@@ -127,6 +130,7 @@ class MSXPlayer(Player):
         self._attr_elapsed_time_last_updated = time.time()
         self._last_ws_position = None
         self._track_started_at = time.monotonic()
+        self._accepted_position = False
         self.update_state()
 
         if not self._skip_ws_notify:
@@ -230,7 +234,10 @@ class MSXPlayer(Player):
         if self._track_started_at > 0:
             age = time.monotonic() - self._track_started_at
             if normalized > age + 2.0:
-                return
+                if not self._accepted_position:
+                    return
+                self._track_started_at = time.monotonic() - normalized
+        self._accepted_position = True
         duration = self._served_duration()
         if duration is not None:
             normalized = min(normalized, duration)
@@ -308,16 +315,25 @@ class MSXPlayer(Player):
     @contextmanager
     def suppress_ws_notify(self) -> Iterator[None]:
         """Suppress MA→MSX WebSocket echo while MSX is driving playback."""
-        self._skip_ws_notify = True
+        self._skip_ws_depth += 1
         try:
             yield
         finally:
-            self._skip_ws_notify = False
+            self._skip_ws_depth = max(0, self._skip_ws_depth - 1)
 
     def mark_queue_playback(self, queue_id: str) -> None:
         """Remember that MSX is rendering this MA queue as a native playlist."""
         self._playing_from_queue = True
         self._queue_source_id = queue_id
+
+    @property
+    def _skip_ws_notify(self) -> bool:
+        """True while at least one suppress_ws_notify() context is active."""
+        return self._skip_ws_depth > 0
+
+    @_skip_ws_notify.setter
+    def _skip_ws_notify(self, value: bool) -> None:
+        self._skip_ws_depth = 1 if value else 0
 
     def _notify_msx_playback(self, media: PlayerMedia) -> None:
         """Send WS notification to MSX about the new playback state."""

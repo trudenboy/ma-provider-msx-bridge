@@ -7,7 +7,8 @@ import json
 import re
 import shutil
 import subprocess
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Iterator
+from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock, Mock, call, patch
 from urllib.parse import parse_qs, quote, urlsplit
@@ -20,6 +21,8 @@ from music_assistant_models.enums import PlaybackState
 from music_assistant_models.errors import MusicAssistantError
 from music_assistant_models.player import PlayerMedia
 
+from music_assistant.providers.msx_bridge.audio_stream import _collect_prebuffer
+from music_assistant.providers.msx_bridge.constants import PRE_BUFFER_BYTES
 from music_assistant.providers.msx_bridge.http_server import STATIC_DIR, MSXHTTPServer
 from music_assistant.providers.msx_bridge.mappers import map_track_to_msx
 from music_assistant.providers.msx_bridge.player import MSXPlayer
@@ -505,6 +508,33 @@ async def test_play_context_starts_at_track_uri(
         await client.close()
 
 
+async def test_play_context_prefers_start_index_for_duplicate_uri(
+    provider: MSXBridgeProvider, mass_mock: Mock
+) -> None:
+    """The clicked index wins when the same track URI appears twice."""
+    player = _register_msx_player(mass_mock, provider, "msx_test")
+    items = [
+        _make_queue_item("library://track/11", queue_item_id="a"),
+        _make_queue_item("library://track/12", queue_item_id="b"),
+        _make_queue_item("library://track/11", queue_item_id="c"),
+    ]
+    _wire_queue(mass_mock, items)
+    mass_mock.player_queues.play_media = AsyncMock()
+    server = MSXHTTPServer(provider, 0)
+    client = AiohttpTestClient(TestServer(server.app))
+    await client.start_server()
+    try:
+        with patch.object(player, "wait_for_media", AsyncMock(return_value=player.current_media)):
+            resp = await client.get(
+                "/api/play-context/msx_test"
+                "?uri=library://album/9&start=2&track=library://track/11"
+            )
+        assert resp.status == 200
+        mass_mock.player_queues.play_index.assert_awaited_once_with("msx_test", "c")
+    finally:
+        await client.close()
+
+
 async def test_play_unknown_player(provider: MSXBridgeProvider) -> None:
     """POST /api/play with unknown player_id should return 404."""
     server = MSXHTTPServer(provider, 0)
@@ -526,6 +556,16 @@ async def test_play_invalid_body(http_client: TestClient[Any, Any]) -> None:
         "/api/play",
         data=b"not json",
         headers={"Content-Type": "application/json"},
+    )
+    assert resp.status == 400
+
+
+async def test_play_unknown_charset_is_400(http_client: TestClient[Any, Any]) -> None:
+    """POST /api/play with an unknown JSON charset should return 400, not 500."""
+    resp = await http_client.post(
+        "/api/play",
+        data=b'{"track_uri":"library://track/1","player_id":"msx_test"}',
+        headers={"Content-Type": "application/json; charset=invalid"},
     )
     assert resp.status == 400
 
@@ -693,6 +733,16 @@ def _make_audio_player(mass_mock: Mock) -> tuple[MagicMock, PlayerMedia]:
     player.player_id = "msx_test"
     player.output_format = "mp3"
     player._skip_ws_notify = False
+
+    @contextmanager
+    def _suppress() -> Iterator[None]:
+        player._skip_ws_notify = True
+        try:
+            yield
+        finally:
+            player._skip_ws_notify = False
+
+    player.suppress_ws_notify = _suppress
     media = PlayerMedia(
         uri="library://track/1",
         title=None,
@@ -2063,8 +2113,6 @@ async def test_msx_audio_redirect_mode(provider: MSXBridgeProvider, mass_mock: M
             allow_redirects=False,
         )
         assert resp.status == 302
-        # the URL host is rewritten to the client-reachable one (see the
-        # dedicated rewrite test); the streamserver path must be intact
         assert resp.headers["Location"].endswith(":8097/single/s1/q1/i1/msx_test.mp3")
     finally:
         await client.close()
@@ -2098,12 +2146,24 @@ async def test_msx_audio_redirect_rewrites_host_for_client(
         )
         assert resp.status == 302
         location = urlsplit(resp.headers["Location"])
-        assert location.hostname == "127.0.0.1"  # host the TestClient connects to
+        assert location.hostname == "127.0.0.1"
         assert location.port == 8097
         assert location.path == "/single/s1/q1/i1/msx_test.mp3"
         assert location.query == "flow=1"
     finally:
         await client.close()
+
+
+async def test_collect_prebuffer_waits_for_threshold() -> None:
+    """Headers must not go out until PRE_BUFFER_BYTES have arrived (or EOF)."""
+    queue: asyncio.Queue[bytes | None] = asyncio.Queue()
+    await queue.put(b"a" * 40_000)
+    await queue.put(b"b" * 40_000)
+    await queue.put(b"tail")
+    buf, ended = await _collect_prebuffer(queue)
+    assert ended is False
+    assert sum(len(chunk) for chunk in buf) >= PRE_BUFFER_BYTES
+    assert queue.get_nowait() == b"tail"
 
 
 async def test_msx_audio_redirect_mode_falls_back_to_proxy(

@@ -661,7 +661,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
                 MsxItem(
                     label="MSX Player",
                     icon="msx-white-soft:tv",
-                    action=f"menu:request:interaction:init@{prefix}/msx/plugin.html?v=12",
+                    action=f"menu:request:interaction:init@{prefix}/msx/plugin.html?v=17",
                 ),
                 MsxItem(
                     label="Web Kiosk",
@@ -1903,7 +1903,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
             return rejected
         try:
             body = await request.json()
-        except json.JSONDecodeError, UnicodeDecodeError:
+        except json.JSONDecodeError, UnicodeDecodeError, LookupError:
             return web.json_response({"error": "Invalid JSON body"}, status=400)
 
         track_uri = body.get("track_uri")
@@ -2002,15 +2002,18 @@ small {{ color: #666; display: block; margin-top: 4px; }}
         if queue is None:
             return
         player.mark_queue_playback(queue.queue_id)
+        items = list(self.provider.mass.player_queues.items(queue.queue_id, limit=queue.items))
         target_id: str | None = None
-        if track_uri:
+        if track_uri and 0 <= start < len(items):
+            candidate = items[start]
+            if candidate.media_item is not None and candidate.media_item.uri == track_uri:
+                target_id = candidate.queue_item_id
+        if target_id is None and track_uri:
             found = find_uri_in_active_queue(self.provider.mass, player_id, track_uri)
             if found:
                 target_id = found[1]
-        if target_id is None and start > 0:
-            items = list(self.provider.mass.player_queues.items(queue.queue_id, limit=queue.items))
-            if start < len(items):
-                target_id = items[start].queue_item_id
+        if target_id is None and start > 0 and start < len(items):
+            target_id = items[start].queue_item_id
         if target_id is not None:
             await self.provider.mass.player_queues.play_index(queue.queue_id, target_id)
 

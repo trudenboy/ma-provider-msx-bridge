@@ -250,18 +250,26 @@
         sendWsMessage({ type: "resume" });
     }
 
+    function onMediaSeeked() {
+        if (monitoredElement) {
+            startPositionTimer(monitoredElement.currentTime);
+        }
+    }
+
     function attachMediaListeners(el) {
         if (monitoredElement === el) return;
         detachMediaListeners();
         monitoredElement = el;
         el.addEventListener("pause", onMediaPause);
         el.addEventListener("play", onMediaPlay);
+        el.addEventListener("seeked", onMediaSeeked);
     }
 
     function detachMediaListeners() {
         if (monitoredElement) {
             monitoredElement.removeEventListener("pause", onMediaPause);
             monitoredElement.removeEventListener("play", onMediaPlay);
+            monitoredElement.removeEventListener("seeked", onMediaSeeked);
             monitoredElement = null;
         }
     }

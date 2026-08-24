@@ -227,7 +227,7 @@ class SharedGroupStream:
         except asyncio.CancelledError:
             logger.debug("[SharedStream:%s] Producer cancelled", self.group_id)
             raise
-        except Exception as exc:
+        except (MusicAssistantError, OSError, RuntimeError) as exc:
             logger.exception("[SharedStream:%s] Producer error", self.group_id)
             self.producer_error = exc
         finally:
@@ -240,8 +240,7 @@ class SharedGroupStream:
                 )
             async with self._lock:
                 for player_id, q in list(self.subscribers.items()):
-                    with contextlib.suppress(asyncio.QueueFull):
-                        q.put_nowait(None)
+                    _queue_eof(q)
                     logger.debug(
                         "[SharedStream:%s] Sent EOF to subscriber %s",
                         self.group_id,
@@ -347,6 +346,8 @@ class AudioPipeline:
         media_uri = getattr(media, "uri", "") or str(media)
 
         existing_stream = self.provider.get_shared_stream(group_id)
+        if existing_stream is not None and existing_stream.media_uri != media_uri:
+            existing_stream = None
         is_leader = player_id == group_id
 
         if existing_stream is not None:
@@ -396,8 +397,9 @@ class AudioPipeline:
             for _ in range(30):
                 await asyncio.sleep(0.1)
                 shared_stream = self.provider.get_shared_stream(group_id)
-                if shared_stream is not None:
+                if shared_stream is not None and shared_stream.media_uri == media_uri:
                     break
+                shared_stream = None
             if shared_stream is None:
                 logger.warning(
                     "[SharedStream] Timeout waiting for leader stream, "
@@ -521,8 +523,7 @@ class AudioPipeline:
                 ):
                     await chunk_queue.put(chunk)
             finally:
-                with contextlib.suppress(asyncio.QueueFull):
-                    chunk_queue.put_nowait(None)
+                _queue_eof(chunk_queue)
 
         producer_task: asyncio.Task[None] | None = None
         total_bytes = 0
@@ -553,8 +554,9 @@ class AudioPipeline:
             logger.debug("Stream cancelled for player %s", player_id)
             raise
         finally:
-            if producer_task and not producer_task.done():
-                producer_task.cancel()
+            if producer_task is not None:
+                if not producer_task.done():
+                    producer_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await producer_task
             content_length = headers.get("Content-Length")
@@ -609,6 +611,28 @@ class AudioPipeline:
             del self.active_stream_transports[player_id]
 
 
+def _queue_eof(queue: asyncio.Queue[bytes | None]) -> None:
+    """Enqueue the stream sentinel, making room if the queue is full."""
+    try:
+        queue.put_nowait(None)
+    except asyncio.QueueFull:
+        with contextlib.suppress(asyncio.QueueEmpty):
+            queue.get_nowait()
+        queue.put_nowait(None)
+
+
+def rewrite_stream_host(request: web.Request, url: str) -> str:
+    """Point a stream URL at the host the client already uses to reach us."""
+    client_host = request.url.host
+    if not client_host:
+        return url
+    parts = urlsplit(url)
+    if ":" in client_host:
+        client_host = f"[{client_host}]"
+    netloc = f"{client_host}:{parts.port}" if parts.port else client_host
+    return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
+
+
 async def _collect_prebuffer(
     chunk_queue: asyncio.Queue[bytes | None],
 ) -> tuple[list[bytes], bool]:
@@ -658,18 +682,6 @@ def build_audio_params(
         capped_duration = min(float(duration), 43200)
         headers["Content-Length"] = str(int(capped_duration * bytes_per_sec))
     return pcm_format, out_format, headers
-
-
-def rewrite_stream_host(request: web.Request, url: str) -> str:
-    """Point a stream URL at the host the client already uses to reach us."""
-    client_host = request.url.host
-    if not client_host:
-        return url
-    parts = urlsplit(url)
-    if ":" in client_host:
-        client_host = f"[{client_host}]"
-    netloc = f"{client_host}:{parts.port}" if parts.port else client_host
-    return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
 
 
 def resolve_served_duration(mass: Any, media: PlayerMedia) -> int:
