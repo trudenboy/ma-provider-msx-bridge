@@ -527,14 +527,14 @@ async def test_play_media_queue_sends_playlist(player: MSXPlayer, mass_mock: Moc
     assert player._playlist_size == 5
 
 
-async def test_play_media_sends_goto_index_when_playing_from_queue(
+async def test_play_media_reloads_playlist_when_playing_from_queue(
     player: MSXPlayer, mass_mock: Mock
 ) -> None:
-    """play_media should send translated goto_index when _playing_from_queue is True."""
+    """Same-queue play reloads a rotated playlist so MSX index 0 is the current item."""
     player._playing_from_queue = True
     player._queue_source_id = "msx_test"
-    player._playlist_offset = 2  # playlist was rotated by 2
-    player._playlist_size = 5  # 5 items in playlist
+    player._playlist_offset = 2
+    player._playlist_size = 5
 
     media = Mock(spec=PlayerMedia)
     media.uri = "http://ma-server/stream/12345"
@@ -546,11 +546,10 @@ async def test_play_media_sends_goto_index_when_playing_from_queue(
     media.queue_item_id = "qi2"
 
     queue = Mock()
-    queue.current_index = 3  # MA index 3 → MSX index (3-2)%5 = 1
+    queue.current_index = 3
 
     mass_mock.player_queues.get.return_value = queue
     mass_mock.player_queues.get_item.return_value = None
-    # Return same size as _playlist_size to avoid "queue changed" re-send
     mass_mock.player_queues.items.return_value = [Mock()] * 5
 
     with (
@@ -560,9 +559,8 @@ async def test_play_media_sends_goto_index_when_playing_from_queue(
     ):
         await player.play_media(media)
 
-    # Index translated: (3 - 2) % 5 = 1
-    mock_goto.assert_called_once_with("msx_test", 1)
-    mock_playlist.assert_not_called()
+    mock_goto.assert_not_called()
+    mock_playlist.assert_called_once_with("msx_test", 3, queue_id="msx_test")
     mock_play.assert_not_called()
 
 
@@ -624,8 +622,8 @@ async def test_play_media_non_queue_sends_broadcast_play(
         artist="Artist 1",
         image_url="http://ma-server/image.png",
         duration=180,
-        next_action=f"request:interaction:/api/next/{player.player_id}",
-        prev_action=f"request:interaction:/api/previous/{player.player_id}",
+        next_action=f"execute:/api/next/{player.player_id}",
+        prev_action=f"execute:/api/previous/{player.player_id}",
     )
 
 
@@ -637,6 +635,27 @@ async def test_stop_resets_playing_from_queue(player: MSXPlayer) -> None:
 
 
 # --- WebSocket position reporting ---
+
+
+async def test_update_position_ignores_stale_report_after_track_change(
+    player: MSXPlayer,
+) -> None:
+    """A leftover TV clock must not keep MA progress on the previous track."""
+    media = Mock(spec=PlayerMedia)
+    media.uri = "library://track/1"
+    media.title = None
+    media.artist = None
+    media.image_url = None
+    media.duration = 180
+    media.stream_duration = None
+    media.source_id = None
+    media.queue_item_id = None
+    with patch.object(player.provider, "notify_play_started"):
+        await player.play_media(media)
+    player.update_position(95.0)
+    assert player._attr_elapsed_time == 0.0
+    player.update_position(0.4)
+    assert player._attr_elapsed_time == 0.4
 
 
 def test_update_position(player: MSXPlayer) -> None:

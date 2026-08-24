@@ -50,6 +50,35 @@ def test_map_track_to_msx() -> None:
     assert "uri=library%3A%2F%2Ftrack%2F1" in item.action
     assert "token=tok123" in item.action
     assert "device_id=abc" in item.action
+    assert item.properties is not None
+    assert item.properties["trigger:complete"] == "execute:http://localhost/api/next/msx_123"
+
+
+def test_map_track_to_msx_play_context() -> None:
+    """Album/playlist clicks must enqueue the container into the MA queue."""
+    prov = _mock_provider()
+    track = MagicMock(spec=Track)
+    track.name = "Test Track"
+    track.uri = "library://track/1"
+    track.duration = 125
+    track.artist_str = "Test Artist"
+    track.image = "some_image"
+
+    item = map_track_to_msx(
+        track=track,
+        prefix="http://localhost",
+        player_id="msx_123",
+        provider=prov,
+        device_param="device_id=abc",
+        context_uri="library://album/9",
+        context_start=3,
+    )
+
+    assert item.action is not None
+    assert item.action.startswith("execute:http://localhost/api/play-context/msx_123")
+    assert "uri=library%3A%2F%2Falbum%2F9" in item.action
+    assert "start=3" in item.action
+    assert "device_id=abc" in item.action
 
 
 @pytest.mark.asyncio

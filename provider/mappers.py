@@ -16,12 +16,45 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def queue_nav_properties(player_id: str, prefix: str = "") -> dict[str, str]:
+    """MSX next/prev/complete must go through the MA queue, not the native list."""
+    next_action = f"execute:{prefix}/api/next/{player_id}"
+    prev_action = f"execute:{prefix}/api/previous/{player_id}"
+    return {
+        "control:retune": "restart",
+        "progress:position": "0",
+        "button:next:icon": "default",
+        "button:next:action": next_action,
+        "button:prev:icon": "default",
+        "button:prev:action": prev_action,
+        "trigger:complete": next_action,
+    }
+
+
 def append_device_param(url: str, device_param: str) -> str:
     """Append device_id to URL if present."""
     if not device_param:
         return url
     sep = "&" if "?" in url else "?"
     return f"{url}{sep}{device_param}"
+
+
+def container_uri(kind: str, item_id: str, provider: str = "library") -> str:
+    """Build a MA media URI for an album, playlist, or similar container."""
+    domain = "library" if provider in {"", "library"} else provider
+    return f"{domain}://{kind}/{item_id}"
+
+
+def play_context_action(
+    prefix: str,
+    player_id: str,
+    context_uri: str,
+    start: int,
+    device_param: str = "",
+) -> str:
+    """Build a request that enqueues a container/track into the MA queue."""
+    url = f"{prefix}/api/play-context/{player_id}?uri={quote(context_uri, safe='')}&start={start}"
+    return f"execute:{append_device_param(url, device_param)}"
 
 
 def sort_album_tracks(tracks: list[Any]) -> list[Any]:
@@ -175,6 +208,8 @@ def map_track_to_msx(
     provider: MSXBridgeProvider,
     device_param: str = "",
     playlist_url: str | None = None,
+    context_uri: str | None = None,
+    context_start: int = 0,
 ) -> MsxItem:
     """Map a MA Track to an MSX Item."""
     duration = getattr(track, "duration", 0) or 0
@@ -182,18 +217,16 @@ def map_track_to_msx(
     artist = getattr(track, "artist_str", "")
     image_url = get_image_url(track, provider)
 
-    # Build footer: "Artist · 3:42" or just one of them
     footer: str | None = (
         f"{artist} · {duration_str}"
         if artist and duration_str
         else (artist or duration_str or None)
     )
 
-    if playlist_url:
-        # playlist: (not auto:) loads the playlist and executes the content
-        # root's action ("player:play") which starts playback AND shows the
-        # player in foreground.  playlist:auto: plays in background.
-        # Items are rotated so the desired track is at index 0.
+    nav = queue_nav_properties(player_id, prefix)
+    if context_uri:
+        action = play_context_action(prefix, player_id, context_uri, context_start, device_param)
+    elif playlist_url:
         action = f"playlist:{playlist_url}"
     else:
         action = _build_audio_action(
@@ -212,6 +245,9 @@ def map_track_to_msx(
         image=image_url,
         background=image_url,
         action=action,
+        next_action=nav["button:next:action"],
+        prev_action=nav["button:prev:action"],
+        properties=nav,
     )
 
 
@@ -268,6 +304,7 @@ def map_tracks_to_msx_playlist(
                 else None
             ),
         )
+        nav = queue_nav_properties(player_id, prefix)
 
         msx_items.append(
             MsxItem(
@@ -278,6 +315,9 @@ def map_tracks_to_msx_playlist(
                 background=background,
                 duration=duration,
                 action=action,
+                next_action=nav["button:next:action"],
+                prev_action=nav["button:prev:action"],
+                properties=nav,
             )
         )
 

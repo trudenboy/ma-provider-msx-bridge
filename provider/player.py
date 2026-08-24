@@ -37,6 +37,7 @@ class MSXPlayer(Player):
     _attr_elapsed_time_last_updated: float | None = None
     _last_ws_position: float | None = None
     _ws_ever_connected: bool = False
+    _track_started_at: float = 0.0
 
     def __init__(
         self,
@@ -125,6 +126,7 @@ class MSXPlayer(Player):
         self._attr_elapsed_time = 0.0
         self._attr_elapsed_time_last_updated = time.time()
         self._last_ws_position = None
+        self._track_started_at = time.monotonic()
         self.update_state()
 
         if not self._skip_ws_notify:
@@ -223,6 +225,10 @@ class MSXPlayer(Player):
         if self._attr_playback_state != PlaybackState.PLAYING:
             return
         normalized = max(0.0, float(position))
+        if self._track_started_at > 0:
+            age = time.monotonic() - self._track_started_at
+            if normalized > age + 2.0:
+                return
         duration = self._served_duration()
         if duration is not None:
             normalized = min(normalized, duration)
@@ -306,6 +312,11 @@ class MSXPlayer(Player):
         finally:
             self._skip_ws_notify = False
 
+    def mark_queue_playback(self, queue_id: str) -> None:
+        """Remember that MSX is rendering this MA queue as a native playlist."""
+        self._playing_from_queue = True
+        self._queue_source_id = queue_id
+
     def _notify_msx_playback(self, media: PlayerMedia) -> None:
         """Send WS notification to MSX about the new playback state."""
         source_id = media.source_id
@@ -320,8 +331,8 @@ class MSXPlayer(Player):
         else:
             # Queue-backed playback renders from the MSX native playlist, which carries
             # its own per-track metadata; only standalone media needs it pushed here.
-            next_action = f"request:interaction:/api/next/{self.player_id}"
-            prev_action = f"request:interaction:/api/previous/{self.player_id}"
+            next_action = f"execute:/api/next/{self.player_id}"
+            prev_action = f"execute:/api/previous/{self.player_id}"
             provider.notify_play_started(
                 self.player_id,
                 title=media.title,
@@ -341,16 +352,9 @@ class MSXPlayer(Player):
         except Exception:
             self.logger.debug("Failed to get queue size for %s", source_id, exc_info=True)
             current_size = self._playlist_size
-        if current_size != self._playlist_size:
-            self._playlist_size = current_size
-            self._playlist_offset = ma_index
-            provider.notify_play_playlist(self.player_id, ma_index, queue_id=source_id)
-        else:
-            if self._playlist_size > 0:
-                msx_index = (ma_index - self._playlist_offset) % self._playlist_size
-            else:
-                msx_index = ma_index
-            provider.notify_goto_index(self.player_id, msx_index)
+        self._playlist_size = current_size
+        self._playlist_offset = ma_index
+        provider.notify_play_playlist(self.player_id, ma_index, queue_id=source_id)
 
     def _notify_new_queue(self, provider: MSXBridgeProvider, source_id: str) -> None:
         """Send full MSX native playlist for a new queue."""

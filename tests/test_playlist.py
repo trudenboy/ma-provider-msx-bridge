@@ -57,6 +57,9 @@ def test_map_tracks_to_msx_playlist_basic() -> None:
     assert "library%3A%2F%2Ftrack%2F2" in item0.action
     assert "/msx/audio/msx_1?" in item0.action
     assert "&from_playlist=1" in item0.action
+    assert item0.properties is not None
+    assert item0.properties["button:next:action"] == "execute:http://localhost/api/next/msx_1"
+    assert item0.properties["trigger:complete"] == "execute:http://localhost/api/next/msx_1"
     assert item0.player_label == "Track 2"
     assert item0.duration == 200
     assert item0.label is not None

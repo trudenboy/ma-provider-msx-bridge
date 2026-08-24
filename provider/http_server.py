@@ -27,6 +27,7 @@ from .constants import (
 )
 from .mappers import (
     append_device_param,
+    container_uri,
     dump_msx,
     get_image_url,
     map_album_to_msx,
@@ -75,6 +76,20 @@ def _int_param(query: MultiMapping[str], name: str, default: int, max_val: int =
 def _is_audio_path(path: str) -> bool:
     """Check whether the path is one of the audio routes."""
     return path.startswith(("/stream/", "/msx/audio/"))
+
+
+def _msx_execute_ok(action: str = "[]") -> web.Response:
+    """Wrap a follow-up action for MSX ``execute:{URL}``."""
+    return web.json_response(
+        {"response": {"status": 200, "text": "OK", "message": None, "data": {"action": action}}}
+    )
+
+
+def _msx_execute_error(status: int, message: str) -> web.Response:
+    """Return an MSX-visible execute error while keeping HTTP 200."""
+    return web.json_response(
+        {"response": {"status": status, "text": "Error", "message": message, "data": None}}
+    )
 
 
 def _strip_known_extension(value: str) -> str:
@@ -429,6 +444,7 @@ class MSXHTTPServer:
             ("/api/pause/{player_id}", self._handle_pause),
             ("/api/stop/{player_id}", self._handle_stop),
             ("/api/quick-stop/{player_id}", self._handle_quick_stop),
+            ("/api/play-context/{player_id}", self._handle_play_context),
             ("/api/next/{player_id}", self._handle_next),
             ("/api/previous/{player_id}", self._handle_previous),
         ):
@@ -636,7 +652,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
                 MsxItem(
                     label="MSX Player",
                     icon="msx-white-soft:tv",
-                    action=f"menu:request:interaction:init@{prefix}/msx/plugin.html?v=8",
+                    action=f"menu:request:interaction:init@{prefix}/msx/plugin.html?v=12",
                 ),
                 MsxItem(
                     label="Web Kiosk",
@@ -824,8 +840,6 @@ small {{ color: #666; display: block; margin-top: 4px; }}
             logger.exception("Failed to fetch tracks")
             tracks = []
 
-        playlist_base = f"{prefix}/msx/playlist/tracks.json?limit={limit}&offset={offset}"
-        playlist_base = append_device_param(playlist_base, device_param)
         items = [
             map_track_to_msx(
                 t,
@@ -833,9 +847,9 @@ small {{ color: #666; display: block; margin-top: 4px; }}
                 player_id,
                 self.provider,
                 device_param,
-                playlist_url=f"{playlist_base}&start={idx}",
+                context_uri=t.uri,
             )
-            for idx, t in enumerate(tracks)
+            for t in tracks
         ]
         content = MsxContent(
             headline="Tracks",
@@ -863,8 +877,6 @@ small {{ color: #666; display: block; margin-top: 4px; }}
         except MusicAssistantError, TimeoutError:
             logger.exception("Failed to fetch recently played tracks")
             tracks = []
-        playlist_base = f"{prefix}/msx/playlist/recently-played.json"
-        playlist_base = append_device_param(playlist_base, device_param)
         items = [
             map_track_to_msx(
                 t,
@@ -872,9 +884,9 @@ small {{ color: #666; display: block; margin-top: 4px; }}
                 player_id,
                 self.provider,
                 device_param,
-                playlist_url=f"{playlist_base}{'&' if '?' in playlist_base else '?'}start={idx}",
+                context_uri=t.uri,
             )
-            for idx, t in enumerate(tracks)
+            for t in tracks
         ]
         content = MsxContent(
             headline="Recently played",
@@ -1037,16 +1049,14 @@ small {{ color: #666; display: block; margin-top: 4px; }}
             item.label = f"Album — {getattr(album, 'artist_str', '')}"
             item.icon = "msx-white-soft:album"
             items.append(item)
-        playlist_base = f"{prefix}/msx/playlist/search.json?q={quote(query, safe='')}"
-        playlist_base = append_device_param(playlist_base, device_param)
-        for idx, track in enumerate(results.tracks):
+        for track in results.tracks:
             item = map_track_to_msx(
                 track,
                 prefix,
                 player_id,
                 self.provider,
                 device_param,
-                playlist_url=f"{playlist_base}&start={idx}",
+                context_uri=track.uri,
             )
             item.label = f"Track — {getattr(track, 'artist_str', '')}"
             item.icon = "msx-white-soft:audiotrack"
@@ -1068,8 +1078,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
         except MusicAssistantError, TimeoutError:
             logger.exception("Failed to fetch tracks for album %s", item_id)
             tracks = []
-        playlist_base = f"{prefix}/msx/playlist/album/{item_id}.json?provider={provider}"
-        playlist_base = append_device_param(playlist_base, device_param)
+        album_uri = container_uri("album", item_id, provider)
         items = [
             map_track_to_msx(
                 t,
@@ -1077,7 +1086,8 @@ small {{ color: #666; display: block; margin-top: 4px; }}
                 player_id,
                 self.provider,
                 device_param,
-                playlist_url=f"{playlist_base}&start={idx}",
+                context_uri=album_uri,
+                context_start=idx,
             )
             for idx, t in enumerate(tracks)
         ]
@@ -1131,8 +1141,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
         except MusicAssistantError, TimeoutError:
             logger.exception("Failed to fetch tracks for playlist %s", item_id)
             tracks = []
-        playlist_base = f"{prefix}/msx/playlist/playlist/{item_id}.json"
-        playlist_base = append_device_param(playlist_base, device_param)
+        playlist_uri = container_uri("playlist", item_id)
         items = [
             map_track_to_msx(
                 t,
@@ -1140,7 +1149,8 @@ small {{ color: #666; display: block; margin-top: 4px; }}
                 player_id,
                 self.provider,
                 device_param,
-                playlist_url=f"{playlist_base}{'&' if '?' in playlist_base else '?'}start={idx}",
+                context_uri=playlist_uri,
+                context_start=idx,
             )
             for idx, t in enumerate(tracks)
         ]
@@ -1276,7 +1286,11 @@ small {{ color: #666; display: block; margin-top: 4px; }}
         prefix = self._get_prefix(request)
         player_id = request.match_info["player_id"]
         queue_id = request.query.get("queue_id", player_id)
-        start = _int_param(request.query, "start", 0)
+        if "start" in request.query:
+            start = _int_param(request.query, "start", 0)
+        else:
+            queue = self.provider.mass.player_queues.get(queue_id)
+            start = int(getattr(queue, "current_index", 0) or 0)
 
         tracks = queue_items_to_tracks(self.provider.mass.player_queues.items(queue_id))
 
@@ -1852,6 +1866,32 @@ small {{ color: #666; display: block; margin-top: 4px; }}
             return web.json_response({"error": "Cross-site request rejected"}, status=403)
         return None
 
+    async def _handle_play_context(self, request: web.Request) -> web.Response:
+        """Enqueue a container or track into the MA queue and start at the given index."""
+        if rejected := self._reject_cross_site(request):
+            return rejected
+        player_id = _strip_known_extension(request.match_info["player_id"])
+        player = self._get_msx_player(player_id)
+        if player is None:
+            return _msx_execute_error(404, "Unknown MSX player")
+        uri = request.query.get("uri")
+        if not isinstance(uri, str) or not uri or not await is_media_item_uri(uri):
+            return _msx_execute_error(400, "Invalid uri")
+        start = _int_param(request.query, "start", 0)
+        self.provider.on_player_activity(player_id)
+        player.expect_new_media()
+        await self.provider.mass.player_queues.play_media(player_id, uri)
+        if start > 0:
+            await player.wait_for_media(timeout=10.0)
+            queue = self.provider.mass.player_queues.get_active_queue(player_id)
+            if queue is not None:
+                items = list(self.provider.mass.player_queues.items(queue.queue_id))
+                if start < len(items):
+                    await self.provider.mass.player_queues.play_index(
+                        queue.queue_id, items[start].queue_item_id
+                    )
+        return _msx_execute_ok(self._queue_playlist_action(request, player_id))
+
     async def _handle_play(self, request: web.Request) -> web.Response:
         """Start playback of a track."""
         if rejected := self._reject_cross_site(request):
@@ -1923,7 +1963,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
             return web.json_response({"error": "Unknown MSX player"}, status=404)
         self.provider.on_player_activity(player_id)
         await self.provider.mass.players.cmd_next_track(player_id)
-        return web.json_response({"status": "ok"})
+        return _msx_execute_ok(self._queue_playlist_action(request, player_id))
 
     async def _handle_previous(self, request: web.Request) -> web.Response:
         """Skip to previous track."""
@@ -1934,9 +1974,24 @@ small {{ color: #666; display: block; margin-top: 4px; }}
             return web.json_response({"error": "Unknown MSX player"}, status=404)
         self.provider.on_player_activity(player_id)
         await self.provider.mass.players.cmd_previous_track(player_id)
-        return web.json_response({"status": "ok"})
+        return _msx_execute_ok(self._queue_playlist_action(request, player_id))
 
     # --- Helpers ---
+
+    def _queue_playlist_action(self, request: web.Request, player_id: str) -> str:
+        """Build a playlist: action rotated so the current MA item is index 0."""
+        prefix = self._get_prefix(request)
+        queue = self.provider.mass.player_queues.get_active_queue(player_id)
+        queue_id = queue.queue_id if queue is not None else player_id
+        start = int(getattr(queue, "current_index", 0) or 0) if queue is not None else 0
+        url = (
+            f"{prefix}/msx/queue-playlist/{player_id}.json"
+            f"?start={start}&queue_id={queue_id}"
+        )
+        device_id = request.query.get("device_id")
+        if device_id:
+            url = f"{url}&device_id={quote(device_id, safe='')}"
+        return f"playlist:{url}"
 
     def _get_msx_player(self, player_id: str) -> MSXPlayer | None:
         """Return the MSXPlayer for player_id if it belongs to this provider, else None."""

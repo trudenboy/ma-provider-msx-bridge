@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from types import SimpleNamespace
@@ -18,6 +19,16 @@ if TYPE_CHECKING:
     from .provider import MSXBridgeProvider
 
 logger = logging.getLogger(__name__)
+
+_prepare_locks: dict[str, asyncio.Lock] = {}
+
+
+def _lock_for(player_id: str) -> asyncio.Lock:
+    lock = _prepare_locks.get(player_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        _prepare_locks[player_id] = lock
+    return lock
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,18 +121,31 @@ async def prepare_msx_audio(
     Owns the enqueue vs reuse decision so MA-driven play and MSX-driven
     /msx/audio share one implementation.
     """
-    queue_item: tuple[str, str] | None = None
-    if not await is_media_item_uri(uri):
-        queue_item = find_uri_in_active_queue(provider.mass, player.player_id, uri, queue_item_id)
-        if queue_item is None:
-            return PrepareFailure(400, "Invalid uri parameter")
     provider.on_player_activity(player.player_id)
+    async with _lock_for(player.player_id):
+        return await _prepare_msx_audio_locked(
+            provider,
+            player,
+            uri,
+            from_playlist=from_playlist,
+            queue_item_id=queue_item_id,
+        )
 
-    if (
-        from_playlist
-        and player.playing_from_queue
-        and current_media_matches_uri(provider.mass, player, uri, queue_item_id)
-    ):
+
+async def _prepare_msx_audio_locked(
+    provider: MSXBridgeProvider,
+    player: MSXPlayer,
+    uri: str,
+    *,
+    from_playlist: bool,
+    queue_item_id: str | None,
+) -> PlayerMedia | PrepareFailure:
+    """Enqueue or reuse under the per-player lock."""
+    queue_item = find_uri_in_active_queue(provider.mass, player.player_id, uri, queue_item_id)
+    if queue_item is None and not await is_media_item_uri(uri):
+        return PrepareFailure(400, "Invalid uri parameter")
+
+    if from_playlist and current_media_matches_uri(provider.mass, player, uri, queue_item_id):
         logger.debug("Queue-driven: using current_media for %s", uri)
         media = player.current_media
         if media is None:
@@ -143,4 +167,6 @@ async def prepare_msx_audio(
     media = await player.wait_for_media(timeout=10.0)
     if not media:
         return PrepareFailure(504, "Playback setup timeout")
+    if media.source_id:
+        player.mark_queue_playback(media.source_id)
     return media
