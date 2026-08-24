@@ -19,6 +19,7 @@ from aiohttp.test_utils import TestServer, make_mocked_request
 from PIL import Image
 
 from music_assistant.helpers.util import join_task
+from music_assistant.providers.msx_bridge import party as party_module
 from music_assistant.providers.msx_bridge.http_server import (
     MSXHTTPServer,
     PartyInfo,
@@ -163,10 +164,7 @@ async def test_qr_cover_composite_runs_off_event_loop(
         stamp_threads.append(threading.get_ident())
         return _stamp_qr_on_cover(cover_bytes, qr_bytes)
 
-    monkeypatch.setattr(
-        "music_assistant.providers.msx_bridge.party.stamp_qr_on_cover",
-        _tracking_stamp,
-    )
+    monkeypatch.setattr(party_module, "stamp_qr_on_cover", _tracking_stamp)
     server = MSXHTTPServer(provider, 0)
     client = AiohttpTestClient(TestServer(server.app))
     await client.start_server()
@@ -195,10 +193,7 @@ async def test_qr_cover_concurrent_misses_coalesce(
         stamp_calls.append(1)
         return _stamp_qr_on_cover(cover_bytes, qr_bytes)
 
-    monkeypatch.setattr(
-        "music_assistant.providers.msx_bridge.party.stamp_qr_on_cover",
-        _tracking_stamp,
-    )
+    monkeypatch.setattr(party_module, "stamp_qr_on_cover", _tracking_stamp)
     server = MSXHTTPServer(provider, 0)
     client = AiohttpTestClient(TestServer(server.app))
     await client.start_server()
