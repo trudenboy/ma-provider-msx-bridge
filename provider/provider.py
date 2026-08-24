@@ -440,6 +440,7 @@ class MSXBridgeProvider(PlayerProvider):
         group_id: str,
         media_uri: str,
         audio_chunks: AsyncIterator[bytes],
+        session_id: str = "",
     ) -> SharedGroupStream:
         """
         Get existing shared stream or create new one for the group.
@@ -459,7 +460,12 @@ class MSXBridgeProvider(PlayerProvider):
             existing = self._shared_streams.get(group_id)
 
             # Reuse existing if same media and not finished
-            if existing and not existing.finished and existing.media_uri == media_uri:
+            if (
+                existing
+                and not existing.finished
+                and existing.media_uri == media_uri
+                and existing.session_id == session_id
+            ):
                 logger.info(
                     "[GroupStream] Reusing existing shared stream for group %s (subscribers: %d)",
                     group_id,
@@ -484,7 +490,7 @@ class MSXBridgeProvider(PlayerProvider):
                 group_id,
                 media_uri[:80] if media_uri else "N/A",
             )
-            stream = SharedGroupStream(group_id, media_uri)
+            stream = SharedGroupStream(group_id, media_uri, session_id)
             await stream.start(audio_chunks)
             self._shared_streams[group_id] = stream
 

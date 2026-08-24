@@ -24,6 +24,8 @@ logger = logging.getLogger(__name__)
 
 PARTY_CACHE_TTL = 10.0
 PARTY_CALL_TIMEOUT = 5.0
+COVER_FETCH_MAX_BYTES = 2 * 1024 * 1024
+COVER_MAX_PIXELS = 4096 * 4096
 
 
 class PartyInfo(NamedTuple):
@@ -169,7 +171,10 @@ class PartyAdapter:
         ) as resp:
             if resp.status != 200:
                 raise ValueError(f"cover fetch returned HTTP {resp.status}")
-            cover_bytes = await resp.read()
+            content_length = resp.headers.get("Content-Length")
+            if content_length and int(content_length) > COVER_FETCH_MAX_BYTES:
+                raise ValueError("cover exceeds size limit")
+            cover_bytes = await _read_capped(resp, COVER_FETCH_MAX_BYTES)
         rendered = await asyncio.to_thread(render_qr_cover, join_url, cover_bytes)
         if len(self.qr_cover_cache) >= 32:
             self.qr_cover_cache.clear()
@@ -196,15 +201,33 @@ def render_qr_cover(join_url: str, cover_bytes: bytes) -> bytes:
     return stamp_qr_on_cover(cover_bytes, render_qr(join_url, "png"))
 
 
+async def _read_capped(resp: aiohttp.ClientResponse, max_bytes: int) -> bytes:
+    """Read a response body, aborting if it exceeds max_bytes."""
+    buf = bytearray()
+    async for chunk in resp.content.iter_chunked(65536):
+        buf.extend(chunk)
+        if len(buf) > max_bytes:
+            raise ValueError("cover exceeds size limit")
+    return bytes(buf)
+
+
 def stamp_qr_on_cover(cover_bytes: bytes, qr_bytes: bytes) -> bytes:
     """Composite the QR into the cover's bottom-right corner; returns PNG bytes."""
+    import warnings  # noqa: PLC0415
+
     from PIL import Image  # noqa: PLC0415
 
+    previous_limit = Image.MAX_IMAGE_PIXELS
+    Image.MAX_IMAGE_PIXELS = COVER_MAX_PIXELS
     try:
-        cover = Image.open(io.BytesIO(cover_bytes)).convert("RGB")
-        qr = Image.open(io.BytesIO(qr_bytes)).convert("RGB")
-    except Image.DecompressionBombError as err:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", Image.DecompressionBombWarning)
+            cover = Image.open(io.BytesIO(cover_bytes)).convert("RGB")
+            qr = Image.open(io.BytesIO(qr_bytes)).convert("RGB")
+    except (Image.DecompressionBombError, Image.DecompressionBombWarning) as err:
         raise ValueError("image exceeds Pillow decompression limit") from err
+    finally:
+        Image.MAX_IMAGE_PIXELS = previous_limit
     side = max(48, min(cover.width, cover.height) * 28 // 100)
     qr = qr.resize((side, side), Image.Resampling.NEAREST)
     margin = side // 8

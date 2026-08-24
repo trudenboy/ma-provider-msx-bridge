@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.16] - 2026-08-24
+
+### Fixed
+
+- Completing the last track of a queue no longer restarts that track unless repeat-one is on.
+- Grouped TVs start a new stream when the same track is played again instead of reusing the old buffer.
+- Party cover stamping rejects oversized images before decoding them.
+- Pause, resume, and seek keep working after the TV reuses the same audio element for the next track.
+
 ## [1.4.15] - 2026-08-24
 
 ### Fixed
