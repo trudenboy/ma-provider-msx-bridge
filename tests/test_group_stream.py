@@ -169,7 +169,7 @@ async def test_shared_stream_paces_output(provider: MSXBridgeProvider, mass_mock
     out = AudioFormat(content_type=ContentType.MP3)
     with (
         patch(
-            "music_assistant.providers.msx_bridge.http_server.get_ffmpeg_stream",
+            "music_assistant.providers.msx_bridge.audio_stream.get_ffmpeg_stream",
             return_value=_chunks(b"encoded"),
         ) as ffmpeg_mock,
         pytest.raises(RuntimeError),

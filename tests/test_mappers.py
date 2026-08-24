@@ -10,6 +10,8 @@ from music_assistant_models.media_items import Album, Track
 from music_assistant.providers.msx_bridge.mappers import (
     map_album_to_msx,
     map_track_to_msx,
+    msx_list_page,
+    sort_album_tracks,
 )
 from music_assistant.providers.msx_bridge.provider import MSXBridgeProvider
 
@@ -76,3 +78,24 @@ async def test_map_album_to_msx() -> None:
         item.action
         == "content:http://localhost/msx/albums/1/tracks.json?provider=library&device_id=abc"
     )
+
+
+def test_sort_album_tracks_uses_name_as_tiebreaker() -> None:
+    """Display and playlist pages must agree when disc/track numbers collide."""
+    early = MagicMock()
+    early.disc_number = 1
+    early.track_number = 1
+    early.name = "A"
+    late = MagicMock()
+    late.disc_number = 1
+    late.track_number = 1
+    late.name = "B"
+    assert [t.name for t in sort_album_tracks([late, early])] == ["A", "B"]
+
+
+def test_msx_list_page_uses_empty_title() -> None:
+    """A list page with no items still has one placeholder item."""
+    page = msx_list_page("Albums", [], empty_title="No albums found", layout="0,0,3,4")
+    assert page.headline == "Albums"
+    assert page.items is not None
+    assert page.items[0].title == "No albums found"

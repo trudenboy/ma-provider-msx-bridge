@@ -9,7 +9,6 @@ import hmac
 import logging
 import secrets
 import time
-from collections import deque
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any, cast
 
@@ -18,6 +17,7 @@ from music_assistant_models.enums import ConfigEntryType
 
 from music_assistant.models.player_provider import PlayerProvider
 
+from .audio_stream import SharedGroupStream
 from .constants import (
     CONF_ENABLE_GROUPING,
     CONF_ENABLE_SENDSPIN_BRIDGE,
@@ -42,231 +42,9 @@ from .http_server import MSXHTTPServer
 from .player import MSXPlayer
 
 if TYPE_CHECKING:
-    from music_assistant.controllers.streams.audio_processing import AudioOutputPlan
-
     from .sendspin_bridge import MSXSendspinBridgeManager
 
 logger = logging.getLogger(__name__)
-
-
-class SharedGroupStream:
-    """
-    Shared audio stream for a player group.
-
-    One ffmpeg process produces audio, multiple TV clients read from a shared buffer.
-    Late joiners receive buffered data first (catch-up), then live chunks.
-    """
-
-    def __init__(self, group_id: str, media_uri: str) -> None:
-        """Initialize shared stream for a group."""
-        self.group_id = group_id
-        self.media_uri = media_uri
-        self.buffer: deque[bytes] = deque(maxlen=512)  # ~15s @ 40KB/s MP3
-        self.subscribers: dict[str, asyncio.Queue[bytes | None]] = {}
-        self.producer_task: asyncio.Task[None] | None = None
-        self.started = asyncio.Event()
-        self.finished = False
-        self.producer_error: Exception | None = None
-        self.output_plan: AudioOutputPlan | None = None
-        self._lock = asyncio.Lock()
-        self._total_bytes = 0
-        self._start_time: float = 0
-
-        logger.info(
-            "[SharedStream:%s] Created for media_uri=%s",
-            self.group_id,
-            self.media_uri[:80] if self.media_uri else "N/A",
-        )
-
-    async def start(
-        self,
-        audio_chunks: AsyncIterator[bytes],
-    ) -> None:
-        """Start producing audio from the given chunk iterator."""
-        logger.info(
-            "[SharedStream:%s] Starting producer task",
-            self.group_id,
-        )
-        self._start_time = time.monotonic()
-        self.producer_task = asyncio.create_task(self._produce(audio_chunks))
-
-    async def subscribe(self, player_id: str) -> AsyncIterator[bytes]:
-        """
-        Subscribe to stream, get buffered + live chunks.
-
-        Yields:
-            Audio chunks (bytes). First yields catch-up buffer, then live chunks.
-        """
-        # Large queue to handle slow readers (TV with weak WiFi)
-        q: asyncio.Queue[bytes | None] = asyncio.Queue(maxsize=512)
-
-        bytes_sent = 0
-        chunks_sent = 0
-
-        try:
-            # Wait for stream to start before registering so we don't receive
-            # chunks that are already in the catch-up buffer via both paths.
-            try:
-                await asyncio.wait_for(self.started.wait(), timeout=15.0)
-            except TimeoutError:
-                logger.error(
-                    "[SharedStream:%s] Timeout waiting for stream start for %s",
-                    self.group_id,
-                    player_id,
-                )
-                raise
-
-            if self.producer_error is not None:
-                logger.error(
-                    "[SharedStream:%s] Producer failed before subscriber %s could join: %s",
-                    self.group_id,
-                    player_id,
-                    self.producer_error,
-                )
-                raise self.producer_error
-
-            # Phase 1: Snapshot buffer and register for live chunks atomically.
-            # Holding the lock ensures the producer cannot distribute a new chunk
-            # between the snapshot and the registration, eliminating the window
-            # where the first chunk would appear in both the catch-up buffer and
-            # the subscriber's live queue.
-            # Also capture self.finished under the lock: if the producer already
-            # completed before we registered, we must self-signal EOF so that
-            # the live-stream loop below does not block forever.
-            async with self._lock:
-                buffer_snapshot = list(self.buffer)
-                already_finished = self.finished
-                self.subscribers[player_id] = q
-                if already_finished:
-                    q.put_nowait(None)
-                subscriber_count = len(self.subscribers)
-
-            logger.info(
-                "[SharedStream:%s] Subscriber %s joined (total: %d)",
-                self.group_id,
-                player_id,
-                subscriber_count,
-            )
-
-            buffer_bytes = sum(len(c) for c in buffer_snapshot)
-            logger.debug(
-                "[SharedStream:%s] Sending %d catch-up chunks (%d bytes) to %s",
-                self.group_id,
-                len(buffer_snapshot),
-                buffer_bytes,
-                player_id,
-            )
-            for chunk in buffer_snapshot:
-                yield chunk
-                bytes_sent += len(chunk)
-                chunks_sent += 1
-
-            # Phase 2: Live stream
-            while True:
-                next_chunk = await q.get()
-                if next_chunk is None:
-                    logger.debug(
-                        "[SharedStream:%s] EOF received for subscriber %s",
-                        self.group_id,
-                        player_id,
-                    )
-                    break
-                yield next_chunk
-                bytes_sent += len(next_chunk)
-                chunks_sent += 1
-
-        finally:
-            async with self._lock:
-                self.subscribers.pop(player_id, None)
-                remaining = len(self.subscribers)
-
-            logger.info(
-                "[SharedStream:%s] Subscriber %s left after %d chunks, %d bytes (remaining: %d)",
-                self.group_id,
-                player_id,
-                chunks_sent,
-                bytes_sent,
-                remaining,
-            )
-
-    async def stop(self) -> None:
-        """Stop the stream and clean up."""
-        logger.info(
-            "[SharedStream:%s] Stopping (total: %d bytes)",
-            self.group_id,
-            self._total_bytes,
-        )
-        if self.producer_task and not self.producer_task.done():
-            self.producer_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self.producer_task
-        self.finished = True
-
-    @property
-    def subscriber_count(self) -> int:
-        """Return current subscriber count."""
-        return len(self.subscribers)
-
-    async def _produce(self, audio_chunks: AsyncIterator[bytes]) -> None:
-        """Read from ffmpeg and distribute to all subscribers."""
-        try:
-            chunk_count = 0
-            async for chunk in audio_chunks:
-                chunk_count += 1
-                self._total_bytes += len(chunk)
-                async with self._lock:
-                    self.buffer.append(chunk)
-                    for player_id, q in list(self.subscribers.items()):
-                        try:
-                            q.put_nowait(chunk)
-                        except asyncio.QueueFull:
-                            logger.warning(
-                                "[SharedStream:%s] Queue full for subscriber %s, dropping chunk %d",
-                                self.group_id,
-                                player_id,
-                                chunk_count,
-                            )
-
-                if not self.started.is_set():
-                    # Signal that stream has started (first chunk received)
-                    self.started.set()
-                    logger.debug(
-                        "[SharedStream:%s] First chunk received, signaling started",
-                        self.group_id,
-                    )
-
-            logger.info(
-                "[SharedStream:%s] Producer finished: %d chunks, %d bytes, %.1fs",
-                self.group_id,
-                chunk_count,
-                self._total_bytes,
-                time.monotonic() - self._start_time,
-            )
-        except asyncio.CancelledError:
-            logger.debug("[SharedStream:%s] Producer cancelled", self.group_id)
-            raise
-        except Exception as exc:
-            logger.exception("[SharedStream:%s] Producer error", self.group_id)
-            self.producer_error = exc
-        finally:
-            self.finished = True
-            # Ensure subscribers waiting on `started` can proceed even if no chunks were produced
-            if not self.started.is_set():
-                self.started.set()
-                logger.debug(
-                    "[SharedStream:%s] Producer completed without first chunk, signaling started",
-                    self.group_id,
-                )
-            # Signal EOF to all subscribers
-            async with self._lock:
-                for player_id, q in list(self.subscribers.items()):
-                    with contextlib.suppress(asyncio.QueueFull):
-                        q.put_nowait(None)
-                    logger.debug(
-                        "[SharedStream:%s] Sent EOF to subscriber %s",
-                        self.group_id,
-                        player_id,
-                    )
 
 
 class MSXBridgeProvider(PlayerProvider):
@@ -470,7 +248,7 @@ class MSXBridgeProvider(PlayerProvider):
         output_format = cast(
             "str", self.config.get_value(CONF_OUTPUT_FORMAT, DEFAULT_OUTPUT_FORMAT)
         )
-        name = display_name or self._player_display_name_from_id(player_id)
+        name = display_name or self.player_display_name(player_id)
         player = MSXPlayer(
             provider=self,
             player_id=player_id,
@@ -710,6 +488,13 @@ class MSXBridgeProvider(PlayerProvider):
 
             return stream
 
+    def get_shared_stream(self, group_id: str) -> SharedGroupStream | None:
+        """Return the live shared stream for a group, if one is running."""
+        stream = self._shared_streams.get(group_id)
+        if stream is None or stream.finished:
+            return None
+        return stream
+
     def remove_shared_stream(self, group_id: str) -> None:
         """Remove and cleanup shared stream for a group."""
         if stream := self._shared_streams.pop(group_id, None):
@@ -760,7 +545,7 @@ class MSXBridgeProvider(PlayerProvider):
             await stream.stop()
         self._shared_streams.clear()
 
-    def _player_display_name_from_id(
+    def player_display_name(
         self, player_id: str, prefix_label: str = "MSX TV", remote_ip: str | None = None
     ) -> str:
         """Build a unique display name from player_id for the MA UI."""

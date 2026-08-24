@@ -252,7 +252,7 @@ async def test_stream_success(provider: MSXBridgeProvider, mass_mock: Mock) -> N
     try:
         chunks = [b"encoded-chunk-1", b"encoded-chunk-2"]
         with patch(
-            "music_assistant.providers.msx_bridge.http_server.get_ffmpeg_stream",
+            "music_assistant.providers.msx_bridge.audio_stream.get_ffmpeg_stream",
             return_value=_async_iter(chunks),
         ):
             resp = await client.get(f"/stream/msx_test?token={token}")
@@ -1087,7 +1087,7 @@ async def test_msx_audio_preserves_two_queued_builtin_items(
 
         for uri in (first_uri, second_uri):
             with patch(
-                "music_assistant.providers.msx_bridge.http_server.get_ffmpeg_stream",
+                "music_assistant.providers.msx_bridge.audio_stream.get_ffmpeg_stream",
                 return_value=_async_iter([b"encoded"]),
             ):
                 response = await client.get(
@@ -1131,7 +1131,7 @@ async def test_queue_playlist_builtin_item_stays_playable(
         mass_mock.streams = Mock()
         mass_mock.streams.get_stream = Mock(return_value=_async_iter([b"pcm"]))
         with patch(
-            "music_assistant.providers.msx_bridge.http_server.get_ffmpeg_stream",
+            "music_assistant.providers.msx_bridge.audio_stream.get_ffmpeg_stream",
             return_value=_async_iter([b"encoded"]),
         ):
             resp = await client.get(f"{audio_url.path}?{audio_url.query}")
@@ -1181,7 +1181,7 @@ async def test_queue_playlist_duplicate_uri_selects_exact_item(
         mass_mock.streams.get_stream = Mock(return_value=_async_iter([b"pcm"]))
 
         with patch(
-            "music_assistant.providers.msx_bridge.http_server.get_ffmpeg_stream",
+            "music_assistant.providers.msx_bridge.audio_stream.get_ffmpeg_stream",
             return_value=_async_iter([b"encoded"]),
         ):
             response = await client.get(f"{audio_urls[1].path}?{audio_urls[1].query}")
@@ -1306,7 +1306,7 @@ async def test_msx_audio_accepts_uri_from_the_group_leaders_queue(
         mass_mock.streams = Mock()
         mass_mock.streams.get_stream = Mock(return_value=_async_iter([b"pcm"]))
         with patch(
-            "music_assistant.providers.msx_bridge.http_server.get_ffmpeg_stream",
+            "music_assistant.providers.msx_bridge.audio_stream.get_ffmpeg_stream",
             return_value=_async_iter([b"encoded"]),
         ):
             resp = await client.get(
@@ -1338,7 +1338,7 @@ async def test_msx_audio_finds_a_uri_at_the_end_of_a_long_queue(
         mass_mock.streams = Mock()
         mass_mock.streams.get_stream = Mock(return_value=_async_iter([b"pcm"]))
         with patch(
-            "music_assistant.providers.msx_bridge.http_server.get_ffmpeg_stream",
+            "music_assistant.providers.msx_bridge.audio_stream.get_ffmpeg_stream",
             return_value=_async_iter([b"encoded"]),
         ):
             resp = await client.get(
@@ -1373,7 +1373,7 @@ async def test_msx_audio_queue_scan_skips_items_without_a_media_item(
         mass_mock.streams = Mock()
         mass_mock.streams.get_stream = Mock(return_value=_async_iter([b"pcm"]))
         with patch(
-            "music_assistant.providers.msx_bridge.http_server.get_ffmpeg_stream",
+            "music_assistant.providers.msx_bridge.audio_stream.get_ffmpeg_stream",
             return_value=_async_iter([b"encoded"]),
         ):
             resp = await client.get(
@@ -1424,7 +1424,7 @@ async def test_msx_audio_per_track_mode(provider: MSXBridgeProvider, mass_mock: 
 
         chunks = [b"encoded-chunk-1"]
         with patch(
-            "music_assistant.providers.msx_bridge.http_server.get_ffmpeg_stream",
+            "music_assistant.providers.msx_bridge.audio_stream.get_ffmpeg_stream",
             return_value=_async_iter(chunks),
         ):
             resp = await client.get(f"/msx/audio/msx_test?uri=library://track/1&token={token}")
@@ -1450,7 +1450,7 @@ async def test_msx_audio_proxy_paces_output(provider: MSXBridgeProvider, mass_mo
         mass_mock.streams.get_stream = Mock(return_value=_async_iter([b"pcm"]))
 
         with patch(
-            "music_assistant.providers.msx_bridge.http_server.get_ffmpeg_stream",
+            "music_assistant.providers.msx_bridge.audio_stream.get_ffmpeg_stream",
             return_value=_async_iter([b"encoded"]),
         ) as ffmpeg_mock:
             resp = await client.get(f"/msx/audio/msx_test?uri=library://track/1&token={token}")
@@ -1487,7 +1487,7 @@ async def test_msx_audio_from_playlist_skips_ws(
 
         chunks = [b"encoded-chunk-1"]
         with patch(
-            "music_assistant.providers.msx_bridge.http_server.get_ffmpeg_stream",
+            "music_assistant.providers.msx_bridge.audio_stream.get_ffmpeg_stream",
             return_value=_async_iter(chunks),
         ):
             resp = await client.get(
@@ -1527,7 +1527,7 @@ async def test_msx_audio_arms_wait_before_enqueue(
         mass_mock.player_queues.play_media = _record_enqueue
 
         with patch(
-            "music_assistant.providers.msx_bridge.http_server.get_ffmpeg_stream",
+            "music_assistant.providers.msx_bridge.audio_stream.get_ffmpeg_stream",
             return_value=_async_iter([b"encoded-chunk-1"]),
         ):
             resp = await client.get(f"/msx/audio/msx_test?uri=library://track/1&token={token}")
@@ -1971,7 +1971,7 @@ async def test_msx_audio_redirect_mode_falls_back_to_proxy(
         )
 
         with patch(
-            "music_assistant.providers.msx_bridge.http_server.get_ffmpeg_stream",
+            "music_assistant.providers.msx_bridge.audio_stream.get_ffmpeg_stream",
             return_value=_async_iter([b"encoded-chunk-1"]),
         ) as ffmpeg_stream:
             resp = await client.get(

@@ -9,6 +9,8 @@ from urllib.parse import quote
 from .models import MsxContent, MsxItem, MsxTemplate
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from .provider import MSXBridgeProvider
 
 logger = logging.getLogger(__name__)
@@ -20,6 +22,54 @@ def append_device_param(url: str, device_param: str) -> str:
         return url
     sep = "&" if "?" in url else "?"
     return f"{url}{sep}{device_param}"
+
+
+def sort_album_tracks(tracks: list[Any]) -> list[Any]:
+    """
+    Sort album tracks deterministically.
+
+    MA sorts by (disc_number, track_number) but tracks with identical values
+    get non-deterministic ordering between calls. Adding name as a tiebreaker
+    ensures the display page and playlist endpoint always agree on track order.
+    """
+    return sorted(
+        tracks,
+        key=lambda t: (
+            getattr(t, "disc_number", 0) or 0,
+            getattr(t, "track_number", 0) or 0,
+            getattr(t, "name", "") or "",
+        ),
+    )
+
+
+def dump_msx(content: MsxContent) -> dict[str, Any]:
+    """Serialize an MSX content page for an HTTP JSON response."""
+    return content.model_dump(by_alias=True, exclude_none=True)
+
+
+def msx_list_page(
+    headline: str,
+    items: Sequence[MsxItem],
+    *,
+    empty_title: str,
+    layout: str,
+    template_type: str = "separate",
+    color: str = "msx-glass",
+    image_width: float | None = None,
+) -> MsxContent:
+    """Build a standard MSX list page from already-mapped items."""
+    template_kwargs: dict[str, Any] = {
+        "type": template_type,
+        "layout": layout,
+        "color": color,
+    }
+    if image_width is not None:
+        template_kwargs["image_width"] = image_width
+    return MsxContent(
+        headline=headline,
+        template=MsxTemplate(**template_kwargs),
+        items=list(items) if items else [MsxItem(title=empty_title)],
+    )
 
 
 def get_image_url(item: Any, provider: MSXBridgeProvider, prefer_proxy: bool = False) -> str | None:

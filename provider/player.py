@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any, cast
 
 from music_assistant_models.enums import PlaybackState, PlayerFeature, PlayerType
@@ -85,6 +87,11 @@ class MSXPlayer(Player):
     def poll_interval(self) -> int:
         """Return poll interval in seconds."""
         return 5 if self.playback_state == PlaybackState.PLAYING else 30
+
+    @property
+    def playing_from_queue(self) -> bool:
+        """Return whether MSX is currently rendering an MA queue as a native playlist."""
+        return self._playing_from_queue
 
     async def get_config_entries(self) -> list[ConfigEntry]:
         """Return per-player config entries — codec is configurable per TV."""
@@ -289,6 +296,15 @@ class MSXPlayer(Player):
             except TimeoutError:
                 return None
         return self._attr_current_media
+
+    @contextmanager
+    def suppress_ws_notify(self) -> Iterator[None]:
+        """Suppress MA→MSX WebSocket echo while MSX is driving playback."""
+        self._skip_ws_notify = True
+        try:
+            yield
+        finally:
+            self._skip_ws_notify = False
 
     def _notify_msx_playback(self, media: PlayerMedia) -> None:
         """Send WS notification to MSX about the new playback state."""
