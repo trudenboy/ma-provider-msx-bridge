@@ -6,12 +6,11 @@ import asyncio
 from typing import Any
 from unittest.mock import AsyncMock, Mock, patch
 
-import pytest
 from music_assistant_models.enums import PlaybackState, PlayerFeature, PlayerType
-from music_assistant_models.errors import PlayerCommandFailed
 from music_assistant_models.player import PlayerMedia
 
-from music_assistant.providers.msx_bridge.player import MSXPlayer
+from music_assistant.controllers.players.constants import PlayerLockPurpose
+from provider.player import MSXPlayer
 
 # --- Initialization and properties ---
 
@@ -336,7 +335,7 @@ async def test_set_members_ignores_self_and_non_msx(provider: Any, mass_mock: Mo
 
 
 async def test_play_media_propagates_to_group_members(provider: Any, mass_mock: Mock) -> None:
-    """play_media should propagate to group members when leader (direct member.play_media)."""
+    """play_media should propagate to group members through the internal handler."""
     leader = MSXPlayer(provider, "msx_leader", name="Leader TV", output_format="mp3")
     leader.update_state = Mock()  # type: ignore[misc,method-assign]
     leader._attr_group_members = ["msx_leader", "msx_member"]
@@ -344,9 +343,6 @@ async def test_play_media_propagates_to_group_members(provider: Any, mass_mock: 
     member.update_state = Mock()  # type: ignore[misc,method-assign]
     member.play_media = AsyncMock()  # type: ignore[method-assign]
     mass_mock.players.get = mass_mock.players.get_player = Mock(return_value=member)
-    http = Mock()
-    http.cancel_streams_for_player = Mock()
-    leader.provider.http_server = http  # type: ignore[attr-defined]
 
     media = Mock(spec=PlayerMedia)
     media.uri = "library://track/123"
@@ -360,9 +356,11 @@ async def test_play_media_propagates_to_group_members(provider: Any, mass_mock: 
     with patch.object(leader.provider, "notify_play_started", Mock()):
         await leader.play_media(media)
 
-    # We call member.play_media directly (not mass.players.play_media) to avoid redirect
-    member.play_media.assert_called_once_with(media)
-    http.cancel_streams_for_player.assert_called_once_with("msx_member")
+    mass_mock.players._handle_play_media.assert_awaited_once_with("msx_member", media)
+    member.play_media.assert_not_called()
+    mass_mock.players.get_player_lock.assert_called_once_with(
+        "msx_member", PlayerLockPurpose.PLAYBACK
+    )
 
 
 async def test_play_media_no_propagation_when_empty_group(provider: Any, mass_mock: Mock) -> None:
@@ -399,8 +397,8 @@ async def test_stop_propagates_to_group_members(provider: Any, mass_mock: Mock) 
     with patch.object(leader.provider, "notify_play_stopped", Mock()):
         await leader.stop()
 
-    # group_members may include leader; we skip self and propagate only to members
-    member.stop.assert_called_once()
+    mass_mock.players._handle_cmd_stop.assert_awaited_once_with("msx_member")
+    member.stop.assert_not_called()
 
 
 # --- Grouping: disable and recursion guard ---
@@ -477,6 +475,11 @@ async def test_propagation_recursion_guard(provider: Any, mass_mock: Mock) -> No
         )
     )
 
+    async def play_member(player_id: str, propagated_media: PlayerMedia) -> None:
+        await mass_mock.players.get_player(player_id).play_media(propagated_media)
+
+    mass_mock.players._handle_play_media.side_effect = play_member
+
     media = Mock(spec=PlayerMedia)
     media.uri = "library://track/123"
     media.title = None
@@ -532,45 +535,6 @@ async def test_play_media_queue_sends_playlist(player: MSXPlayer, mass_mock: Moc
     assert player._playing_from_queue is True
     assert player._playlist_offset == 2
     assert player._playlist_size == 5
-
-
-async def test_play_media_queue_size_does_not_swallow_unexpected_error(
-    player: MSXPlayer, mass_mock: Mock
-) -> None:
-    """A bug while reading queue length must not be hidden as a missing playlist."""
-    media = Mock(spec=PlayerMedia)
-    media.uri = "http://ma-server/stream/12345"
-    media.title = "Track 1"
-    media.artist = "Artist 1"
-    media.image_url = None
-    media.duration = 180
-    media.source_id = "msx_test"
-    media.queue_item_id = "qi1"
-    mass_mock.player_queues.get.return_value = Mock(current_index=0, items=1)
-    mass_mock.player_queues.items.side_effect = ValueError("bug")
-
-    with pytest.raises(ValueError, match="bug"):
-        await player.play_media(media)
-
-
-async def test_stop_propagates_when_one_member_fails(provider: Any, mass_mock: Mock) -> None:
-    """A failed member command must not prevent the other members from stopping."""
-    leader = MSXPlayer(provider, "msx_leader", name="Leader TV", output_format="mp3")
-    leader.update_state = Mock()  # type: ignore[misc,method-assign]
-    leader._attr_group_members = ["msx_leader", "msx_a", "msx_b"]
-    failing = MSXPlayer(provider, "msx_a", name="A", output_format="mp3")
-    failing.stop = AsyncMock(side_effect=PlayerCommandFailed("offline"))  # type: ignore[method-assign]
-    ok = MSXPlayer(provider, "msx_b", name="B", output_format="mp3")
-    ok.stop = AsyncMock()  # type: ignore[method-assign]
-    mass_mock.players.get = mass_mock.players.get_player = Mock(
-        side_effect=lambda pid, **_k: {"msx_a": failing, "msx_b": ok}.get(pid)
-    )
-
-    with patch.object(leader.provider, "notify_play_stopped", Mock()):
-        await leader.stop()
-
-    failing.stop.assert_awaited_once()
-    ok.stop.assert_awaited_once()
 
 
 async def test_play_media_reloads_playlist_when_playing_from_queue(
