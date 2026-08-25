@@ -2,6 +2,10 @@
 
 # Browser Web Player
 
+> **Deprecated.** The browser web kiosk is deprecated and will be removed in a
+> future release. Use the standalone [Web Kiosk](https://github.com/trudenboy/ma-provider-web-kiosk)
+> provider instead. This page documents the legacy behaviour only.
+
 Open `http://<SERVER_IP>:8099/web/` in any browser — no MSX app or Smart TV required.
 
 Each browser tab registers as its own MA player (device ID stored in `localStorage`). Playback is controlled independently per tab.
