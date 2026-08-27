@@ -152,6 +152,44 @@ async def test_cancel_stops_subscription() -> None:
             await stream.producer_task
 
 
+async def test_resubscribe_same_player_ends_prior_without_detaching_new() -> None:
+    """A reconnect must EOF the old subscription and not pop the replacement."""
+
+    async def live() -> AsyncIterator[bytes]:
+        while True:
+            yield b"x"
+            await asyncio.sleep(0.01)
+
+    stream = SharedGroupStream("g1", "uri://test")
+    await stream.start(live())
+    try:
+        first_done = asyncio.Event()
+
+        async def first() -> None:
+            try:
+                async for _chunk in stream.subscribe("tv1"):
+                    pass
+            finally:
+                first_done.set()
+
+        first_task = asyncio.create_task(first())
+        await asyncio.sleep(0.05)
+        assert "tv1" in stream.subscribers
+
+        second_task = asyncio.create_task(_collect(stream, "tv1"))
+        await asyncio.wait_for(first_done.wait(), timeout=2.0)
+        assert first_task.done()
+        await asyncio.sleep(0.05)
+        assert "tv1" in stream.subscribers
+
+        second_task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await second_task
+        assert "tv1" not in stream.subscribers
+    finally:
+        await stream.stop()
+
+
 async def test_shared_stream_paces_output(provider: MSXBridgeProvider, mass_mock: Mock) -> None:
     """The shared group encoder carries the same pacing ceiling as the per-player one."""
     server = MSXHTTPServer(provider, 0)
