@@ -14,6 +14,7 @@ from typing import Any, cast
 
 from music_assistant_models.config_entries import ConfigEntry, ConfigValueOption
 from music_assistant_models.enums import ConfigEntryType
+from music_assistant_models.errors import MusicAssistantError
 
 from music_assistant.models.player_provider import PlayerProvider
 
@@ -172,7 +173,7 @@ class MSXBridgeProvider(PlayerProvider):
             try:
                 self.logger.debug("Unloading player %s", player.display_name)
                 await self.mass.players.unregister(player.player_id)
-            except Exception:
+            except MusicAssistantError:
                 self.logger.exception("Error unregistering player %s", player.player_id)
         self._player_last_activity.clear()
         self.logger.info("MSX Bridge provider unloaded")
@@ -187,7 +188,7 @@ class MSXBridgeProvider(PlayerProvider):
                         self._owner_username = user.username
                         self.logger.debug("Resolved owner username: %s", self._owner_username)
                         break
-            except Exception as err:
+            except MusicAssistantError as err:
                 self.logger.warning("Could not resolve owner username: %s", err)
         return self._owner_username
 
@@ -495,7 +496,7 @@ class MSXBridgeProvider(PlayerProvider):
             return None
         try:
             stream_url: str = await self.mass.streams.resolve_stream_url(player_id, media)
-        except Exception as err:
+        except (MusicAssistantError, OSError, RuntimeError) as err:
             logger.warning("[MARedirect] Failed to resolve MA stream URL: %s", err, exc_info=True)
             return None
         # MA returns a flow URL (continuous whole-queue stream) when e.g. crossfade

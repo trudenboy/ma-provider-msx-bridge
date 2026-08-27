@@ -6,6 +6,8 @@ import logging
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
+from music_assistant_models.errors import MusicAssistantError
+
 from .models import MsxContent, MsxItem, MsxTemplate
 
 if TYPE_CHECKING:
@@ -126,7 +128,7 @@ async def get_album_image_fallback(album: Any, provider: MSXBridgeProvider) -> s
         for track in tracks:
             if hasattr(track, "image") and track.image:
                 return provider.mass.metadata.get_image_url(track.image)
-    except Exception:
+    except MusicAssistantError, TimeoutError:
         logger.debug("Failed to fetch album image fallback for %s", album.item_id)
     return None
 

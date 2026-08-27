@@ -9,7 +9,7 @@ from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any, cast
 
 from music_assistant_models.enums import PlaybackState, PlayerFeature, PlayerType
-from music_assistant_models.errors import PlayerUnavailableError
+from music_assistant_models.errors import MusicAssistantError, PlayerUnavailableError
 from music_assistant_models.player import DeviceInfo
 
 from music_assistant.constants import CONF_ENTRY_OUTPUT_CODEC_DEFAULT_MP3
@@ -375,18 +375,7 @@ class MSXPlayer(Player):
         """Handle same-queue playback: goto index or re-send if queue changed."""
         queue = self.mass.player_queues.get(source_id)
         ma_index = getattr(queue, "current_index", 0) if queue else 0
-        try:
-            queue = self.mass.player_queues.get(source_id)
-            limit = getattr(queue, "items", None)
-            current_size = len(
-                self.mass.player_queues.items(
-                    source_id, limit=limit if isinstance(limit, int) and limit > 0 else 500
-                )
-            )
-        except Exception:
-            self.logger.debug("Failed to get queue size for %s", source_id, exc_info=True)
-            current_size = self._playlist_size
-        self._playlist_size = current_size
+        self._playlist_size = self._queue_length(source_id, fallback=self._playlist_size)
         self._playlist_offset = ma_index
         provider.notify_play_playlist(self.player_id, ma_index, queue_id=source_id)
 
@@ -394,16 +383,7 @@ class MSXPlayer(Player):
         """Send full MSX native playlist for a new queue."""
         queue = self.mass.player_queues.get(source_id)
         start_index = getattr(queue, "current_index", 0) if queue else 0
-        try:
-            limit = getattr(queue, "items", None)
-            self._playlist_size = len(
-                self.mass.player_queues.items(
-                    source_id, limit=limit if isinstance(limit, int) and limit > 0 else 500
-                )
-            )
-        except Exception:
-            self.logger.debug("Failed to get queue size for %s", source_id, exc_info=True)
-            self._playlist_size = 0
+        self._playlist_size = self._queue_length(source_id, fallback=0)
         self._playlist_offset = start_index
         self._queue_source_id = source_id
         provider.notify_play_playlist(self.player_id, start_index, queue_id=source_id)
@@ -453,37 +433,50 @@ class MSXPlayer(Player):
                     continue
                 tasks.append(asyncio.create_task(self._propagate_single(member, command, **kwargs)))
             if tasks:
-                await asyncio.gather(*tasks, return_exceptions=True)
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+                for result in results:
+                    if isinstance(result, BaseException):
+                        self.logger.warning(
+                            "Failed to propagate %s to a group member",
+                            command,
+                            exc_info=(type(result), result, result.__traceback__),
+                        )
         finally:
             self._propagating = False
 
     async def _propagate_single(self, member: MSXPlayer, command: str, **kwargs: Any) -> None:
         """Propagate a single command to one group member."""
+        if command == "play_media":
+            media = kwargs.get("media")
+            if media:
+                # Call member.play_media directly — mass.players.play_media
+                # would redirect synced/grouped players back to the leader.
+                # Cancel the member's current HTTP stream first so a shared
+                # or independent producer from the previous track is aborted.
+                http_server = cast("MSXBridgeProvider", member.provider).http_server
+                if http_server is not None:
+                    http_server.cancel_streams_for_player(member.player_id)
+                await member.play_media(media)
+        elif command == "stop":
+            await member.stop()
+        elif command == "pause":
+            await member.pause()
+        elif command == "play":
+            await member.play()
+
+    def _queue_length(self, source_id: str, fallback: int) -> int:
+        """Return the queue length, or fallback when the controller cannot be read."""
         try:
-            if command == "play_media":
-                media = kwargs.get("media")
-                if media:
-                    # Call member.play_media directly — mass.players.play_media
-                    # would redirect synced/grouped players back to the leader.
-                    # Cancel the member's current HTTP stream first so a shared
-                    # or independent producer from the previous track is aborted.
-                    http_server = cast("MSXBridgeProvider", member.provider).http_server
-                    if http_server is not None:
-                        http_server.cancel_streams_for_player(member.player_id)
-                    await member.play_media(media)
-            elif command == "stop":
-                await member.stop()
-            elif command == "pause":
-                await member.pause()
-            elif command == "play":
-                await member.play()
-        except Exception:
-            self.logger.warning(
-                "Failed to propagate %s to member %s",
-                command,
-                member.player_id,
-                exc_info=True,
+            queue = self.mass.player_queues.get(source_id)
+            limit = getattr(queue, "items", None)
+            return len(
+                self.mass.player_queues.items(
+                    source_id, limit=limit if isinstance(limit, int) and limit > 0 else 500
+                )
             )
+        except TypeError, AttributeError, MusicAssistantError:
+            self.logger.debug("Failed to get queue size for %s", source_id, exc_info=True)
+            return fallback
 
     async def _resume_from_pause(self) -> None:
         """

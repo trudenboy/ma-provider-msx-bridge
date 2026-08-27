@@ -118,8 +118,8 @@ async def prepare_msx_audio(
     """
     Resolve the PlayerMedia MSX should stream for this URI.
 
-    Owns the enqueue vs reuse decision so MA-driven play and MSX-driven
-    /msx/audio share one implementation.
+    Selects a queued item (or reuses current media) so MA-driven play
+    and MSX-driven /msx/audio share one implementation.
     """
     provider.on_player_activity(player.player_id)
     async with _prepare_lock(player):
@@ -140,9 +140,9 @@ async def _prepare_msx_audio_locked(
     from_playlist: bool,
     queue_item_id: str | None,
 ) -> PlayerMedia | PrepareFailure:
-    """Enqueue or reuse under the per-player lock."""
+    """Select the queued item under the per-player lock."""
     queue_item = find_uri_in_active_queue(provider.mass, player.player_id, uri, queue_item_id)
-    if queue_item is None and not await is_media_item_uri(uri):
+    if queue_item is None:
         return PrepareFailure(400, "Invalid uri parameter")
 
     if from_playlist and current_media_matches_uri(provider.mass, player, uri, queue_item_id):
@@ -154,17 +154,11 @@ async def _prepare_msx_audio_locked(
 
     player.expect_new_media()
 
-    async def _enqueue() -> None:
-        if queue_item is not None:
-            await provider.mass.player_queues.play_index(*queue_item)
-        else:
-            await provider.mass.player_queues.play_media(player.player_id, uri)
-
     if from_playlist:
         with player.suppress_ws_notify():
-            await _enqueue()
+            await provider.mass.player_queues.play_index(*queue_item)
     else:
-        await _enqueue()
+        await provider.mass.player_queues.play_index(*queue_item)
 
     media = await player.wait_for_media(timeout=10.0)
     if not media:

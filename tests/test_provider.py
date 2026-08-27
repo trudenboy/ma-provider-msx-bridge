@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, Mock, patch
 
+import pytest
+from music_assistant_models.errors import PlayerUnavailableError
+
 from music_assistant.providers.msx_bridge.provider import MSXBridgeProvider
 
 
@@ -92,6 +95,16 @@ async def test_get_ma_stream_url_returns_none_on_error(
     mass_mock.streams.resolve_stream_url.assert_awaited_once()
 
 
+async def test_get_ma_stream_url_does_not_swallow_unexpected_error(
+    provider: MSXBridgeProvider, mass_mock: Mock
+) -> None:
+    """Programming errors while resolving a stream URL must not look like a missing URL."""
+    mass_mock.streams.resolve_stream_url = AsyncMock(side_effect=ValueError("bug"))
+
+    with pytest.raises(ValueError, match="bug"):
+        await provider.get_ma_stream_url("msx_test", Mock())
+
+
 def test_on_player_activity_uses_monotonic_clock(provider: MSXBridgeProvider) -> None:
     """
     The idle-activity ledger must use the monotonic clock.
@@ -135,6 +148,38 @@ async def test_unload_stops_server_first(provider: MSXBridgeProvider) -> None:
 
     mock_server.stop.assert_awaited_once()
     provider.mass.players.unregister.assert_awaited_once_with("msx_test")  # type: ignore[attr-defined]
+
+
+async def test_unload_continues_when_unregister_fails(
+    provider: MSXBridgeProvider,
+) -> None:
+    """One unavailable player must not block the rest of unload."""
+    first = Mock(display_name="A", player_id="msx_a")
+    second = Mock(display_name="B", player_id="msx_b")
+    provider.mass.players.all.return_value = [first, second]  # type: ignore[attr-defined]
+    provider.mass.players.iter_players.return_value = [first, second]  # type: ignore[attr-defined]
+    provider.mass.players.unregister = AsyncMock(  # type: ignore[method-assign]
+        side_effect=[PlayerUnavailableError("gone"), None]
+    )
+    provider.http_server = None
+
+    await provider.unload()
+
+    assert provider.mass.players.unregister.await_count == 2
+
+
+async def test_unload_does_not_swallow_unexpected_unregister_error(
+    provider: MSXBridgeProvider,
+) -> None:
+    """A bug while unregistering must not be hidden as a missing player."""
+    mock_player = Mock(display_name="Test TV", player_id="msx_test")
+    provider.mass.players.all.return_value = [mock_player]  # type: ignore[attr-defined]
+    provider.mass.players.iter_players.return_value = [mock_player]  # type: ignore[attr-defined]
+    provider.mass.players.unregister = AsyncMock(side_effect=ValueError("bug"))  # type: ignore[method-assign]
+    provider.http_server = None
+
+    with pytest.raises(ValueError, match="bug"):
+        await provider.unload()
 
 
 async def test_unload_no_server(provider: MSXBridgeProvider) -> None:

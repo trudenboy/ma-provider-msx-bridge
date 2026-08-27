@@ -161,6 +161,7 @@ async def test_shared_stream_paces_output(provider: MSXBridgeProvider, mass_mock
 
     mass_mock.streams = Mock()
     mass_mock.streams.get_stream = Mock(return_value=_chunks(b"pcm"))
+    mass_mock.streams.resolve_stream_url = AsyncMock(side_effect=RuntimeError("no session"))
     mass_mock.streams.audio.get_player_output_plan = Mock(return_value=Mock(filter_params=[]))
     provider.get_or_create_shared_stream = AsyncMock(  # type: ignore[method-assign]
         side_effect=RuntimeError("stop here")
