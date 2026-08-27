@@ -57,3 +57,4 @@ class MsxContent(BaseModel):
     items: list[MsxItem] | None = None
     action: str | None = None
     hint: str | None = None
+    compress: bool | None = None

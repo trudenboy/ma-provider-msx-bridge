@@ -824,6 +824,7 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
             content = MsxContent(
                 headline="{ico:search} Search",
                 hint="Type to search...",
+                compress=True,
                 template=MsxTemplate(
                     type="separate",
                     layout="0,0,2,4",
@@ -845,6 +846,7 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
         content = MsxContent(
             headline=f'{{ico:search}} "{query}"',
             hint=f"Found {len(items)} items",
+            compress=True,
             template=MsxTemplate(
                 type="separate",
                 layout="0,0,2,4",

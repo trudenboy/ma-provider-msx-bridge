@@ -372,6 +372,24 @@ async def test_search_missing_query(http_client: TestClient[Any, Any]) -> None:
     assert "error" in data
 
 
+@pytest.mark.parametrize("path", ["/msx/search-input.json?q=beatles", "/msx/search-input.json"])
+async def test_msx_search_input_marks_page_compressed(
+    http_client: TestClient[Any, Any], path: str
+) -> None:
+    """
+    Search keyboard results must set compress so old MSX can show them.
+
+    The bundled Input Plugin sets template.decompress when compress is missing.
+    That decompress path only exists on Media Station X 0.1.155+; older builds
+    then show "Decompression not supported" instead of the hits.
+    """
+    resp = await http_client.get(path)
+    assert resp.status == 200
+    data = await resp.json()
+    assert data["compress"] is True
+    assert "template" in data
+
+
 @pytest.mark.parametrize("error_type", [MusicAssistantError, TimeoutError])
 @pytest.mark.parametrize(
     ("route", "controller_name", "method_name", "async_method", "has_placeholder"),
