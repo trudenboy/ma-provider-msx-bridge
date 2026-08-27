@@ -13,7 +13,7 @@ from collections.abc import AsyncIterator
 from typing import Any, cast
 
 from music_assistant_models.config_entries import ConfigEntry, ConfigValueOption
-from music_assistant_models.enums import ConfigEntryType
+from music_assistant_models.enums import ConfigEntryType, ContentType
 from music_assistant_models.errors import MusicAssistantError
 
 from music_assistant.models.player_provider import PlayerProvider
@@ -408,17 +408,16 @@ class MSXBridgeProvider(PlayerProvider):
         media_uri: str,
         audio_chunks: AsyncIterator[bytes],
         session_id: str = "",
+        content_type: ContentType | None = None,
     ) -> SharedGroupStream:
         """
         Get existing shared stream or create new one for the group.
 
-        Args:
-            group_id: ID of the group (leader's player_id)
-            media_uri: URI of the media being streamed
-            audio_chunks: Async iterator yielding encoded audio chunks
-
-        Returns:
-            SharedGroupStream instance
+        :param group_id: ID of the group (leader's player_id).
+        :param media_uri: URI of the media being streamed.
+        :param audio_chunks: Async iterator yielding encoded audio chunks.
+        :param session_id: Per-playback identity so restarts are not reused.
+        :param content_type: Encoded codec of this producer, if known.
         """
         # Serialize check-and-create: without the lock, two concurrent callers
         # replacing an old stream both pass the "existing" check while awaiting
@@ -432,6 +431,11 @@ class MSXBridgeProvider(PlayerProvider):
                 and not existing.finished
                 and existing.media_uri == media_uri
                 and existing.session_id == session_id
+                and (
+                    content_type is None
+                    or existing.content_type is None
+                    or existing.content_type == content_type
+                )
             ):
                 logger.info(
                     "[GroupStream] Reusing existing shared stream for group %s (subscribers: %d)",
@@ -457,7 +461,7 @@ class MSXBridgeProvider(PlayerProvider):
                 group_id,
                 media_uri[:80] if media_uri else "N/A",
             )
-            stream = SharedGroupStream(group_id, media_uri, session_id)
+            stream = SharedGroupStream(group_id, media_uri, session_id, content_type=content_type)
             await stream.start(audio_chunks)
             self._shared_streams[group_id] = stream
 

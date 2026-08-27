@@ -52,11 +52,18 @@ class SharedGroupStream:
     Late joiners receive buffered data first (catch-up), then live chunks.
     """
 
-    def __init__(self, group_id: str, media_uri: str, session_id: str = "") -> None:
+    def __init__(
+        self,
+        group_id: str,
+        media_uri: str,
+        session_id: str = "",
+        content_type: ContentType | None = None,
+    ) -> None:
         """Initialize shared stream for a group."""
         self.group_id = group_id
         self.media_uri = media_uri
         self.session_id = session_id
+        self.content_type = content_type
         self.buffer: deque[bytes] = deque(maxlen=512)  # ~15s @ 40KB/s MP3
         self.subscribers: dict[str, asyncio.Queue[bytes | None]] = {}
         self.producer_task: asyncio.Task[None] | None = None
@@ -378,10 +385,13 @@ class AudioPipeline:
         session_id = get_media_session_id(media) or getattr(media, "queue_item_id", None) or ""
 
         existing_stream = self.provider.get_shared_stream(group_id)
-        if existing_stream is not None and (
-            existing_stream.media_uri != media_uri or existing_stream.session_id != session_id
-        ):
-            existing_stream = None
+        if existing_stream is not None:
+            if _shared_codec_mismatch(existing_stream, media_uri, session_id, out_format):
+                return await self.serve_independent(
+                    request, player, media, pcm_format, out_format, headers
+                )
+            if not _shared_stream_matches(existing_stream, media_uri, session_id, out_format):
+                existing_stream = None
         is_leader = player_id == group_id
 
         if existing_stream is not None:
@@ -418,7 +428,11 @@ class AudioPipeline:
                 extra_input_args=READRATE_ARGS,
             )
             shared_stream = await self.provider.get_or_create_shared_stream(
-                group_id, media_uri, audio_chunks, session_id=session_id
+                group_id,
+                media_uri,
+                audio_chunks,
+                session_id=session_id,
+                content_type=out_format.content_type,
             )
             shared_stream.output_plan = output_plan
         else:
@@ -431,10 +445,8 @@ class AudioPipeline:
             for _ in range(30):
                 await asyncio.sleep(0.1)
                 shared_stream = self.provider.get_shared_stream(group_id)
-                if (
-                    shared_stream is not None
-                    and shared_stream.media_uri == media_uri
-                    and shared_stream.session_id == session_id
+                if shared_stream is not None and _shared_stream_matches(
+                    shared_stream, media_uri, session_id, out_format
                 ):
                     break
                 shared_stream = None
@@ -711,6 +723,35 @@ async def _collect_prebuffer(
         pre_buffer.append(chunk)
         pre_buffer_size += len(chunk)
     return pre_buffer, False
+
+
+def _shared_stream_matches(
+    stream: SharedGroupStream,
+    media_uri: str,
+    session_id: str,
+    out_format: AudioFormat,
+) -> bool:
+    """Return True when a subscriber can share this encoded stream."""
+    if stream.media_uri != media_uri or stream.session_id != session_id:
+        return False
+    if stream.content_type is None:
+        return True
+    return stream.content_type == out_format.content_type
+
+
+def _shared_codec_mismatch(
+    stream: SharedGroupStream,
+    media_uri: str,
+    session_id: str,
+    out_format: AudioFormat,
+) -> bool:
+    """Return True when the same playback is encoded in a different codec."""
+    return (
+        stream.media_uri == media_uri
+        and stream.session_id == session_id
+        and stream.content_type is not None
+        and stream.content_type != out_format.content_type
+    )
 
 
 def build_audio_params(
