@@ -1,4 +1,4 @@
-[← Getting Started](getting-started.md) · [Back to README](../README.md) · [Web Player →](web-player.md)
+[← Getting Started](getting-started.md) · [Back to README](../README.md) · [API Reference →](api.md)
 
 # Architecture
 
@@ -16,10 +16,10 @@ MSX Music Assistant Bridge is a **Music Assistant Player Provider** — a plugin
 │ - Plugin    │         │  └───────────┬──────────────────────┘  │
 └─────────────┘         │              │ internal API             │
                         │              │                          │
-┌─────────────┐         │  ┌───────────▼──────────────────────┐  │
-│   Browser   │  HTTP   │  │        MA Core                    │  │
-│ (Web Player)│ ◄─────► │  │  music, players, player_queues    │  │
-└─────────────┘         │  └───────────────────────────────────┘  │
+                        │  ┌───────────▼──────────────────────┐  │
+                        │  │        MA Core                    │  │
+                        │  │  music, players, player_queues    │  │
+                        │  └───────────────────────────────────┘  │
                         └───────────────────────────────────────┘
 ```
 
@@ -29,7 +29,7 @@ MSX Music Assistant Bridge is a **Music Assistant Player Provider** — a plugin
 |-----------|-------|------|
 | **Provider** | `MSXBridgeProvider` | MA `PlayerProvider` — lifecycle, player registration, idle timeout, WebSocket broadcast, group streaming |
 | **Player** | `MSXPlayer` | MA `Player` — represents one Smart TV; stores stream URL, signals media-ready events |
-| **HTTP Server** | `MSXHTTPServer` | aiohttp server — all routes: MSX JSON, audio, stream proxy, REST API, WebSocket, web player |
+| **HTTP Server** | `MSXHTTPServer` | aiohttp server — all routes: MSX JSON, audio, stream proxy, REST API, WebSocket |
 
 ## Provider Lifecycle
 

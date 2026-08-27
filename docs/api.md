@@ -1,4 +1,4 @@
-[← Web Player](web-player.md) · [Back to README](../README.md) · [Configuration →](configuration.md)
+[← Architecture](architecture.md) · [Back to README](../README.md) · [Configuration →](configuration.md)
 
 # API Reference
 
@@ -6,13 +6,12 @@ Base URL: `http://<SERVER_IP>:8099`
 
 All endpoints use HTTP/1.1. Audio streams use chunked transfer encoding. JSON endpoints return `application/json`.
 
-## Status & Web
+## Status
 
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/` | Status dashboard (HTML) — shows registered players, setup URL, quick-stop buttons |
 | GET | `/health` | Health check — `{"status": "ok", "provider": "...", "players": [...]}` |
-| GET | `/web/` | Browser-based web player |
 
 ## MSX Bootstrap
 
@@ -76,7 +75,7 @@ These return MSX native playlist JSON. MSX auto-starts playback when loaded via 
 
 ## REST Library API
 
-Returns JSON. Useful for external clients (browser web player, scripts, integrations).
+Returns JSON. Useful for external clients (scripts, integrations).
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -89,8 +88,6 @@ Returns JSON. Useful for external clients (browser web player, scripts, integrat
 | GET | `/api/tracks` | List all tracks |
 | GET | `/api/search?q=...` | Search library (artists, albums, tracks) |
 | GET | `/api/recently-played` | Recently played tracks |
-| GET | `/api/lyrics/{player_id}` | LRC lyrics for currently playing track |
-| GET | `/api/queue/{player_id}` | Current queue state |
 
 ## Playback Control
 

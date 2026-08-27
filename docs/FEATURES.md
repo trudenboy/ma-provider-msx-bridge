@@ -4,62 +4,8 @@ Detailed documentation for MSX Music Assistant Bridge advanced features.
 
 ## Browser Web Player
 
-A lightweight web-based player that works in any modern browser without requiring the MSX app.
-
-### Use Cases
-
-- **Kitchen/Living Room** — Open on a tablet while cooking
-- **Office/Coworking** — Background music on your laptop
-- **Events** — Raspberry Pi + display in kiosk mode for parties
-- **Gym/Fitness** — TV without MSX app — just open the URL in TV browser
-- **Mobile Access** — Quick access from phone without installing apps
-
-### Access
-
-```
-http://<SERVER_IP>:8099/web/
-```
-
-### Features
-
-- Responsive design (desktop, tablet, mobile)
-- Keyboard shortcuts:
-  - `Space` — Play/Pause
-  - `←` / `→` — Previous/Next track
-  - `↑` / `↓` — Volume up/down
-- Album art display
-- Volume control
-- Track progress bar
-- Library browsing (Albums, Artists, Playlists, Tracks)
-- Search functionality
-
-### Kiosk Display Toggles
-
-The kiosk URL (`/web?kiosk=1`) accepts four display toggles — each is on by default, `=0` disables it:
-
-| Param | Hides |
-|-------|-------|
-| `controls=0` | Playback control panel (also on mouse/touch interaction) |
-| `party=0` | Party QR overlay (party status is not polled at all) |
-| `viz=0` | Spectrum visualizer / equalizer |
-| `lyrics=0` | Karaoke lyrics (not fetched at all) |
-
-Example — art and visualizer only: `/web?kiosk=1&controls=0&party=0&lyrics=0`. The provider status page (`/`) has a **Kiosk URL Builder** that composes these links interactively.
-
-### Kiosk Mode Setup (Raspberry Pi)
-
-```bash
-# Install Chromium
-sudo apt install chromium-browser
-
-# Create autostart script
-cat > ~/.config/autostart/music-kiosk.desktop << EOF
-[Desktop Entry]
-Type=Application
-Name=Music Kiosk
-Exec=chromium-browser --kiosk --noerrdialogs --disable-infobars http://<SERVER_IP>:8099/web/
-EOF
-```
+The browser web player and kiosk are no longer part of this provider.
+Use the standalone Web Kiosk provider for always-on displays.
 
 ---
 
@@ -237,35 +183,6 @@ Currently implemented:
 In development:
 - MSX → MA: Position updates
 - MSX → MA: Playback state changes
-
----
-
-## Sendspin Integration (Reserved)
-
-Infrastructure for clock-synchronized audio playback using the Sendspin protocol.
-
-### Current Status
-
-**Disabled** — The Sendspin plugin infrastructure is implemented but disabled. It requires Music Assistant core to support streaming audio to specific Sendspin player IDs, which is not yet available.
-
-### What's Implemented
-
-- `sendspin-plugin.html` — TVX Video Plugin with:
-  - Sync indicator UI (SYNC / CONNECTING / ERROR states)
-  - Dynamic Sendspin SDK loading via ES modules
-  - `SendspinMSXPlayer` class implementing TVX Video Plugin interface
-  - Connection handling with error fallback
-
-### Future Plans
-
-When MA core adds support for Sendspin player targeting:
-1. Enable `sendspin_enabled` config option
-2. Action URLs will switch from `audio:http://...` to `audio:plugin:http://.../sendspin-plugin.html`
-3. Clock-synchronized playback across multiple TVs
-
-### Why Sendspin?
-
-Sendspin protocol provides sample-accurate audio synchronization across devices. Unlike the current HTTP streaming approach (which has 100-500ms variance), Sendspin can achieve <10ms sync — ideal for multi-room setups where you can hear multiple speakers.
 
 ---
 

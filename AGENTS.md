@@ -23,16 +23,15 @@ msx-music-assistant/
 │   ├── __init__.py               # setup() entry point, get_config_entries()
 │   ├── provider.py               # MSXBridgeProvider(PlayerProvider) — lifecycle, player mgmt, WS broadcast
 │   ├── player.py                 # MSXPlayer(Player) — per-TV player state, media events
-│   ├── http_server.py            # MSXHTTPServer — aiohttp routes (MSX, audio, API, WS, web)
-│   ├── constants.py              # Config keys and defaults (7 entries)
+│   ├── http_server.py            # MSXHTTPServer — aiohttp routes (MSX, audio, API, WS)
+│   ├── constants.py              # Config keys and defaults (6 entries)
 │   ├── models.py                 # Pydantic models for MSX JSON API (MsxTemplate, MsxItem, MsxContent)
 │   ├── mappers.py                # MA object → MSX model converters
 │   ├── manifest.json             # Provider metadata for MA
 │   └── static/                  # Static files served by aiohttp
 │       ├── plugin.html           # MSX interaction plugin (device ID detection, WebSocket client)
 │       ├── input.html / input.js # MSX Input Plugin (search keyboard)
-│       ├── tvx-plugin*.min.js    # TVX plugin library
-│       └── web/                  # Browser-based web player (index.html, web.js)
+│       └── tvx-plugin*.min.js    # TVX plugin library
 │
 ├── tests/                        # All tests
 │   ├── conftest.py               # MA mock fixtures (MockMusicAssistant, etc.)
@@ -86,7 +85,6 @@ msx-music-assistant/
 | README (RU) | README.ru.md | Project landing page (RU) |
 | Getting Started | docs/getting-started.md | Installation, TV setup, first steps |
 | Architecture | docs/architecture.md | Provider structure, flows, WebSocket protocol |
-| Web Player | docs/web-player.md | Browser player, kiosk mode, URL parameters |
 | API Reference | docs/api.md | All HTTP endpoints |
 | Configuration | docs/configuration.md | Config entries, output format, stop behavior |
 | Development | docs/development.md | Dev setup, tests, linting, commit format |
