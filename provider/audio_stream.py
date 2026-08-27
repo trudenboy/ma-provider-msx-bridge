@@ -276,7 +276,7 @@ class SharedGroupStream:
             "[SharedStream:%s] Producer failed: %s",
             self.group_id,
             exc,
-            exc_info=exc,
+            exc_info=(type(exc), exc, exc.__traceback__),
         )
 
 

@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, cast
+from typing import Any
 from unittest.mock import AsyncMock, Mock, patch
 
 from music_assistant_models.enums import PlaybackState, PlayerFeature, PlayerType
 from music_assistant_models.player import PlayerMedia
 
 from music_assistant.providers.msx_bridge.player import MSXPlayer
-from music_assistant.providers.msx_bridge.provider import MSXBridgeProvider
 
 # --- Initialization and properties ---
 
@@ -345,7 +344,7 @@ async def test_play_media_propagates_to_group_members(provider: Any, mass_mock: 
     mass_mock.players.get = mass_mock.players.get_player = Mock(return_value=member)
     http = Mock()
     http.cancel_streams_for_player = Mock()
-    cast("MSXBridgeProvider", leader.provider).http_server = http
+    leader.provider.http_server = http  # type: ignore[attr-defined]
 
     media = Mock(spec=PlayerMedia)
     media.uri = "library://track/123"
