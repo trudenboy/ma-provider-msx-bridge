@@ -1629,6 +1629,39 @@ async def test_msx_audio_finds_a_uri_at_the_end_of_a_long_queue(
         await client.close()
 
 
+async def test_msx_audio_accepts_queue_item_uri_without_media_item(
+    provider: MSXBridgeProvider, mass_mock: Mock
+) -> None:
+    """A queued URI stored on the queue item itself must still play in place."""
+    radio_uri = "builtin://radio/http://radio.example/stream"
+    item = _make_queue_item(radio_uri, queue_item_id="radio-bare")
+    item.media_item = None
+    item.uri = radio_uri
+    _wire_queue(mass_mock, [item])
+
+    server = MSXHTTPServer(provider, 0)
+    client = AiohttpTestClient(TestServer(server.app))
+    await client.start_server()
+    try:
+        _make_audio_player(mass_mock)
+        token = provider.get_stream_token("msx_test")
+        mass_mock.streams = Mock()
+        mass_mock.streams.get_stream = Mock(return_value=_async_iter([b"pcm"]))
+        mass_mock.streams.resolve_stream_url = AsyncMock(side_effect=RuntimeError("no session"))
+        with patch(
+            "music_assistant.providers.msx_bridge.audio_stream.get_ffmpeg_stream",
+            return_value=_async_iter([b"encoded"]),
+        ):
+            resp = await client.get(
+                f"/msx/audio/msx_test?uri={quote(radio_uri, safe='')}&token={token}"
+            )
+            assert resp.status == 200
+
+        mass_mock.player_queues.play_index.assert_awaited_once_with("msx_test", "radio-bare")
+    finally:
+        await client.close()
+
+
 async def test_msx_audio_queue_scan_skips_items_without_a_media_item(
     provider: MSXBridgeProvider, mass_mock: Mock
 ) -> None:
