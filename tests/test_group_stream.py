@@ -228,11 +228,10 @@ async def test_serve_shared_registers_stream_so_stop_can_cancel(
     async def hanging_subscribe(_player_id: str) -> AsyncIterator[bytes]:
         subscribed.set()
         await hanging.wait()
-        return
         yield b"x"
 
     stream = SharedGroupStream("msx_tv", "library://track/1", session_id="")
-    stream.subscribe = hanging_subscribe  # type: ignore[method-assign]
+    stream.subscribe = hanging_subscribe  # type: ignore[assignment]
     provider.get_shared_stream = Mock(return_value=stream)  # type: ignore[method-assign]
 
     request = Mock()
