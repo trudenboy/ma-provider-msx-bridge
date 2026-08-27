@@ -256,3 +256,64 @@ async def test_serve_shared_registers_stream_so_stop_can_cancel(
             with pytest.raises(asyncio.CancelledError):
                 await asyncio.wait_for(task, timeout=2.0)
             assert "msx_tv" not in pipeline.active_stream_tasks
+
+
+async def test_serve_shared_falls_back_when_member_codec_differs(
+    provider: MSXBridgeProvider,
+) -> None:
+    """A member whose codec differs from the shared encoder must not reuse those bytes."""
+    stream = SharedGroupStream(
+        "msx_leader", "library://track/1", session_id="", content_type=ContentType.MP3
+    )
+    provider._shared_streams["msx_leader"] = stream
+    pipeline = AudioPipeline(provider)
+    member = MagicMock(spec=MSXPlayer)
+    member.player_id = "msx_member"
+    media = Mock(uri="library://track/1", source_id=None, queue_item_id=None)
+    pcm = AudioFormat(content_type=ContentType.PCM_S16LE)
+    flac = AudioFormat(content_type=ContentType.FLAC)
+    headers = {"Content-Type": "audio/flac"}
+    independent = AsyncMock(return_value=Mock())
+    with (
+        patch(
+            "music_assistant.providers.msx_bridge.audio_stream.get_media_session_id",
+            return_value="",
+        ),
+        patch.object(pipeline, "serve_independent", independent),
+        patch.object(pipeline, "_write_shared_response", AsyncMock()) as write_shared,
+    ):
+        await pipeline.serve_shared(Mock(), member, media, "msx_leader", pcm, flac, headers)
+
+    independent.assert_awaited_once()
+    write_shared.assert_not_awaited()
+
+
+async def test_serve_shared_reuses_stream_when_member_codec_matches(
+    provider: MSXBridgeProvider,
+) -> None:
+    """A member with the same codec as the shared encoder subscribes to it."""
+    stream = SharedGroupStream(
+        "msx_leader", "library://track/1", session_id="", content_type=ContentType.MP3
+    )
+    provider._shared_streams["msx_leader"] = stream
+    pipeline = AudioPipeline(provider)
+    member = MagicMock(spec=MSXPlayer)
+    member.player_id = "msx_member"
+    media = Mock(uri="library://track/1", source_id=None, queue_item_id=None)
+    pcm = AudioFormat(content_type=ContentType.PCM_S16LE)
+    mp3 = AudioFormat(content_type=ContentType.MP3)
+    headers = {"Content-Type": "audio/mpeg"}
+    independent = AsyncMock()
+    write_shared = AsyncMock(return_value=Mock())
+    with (
+        patch(
+            "music_assistant.providers.msx_bridge.audio_stream.get_media_session_id",
+            return_value="",
+        ),
+        patch.object(pipeline, "serve_independent", independent),
+        patch.object(pipeline, "_write_shared_response", write_shared),
+    ):
+        await pipeline.serve_shared(Mock(), member, media, "msx_leader", pcm, mp3, headers)
+
+    write_shared.assert_awaited_once()
+    independent.assert_not_awaited()
