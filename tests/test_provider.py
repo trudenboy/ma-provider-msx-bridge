@@ -165,7 +165,7 @@ async def test_unload_continues_when_unregister_fails(
 
     await provider.unload()
 
-    assert provider.mass.players.unregister.await_count == 2  # type: ignore[attr-defined]
+    assert provider.mass.players.unregister.await_count == 2
 
 
 async def test_unload_does_not_swallow_unexpected_unregister_error(

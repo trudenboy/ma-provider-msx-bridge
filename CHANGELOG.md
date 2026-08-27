@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.4.19] - 2026-08-27
 
-### Changed
+### Fixed
 
 - An audio request for a track that is not in the current queue is rejected instead of replacing the queue.
 
