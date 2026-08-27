@@ -129,6 +129,9 @@ class SharedGroupStream:
             async with self._lock:
                 buffer_snapshot = list(self.buffer)
                 already_finished = self.finished
+                previous = self.subscribers.get(player_id)
+                if previous is not None and previous is not q:
+                    _signal_eof(previous)
                 self.subscribers[player_id] = q
                 if already_finished:
                     q.put_nowait(None)
@@ -174,7 +177,8 @@ class SharedGroupStream:
 
         finally:
             async with self._lock:
-                self.subscribers.pop(player_id, None)
+                if self.subscribers.get(player_id) is q:
+                    self.subscribers.pop(player_id, None)
                 remaining = len(self.subscribers)
 
             logger.info(

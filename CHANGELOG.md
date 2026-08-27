@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.23] - 2026-08-27
+
+### Fixed
+
+- A TV that reconnects to a shared group stream no longer leaves the previous connection hanging or drops the new one.
+
 ## [1.4.22] - 2026-08-27
 
 ### Fixed
