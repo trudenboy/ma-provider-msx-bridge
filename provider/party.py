@@ -234,13 +234,13 @@ def _open_rgb_image(data: bytes) -> Any:
 
     from PIL import Image  # noqa: PLC0415
 
-    image = Image.open(io.BytesIO(data))
-    width, height = image.size
-    if width <= 0 or height <= 0 or width * height > COVER_MAX_PIXELS:
-        raise ValueError("image exceeds size limit")
-    with warnings.catch_warnings():
-        warnings.simplefilter("error", Image.DecompressionBombWarning)
-        return image.convert("RGB")
+    with Image.open(io.BytesIO(data)) as image:
+        width, height = image.size
+        if width <= 0 or height <= 0 or width * height > COVER_MAX_PIXELS:
+            raise ValueError("image exceeds size limit")
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", Image.DecompressionBombWarning)
+            return image.convert("RGB")
 
 
 def stamp_qr_on_cover(cover_bytes: bytes, qr_bytes: bytes) -> bytes:
