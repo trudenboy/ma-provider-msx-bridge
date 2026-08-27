@@ -2,7 +2,7 @@
 
 # Configuration
 
-The provider exposes seven settings in the Music Assistant UI under **Settings → Providers → MSX Bridge**.
+The provider exposes these settings in the Music Assistant UI under **Settings → Providers → MSX Bridge**.
 
 ## Config Entries
 
@@ -14,7 +14,6 @@ The provider exposes seven settings in the Music Assistant UI under **Settings �
 | `show_stop_notification` | `false` | Show a confirmation dialog on MSX when MA stops playback |
 | `abort_stream_first` | `false` | When stopping: abort the stream connection before sending the WebSocket stop signal (may reduce stop delay on some TVs) |
 | `enable_player_grouping` | `true` | Allow grouping multiple MSX TVs for synchronized playback (experimental) |
-| `enable_sendspin_bridge` | `false` | Register each TV as a Sendspin client for sample-synchronized playback with any MA players (experimental; requires a TV browser capable of running the Sendspin web client) |
 | `group_stream_mode` | `independent` | How audio is delivered to TVs (see Stream Delivery Mode below) |
 
 ## Output Format

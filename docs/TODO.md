@@ -17,20 +17,6 @@
 
 ## В разработке 🚧
 
-### Sendspin Full Integration
-
-**Статус:** Инфраструктура готова, ожидает поддержки MA core
-
-**Что сделано:**
-- `sendspin-plugin.html` — TVX Video Plugin с sync indicator
-- Класс `SendspinMSXPlayer` реализующий TVX интерфейс
-- Конфигурация `sendspin_enabled` (закомментирована)
-- Логика переключения action URL в mappers.py
-
-**Что нужно:**
-- MA core: возможность стримить аудио на конкретный Sendspin player_id
-- Тестирование на реальных TV (Samsung Tizen, LG webOS)
-
 ### Bidirectional WebSocket Position Sync
 
 **Статус:** Частично реализовано

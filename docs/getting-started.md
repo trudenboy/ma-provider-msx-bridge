@@ -56,7 +56,7 @@ If the TV connected successfully, it will appear as a player in Music Assistant 
 
 1. Browse your MA library on the TV (Albums, Artists, Playlists, Tracks, Search)
 2. Click a track or album — playback starts on the TV
-3. Control playback from the MA UI, the TV remote, or the [browser web player](web-player.md)
+3. Control playback from the MA UI or the TV remote
 
 ## See Also
 

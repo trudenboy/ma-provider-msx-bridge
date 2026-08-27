@@ -10,7 +10,6 @@ from music_assistant_models.enums import ConfigEntryType, PlayerFeature, Provide
 from music_assistant.providers.msx_bridge import setup
 from music_assistant.providers.msx_bridge.constants import (
     CONF_ENABLE_GROUPING,
-    CONF_ENABLE_SENDSPIN_BRIDGE,
     CONF_GROUP_STREAM_MODE,
     CONF_HTTP_PORT,
     CONF_OUTPUT_FORMAT,
@@ -61,13 +60,11 @@ async def test_get_config_entries(provider: MSXBridgeProvider) -> None:
     assert grouping_entry.default_value is False
 
 
-async def test_sendspin_bridge_and_redirect_enabled_by_default(
-    provider: MSXBridgeProvider,
-) -> None:
-    """Fresh installs get the Sendspin bridge on and redirect stream mode by default."""
+async def test_sendspin_bridge_removed_from_config(provider: MSXBridgeProvider) -> None:
+    """The Sendspin bridge lived with the web kiosk and is no longer a config entry."""
     entries = await provider.get_config_entries()
-    sendspin_entry = next(e for e in entries if e.key == CONF_ENABLE_SENDSPIN_BRIDGE)
-    assert sendspin_entry.default_value is True
+    keys = [e.key for e in entries]
+    assert "enable_sendspin_bridge" not in keys
     mode_entry = next(e for e in entries if e.key == CONF_GROUP_STREAM_MODE)
     assert mode_entry.default_value == GROUP_STREAM_MODE_REDIRECT
 

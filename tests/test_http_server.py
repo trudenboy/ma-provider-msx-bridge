@@ -4,9 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import re
-import shutil
-import subprocess
 from collections.abc import AsyncGenerator, Iterator
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
@@ -23,7 +20,7 @@ from music_assistant_models.player import PlayerMedia
 
 from music_assistant.providers.msx_bridge.audio_stream import _collect_prebuffer
 from music_assistant.providers.msx_bridge.constants import PRE_BUFFER_BYTES
-from music_assistant.providers.msx_bridge.http_server import STATIC_DIR, MSXHTTPServer
+from music_assistant.providers.msx_bridge.http_server import MSXHTTPServer
 from music_assistant.providers.msx_bridge.mappers import map_track_to_msx
 from music_assistant.providers.msx_bridge.player import MSXPlayer
 from music_assistant.providers.msx_bridge.provider import MSXBridgeProvider
@@ -62,26 +59,15 @@ async def test_root_html_escapes_host_header(http_client: TestClient[Any, Any]) 
     assert 'evil">' not in body
 
 
-async def test_root_html_sendspin_urls_escaped(http_client: TestClient[Any, Any]) -> None:
-    """Generated sendspin hrefs must be HTML-escaped as a whole, including & separators."""
+async def test_root_html_has_no_web_kiosk(http_client: TestClient[Any, Any]) -> None:
+    """The status page must not advertise the removed browser kiosk."""
     resp = await http_client.get("/")
     assert resp.status == 200
     body = await resp.text()
-    assert "&amp;sendspin_url=http%3A%2F%2F" in body
-    assert "&sendspin_url=http%3A%2F%2F" not in body
-
-
-async def test_root_html_uses_sendspin_server_port_constant(
-    http_client: TestClient[Any, Any],
-) -> None:
-    """Generated Sendspin links must follow the core server port constant."""
-    with patch("music_assistant.providers.msx_bridge.http_server.SENDSPIN_SERVER_PORT", 12345):
-        resp = await http_client.get("/")
-
-    assert resp.status == 200
-    body = await resp.text()
-    assert "sendspin_url=http%3A%2F%2F" in body
-    assert "%3A12345" in body
+    assert 'id="kiosk-builder"' not in body
+    assert 'href="/web"' not in body
+    assert "/web?" not in body
+    assert "sendspin" not in body.lower()
 
 
 async def test_start_json(http_client: TestClient[Any, Any]) -> None:
@@ -95,6 +81,18 @@ async def test_start_json(http_client: TestClient[Any, Any]) -> None:
     assert "scripts" not in data
 
 
+async def test_launcher_has_no_web_kiosk(http_client: TestClient[Any, Any]) -> None:
+    """The MSX launcher offers MSX Player only — no browser kiosk shortcut."""
+    resp = await http_client.get("/msx/launcher.json")
+    assert resp.status == 200
+    data = await resp.json()
+    labels = [item.get("label") for item in data.get("items", [])]
+    assert "MSX Player" in labels
+    assert "Web Kiosk" not in labels
+    blob = json.dumps(data)
+    assert "/web" not in blob
+
+
 async def test_plugin_html(http_client: TestClient[Any, Any]) -> None:
     """GET /msx/plugin.html should return HTML with interaction plugin."""
     resp = await http_client.get("/msx/plugin.html")
@@ -103,6 +101,7 @@ async def test_plugin_html(http_client: TestClient[Any, Any]) -> None:
     body = await resp.text()
     assert "tvx.InteractionPlugin" in body
     assert "handleRequest" in body
+    assert 'msg.type === "sendspin"' not in body
     assert resp.headers.get("Cache-Control") == "no-cache, no-store, must-revalidate"
 
 
@@ -2148,6 +2147,13 @@ async def test_removed_kiosk_and_sendspin_routes_404(
         "/msx/sendspin-plugin.html",
         "/msx/sendspin-standalone.html",
         "/msx/sendspin-bundle.js",
+        "/web",
+        "/web/",
+        "/web/index.html",
+        "/web/web.js",
+        "/web/sendspin-js/index.js",
+        "/api/lyrics/msx_test",
+        "/api/queue/msx_test",
     ]:
         resp = await http_client.get(path)
         assert resp.status == 404, f"Expected 404 for {path}, got {resp.status}"
@@ -2285,165 +2291,6 @@ async def test_msx_audio_redirect_mode_falls_back_to_proxy(
             assert ffmpeg_stream.call_args.kwargs["filter_params"] == filter_params
     finally:
         await client.close()
-
-
-# --- Vendored Sendspin JS client ---
-
-
-async def test_vendored_sendspin_js_served(http_client: TestClient[Any, Any]) -> None:
-    """The Sendspin JS client must be served locally — TVs on LAN-only setups have no CDN."""
-    resp = await http_client.get("/web/sendspin-js/index.js")
-    assert resp.status == 200
-    body = await resp.text()
-    assert "SendspinPlayer" in body
-
-
-def test_web_player_has_no_cdn_dependency() -> None:
-    """web.js must import the Sendspin SDK from the vendored copy, not from a CDN."""
-    web_js = (STATIC_DIR / "web" / "web.js").read_text(encoding="utf-8")
-    assert "unpkg.com" not in web_js
-    assert "jsdelivr" not in web_js
-    assert "sendspin-js/index.js" in web_js
-
-
-async def test_root_has_kiosk_url_builder(http_client: TestClient[Any, Any]) -> None:
-    """The status page offers a kiosk URL builder with the four display toggles."""
-    resp = await http_client.get("/")
-    assert resp.status == 200
-    body = await resp.text()
-    assert 'id="kiosk-builder"' in body
-    for name in ("controls", "party", "viz", "lyrics"):
-        assert f'data-kiosk-param="{name}"' in body
-    assert 'id="kiosk-builder-link"' in body
-    assert 'id="kiosk-builder-url"' in body
-
-
-def test_web_player_reads_kiosk_display_params() -> None:
-    """web.js must read the four kiosk display params (URL contract)."""
-    web_js = (STATIC_DIR / "web" / "web.js").read_text(encoding="utf-8")
-    for name in ("controls", "party", "viz", "lyrics"):
-        assert f"kioskFlag('{name}')" in web_js, f"missing kiosk param: {name}"
-
-
-def test_web_player_js_parses() -> None:
-    """web.js must be syntactically valid (guards against edits breaking the kiosk)."""
-    node = shutil.which("node")
-    if node is None:
-        pytest.skip("node not available")
-    result = subprocess.run(  # noqa: S603
-        [node, "--check", str(STATIC_DIR / "web" / "web.js")],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert result.returncode == 0, result.stderr
-
-
-def test_vendored_sendspin_js_imports_are_browser_loadable() -> None:
-    """
-    Every import specifier in the vendored SDK must be loadable by a browser.
-
-    Relative specifiers must resolve to a vendored file (the upstream dist is
-    TypeScript output with extensionless specifiers that only work through CDN
-    rewriting). Bare specifiers cannot resolve in browsers at all; the two
-    opus-encdec ones are a known opus-decode fallback that stays unreachable
-    because the web player stops advertising opus when WebCodecs is missing.
-    """
-    vendor_dir = STATIC_DIR / "web" / "sendspin-js"
-    js_files = list(vendor_dir.rglob("*.js"))
-    assert js_files, "vendored sendspin-js dist is missing"
-    known_bare_specifiers = {
-        "opus-encdec/dist/libopus-decoder.js",
-        "opus-encdec/src/oggOpusDecoder.js",
-    }
-    # static imports/re-exports, side-effect imports, and dynamic import()
-    pattern = re.compile(
-        r"""(?:import\s*\(\s*|import[^'"()]*?from\s+|import\s+|export[^'"()]*?from\s+)"""
-        r"""['"]([^'"]+)['"]"""
-    )
-    bad: list[str] = []
-    for js_file in js_files:
-        for specifier in pattern.findall(js_file.read_text(encoding="utf-8")):
-            if specifier.startswith("."):
-                target = (js_file.parent / specifier).resolve()
-                if not (specifier.endswith(".js") and target.is_file()):
-                    bad.append(f"{js_file.name}: {specifier}")
-            elif specifier not in known_bare_specifiers:
-                bad.append(f"{js_file.name}: bare specifier {specifier}")
-    assert not bad, f"browser-unloadable import specifiers: {bad}"
-
-
-# --- Queue API ---
-
-
-async def test_queue_unknown_player(http_client: TestClient[Any, Any]) -> None:
-    """GET /api/queue/{player_id} for unknown player returns empty items."""
-    resp = await http_client.get("/api/queue/unknown_player")
-    assert resp.status == 200
-    data = await resp.json()
-    assert data["items"] == []
-    assert data["current_index"] == -1
-
-
-async def test_queue_with_items(
-    http_client: TestClient[Any, Any],
-    provider: MSXBridgeProvider,
-    mass_mock: Mock,
-) -> None:
-    """GET /api/queue/{player_id} returns queue items with current_index."""
-    # Create and register a player
-    player = MSXPlayer(provider, "msx_queue_test", name="Queue TV", output_format="mp3")
-    player.update_state = Mock()  # type: ignore[misc,method-assign]
-
-    # Set current media
-    media = MagicMock(spec=PlayerMedia)
-    media.source_id = "msx_queue_test"
-    media.queue_item_id = "qi_2"
-    player._attr_current_media = media
-
-    # Mock get_player to return our player
-    mass_mock.players.get_player = Mock(
-        side_effect=lambda pid, **_kw: player if pid == "msx_queue_test" else None
-    )
-
-    # Create mock queue items
-    qi1 = Mock()
-    qi1.name = "Track 1"
-    qi1.duration = 180
-    qi1.image = None
-    mi1 = Mock()
-    mi1.name = "Track 1"
-    mi1.uri = "library://track/1"
-    mi1.artist_str = "Artist A"
-    mi1.duration = 180
-    qi1.media_item = mi1
-
-    qi2 = Mock()
-    qi2.name = "Track 2"
-    qi2.duration = 240
-    qi2.image = None
-    mi2 = Mock()
-    mi2.name = "Track 2"
-    mi2.uri = "library://track/2"
-    mi2.artist_str = "Artist B"
-    mi2.duration = 240
-    qi2.media_item = mi2
-
-    mass_mock.player_queues.items = Mock(return_value=[qi1, qi2])
-
-    # Mock get_item to resolve current track
-    current_qi = Mock()
-    current_qi.media_item = mi2
-    mass_mock.player_queues.get_item = Mock(return_value=current_qi)
-
-    resp = await http_client.get("/api/queue/msx_queue_test")
-    assert resp.status == 200
-    data = await resp.json()
-    assert len(data["items"]) == 2
-    assert data["items"][0]["title"] == "Track 1"
-    assert data["items"][0]["artist"] == "Artist A"
-    assert data["items"][1]["title"] == "Track 2"
-    assert data["current_index"] == 1  # Track 2 is current
 
 
 class _AsyncCtx:

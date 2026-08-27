@@ -13,22 +13,20 @@ Smart TV (MSX App) --HTTP--> MSXBridgeProvider (inside MA, port 8099) --internal
 ```
 
 **Provider** (`provider/msx_bridge/`): MA Player Provider with embedded HTTP server.
-- `__init__.py` — `setup()`, `get_config_entries()` (7 config entries), provider entry point
+- `__init__.py` — `setup()`, `get_config_entries()` (6 config entries), provider entry point
 - `provider.py` — `MSXBridgeProvider(PlayerProvider)`: manages lifecycle, dynamic player registration, idle timeout loop, WebSocket push notifications, starts HTTP server
 - `player.py` — `MSXPlayer(Player)`: represents a Smart TV as an MA player. Stores stream URL from `play_media()` for the TV to fetch via HTTP.
 - `http_server.py` — `MSXHTTPServer`: aiohttp server with routes for MSX bootstrap, library browsing, playback control, WebSocket, and stream proxy
-- `constants.py` — config keys and defaults (7 config entries: `http_port`, `output_format`, `player_idle_timeout`, `show_stop_notification`, `abort_stream_first`, `enable_player_grouping`, `group_stream_mode`)
+- `constants.py` — config keys and defaults (6 config entries: `http_port`, `output_format`, `player_idle_timeout`, `show_stop_notification`, `enable_player_grouping`, `group_stream_mode`)
 - `models.py` — Pydantic models for MSX JSON API (`MsxTemplate`, `MsxItem`, `MsxContent`)
 - `mappers.py` — Converters from MA objects to MSX models (`map_track_to_msx`, `map_album_to_msx`, `map_artist_to_msx`, `map_playlist_to_msx`, `map_tracks_to_msx_playlist`)
 - `manifest.json` — provider metadata for MA
 - `static/` — static files served by aiohttp:
   - `plugin.html` — MSX interaction plugin (detects device ID, opens WebSocket, builds menu)
-  - `sendspin-plugin.html` — Sendspin TVX Video Plugin (reserved for future use)
   - `input.html` — MSX Input Plugin wrapper (search keyboard)
   - `input.js` — Input Plugin logic
   - `tvx-plugin-module.min.js` — TVX plugin module library
   - `tvx-plugin.min.js` — TVX plugin library
-  - `web/` — Browser-based web player (index.html, web.js)
 
 ### Key Flows
 
@@ -135,14 +133,13 @@ python -c "from music_assistant.providers.msx_bridge import setup; print('OK')"
 - MSX native playlist endpoints (`/msx/playlist/album/{id}.json`, `/msx/playlist/playlist/{id}.json`, `/msx/playlist/tracks.json`, `/msx/playlist/recently-played.json`, `/msx/playlist/search.json`, `/msx/queue-playlist/{player_id}.json`)
 - Audio playback endpoint (`/msx/audio/{player_id}`) via playlist action; Content-Length set for MP3/AAC from duration; FLAC omits it
 - Stream proxy (`/stream/{player_id}`) with same PCM→ffmpeg chain
-- Library REST API (`/api/albums`, `/api/artists`, `/api/playlists`, `/api/tracks`, `/api/search`, `/api/recently-played`, `/api/lyrics/{player_id}`, `/api/queue/{player_id}`, plus detail sub-routes)
+- Library REST API (`/api/albums`, `/api/artists`, `/api/playlists`, `/api/tracks`, `/api/search`, `/api/recently-played`, plus detail sub-routes)
 - Playback control (`/api/play`, `/api/pause/{player_id}`, `/api/stop/{player_id}`, `/api/quick-stop/{player_id}`, `/api/next/{player_id}`, `/api/previous/{player_id}`)
 - Health endpoint (`/health`)
 - Status dashboard (`/`)
 - 141 tests: 111 unit (test_http_server 53, test_player 42, test_group_stream 20, test_provider 9, test_init 6, test_models 4, test_playlist 5, test_mappers 2) + 30 integration
 - `map_track_to_msx()` / `map_tracks_to_msx_playlist()` in `mappers.py` replace the old `_format_msx_track()` helper
-- 7 config entries: `http_port`, `output_format`, `player_idle_timeout`, `show_stop_notification`, `abort_stream_first`, `enable_player_grouping`, `group_stream_mode`
-- Browser web player (`/web`) with library browsing, playback controls, and keyboard shortcuts
+- 6 config entries: `http_port`, `output_format`, `player_idle_timeout`, `show_stop_notification`, `enable_player_grouping`, `group_stream_mode`
 - Group stream modes: Independent (separate ffmpeg per TV) or Shared Buffer (one ffmpeg, multiple readers)
 - `on_player_disabled` override: does not unregister (player stays on Enable); still broadcasts stop for instant MSX close
 

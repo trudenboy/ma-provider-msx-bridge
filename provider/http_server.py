@@ -15,9 +15,6 @@ import aiohttp
 from aiohttp import WSMsgType, web
 from music_assistant_models.enums import RepeatMode
 from music_assistant_models.errors import MusicAssistantError
-from music_assistant_models.media_items import Track
-
-from music_assistant.constants import SENDSPIN_SERVER_PORT
 
 from .audio_stream import AudioPipeline, build_audio_params, resolve_served_duration
 from .constants import (
@@ -250,27 +247,6 @@ class MSXHTTPServer:
             if not ws.closed:
                 self.provider.mass.create_task(self._ws_send(ws, msg, player_id))
 
-    def broadcast_sendspin(self, player_id: str, url: str) -> None:
-        """Notify WebSocket clients to open the Sendspin kiosk (bridge stream start)."""
-        clients = self._ws_clients.get(player_id, set())
-        if not clients:
-            logger.warning(
-                "broadcast_sendspin: no WebSocket clients for player_id=%s (connected: %s)",
-                player_id,
-                list(self._ws_clients.keys()),
-            )
-            return
-        logger.info(
-            "broadcast_sendspin: player_id=%s, url=%s, sending to %d client(s)",
-            player_id,
-            url,
-            len(clients),
-        )
-        msg = json.dumps({"type": "sendspin", "url": url, "player_id": player_id})
-        for ws in list(clients):
-            if not ws.closed:
-                self.provider.mass.create_task(self._ws_send(ws, msg, player_id))
-
     def broadcast_goto_index(self, player_id: str, index: int) -> None:
         """Notify subscribed WebSocket clients to jump to a playlist index."""
         clients = self._ws_clients.get(player_id, set())
@@ -422,10 +398,6 @@ class MSXHTTPServer:
         self.app.router.add_get("/msx/audio/{player_id}", self._handle_msx_audio)
         self.app.router.add_get("/msx/audio/{player_id}.mp3", self._handle_msx_audio)
 
-        # Kiosk web player (browser-based, no MSX app needed)
-        self.app.router.add_get("/web", self._handle_web_app)
-        self.app.router.add_static("/web/", STATIC_DIR / "web")
-
         # Health
         self.app.router.add_get("/health", self._handle_health)
 
@@ -448,15 +420,13 @@ class MSXHTTPServer:
         self.app.router.add_get("/api/tracks", self._handle_tracks)
         self.app.router.add_get("/api/search", self._handle_search)
         self.app.router.add_get("/api/recently-played", self._handle_recently_played)
-        self.app.router.add_get("/api/lyrics/{player_id}", self._handle_lyrics)
-        self.app.router.add_get("/api/queue/{player_id}", self._handle_queue)
         self.app.router.add_get("/api/party", self._handle_party_status)
         self.app.router.add_get("/api/party/qr.svg", self._handle_party_qr)
         self.app.router.add_get("/api/party/qr.png", self._handle_party_qr)
         self.app.router.add_get("/api/party/qr-cover.png", self._handle_party_qr_cover)
 
-        # Playback control — GET (MSX interaction plugin) + POST (web player,
-        # dashboard). Never wildcard: extra methods only widen the CSRF surface.
+        # Playback control — GET (MSX interaction plugin) + POST (dashboard).
+        # Never wildcard: extra methods only widen the CSRF surface.
         self.app.router.add_post("/api/play", self._handle_play)
         for path, handler in (
             ("/api/pause/{player_id}", self._handle_pause),
@@ -477,14 +447,13 @@ class MSXHTTPServer:
         Add CORS headers to all responses.
 
         Wildcard CORS is intentional: this server runs on LAN (default port 8099).
-        The web player (/web) and MSX plugin (/msx/plugin.html) are served from the
-        same origin, so browser playback-control POSTs are always same-origin.
+        The MSX plugin (/msx/plugin.html) is served from the same origin, so
+        browser playback-control POSTs from the status dashboard are same-origin.
         MSX TV app only makes GET requests. This matches MA's own webserver pattern.
 
         The audio routes are the exception and get no header at all: a media element
-        plays a cross-origin source without CORS, and the kiosk visualizer reads the
-        stream same-origin, so withholding it costs nothing and keeps a cross-origin
-        fetch() from reading the audio.
+        plays a cross-origin source without CORS, so withholding it costs nothing
+        and keeps a cross-origin fetch() from reading the audio.
         """
         if request.method == "OPTIONS":
             return web.Response(
@@ -520,16 +489,7 @@ class MSXHTTPServer:
             player_rows.append(row)
         player_info = "".join(player_rows) if player_rows else ""
 
-        # Build URLs
-        safe_host: str = html_escape(request.host)  # escape for HTML display
-        _raw_host: str = request.url.host or request.host.split(":")[0]  # IPv6-safe, no port
-        hostname = f"[{_raw_host}]" if ":" in _raw_host else _raw_host
-        sendspin_url = f"http://{hostname}:{SENDSPIN_SERVER_PORT}"
-        kiosk_html5_url = f"{base}/web?kiosk=1"
-        # escape the composed URL as a whole: host-derived prefix plus & separators
-        sendspin_query = f"sendspin=1&sendspin_url={quote(sendspin_url, safe='')}"
-        sendspin_web_url = html_escape(f"{prefix}/web?{sendspin_query}")
-        sendspin_kiosk_url = html_escape(f"{prefix}/web?kiosk=1&{sendspin_query}")
+        safe_host: str = html_escape(request.host)
 
         html = f"""<!DOCTYPE html>
 <html>
@@ -537,19 +497,12 @@ class MSXHTTPServer:
 <style>
 body {{ font-family: system-ui, sans-serif; max-width: 800px; margin: 50px auto; padding: 20px; }}
 .info {{ background: #e3f2fd; padding: 15px; border-radius: 5px; margin: 10px 0; }}
-.info-sendspin {{ background: #e8f5e9; }}
 code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: break-all; }}
 .player-row {{ display: flex; align-items: center; gap: 12px; margin: 8px 0; list-style: none; }}
 .player-row form {{ margin: 0; }}
 .btn {{ padding: 6px 12px; border-radius: 4px; border: 1px solid #1976d2;
   background: #1976d2; color: white; cursor: pointer; font-size: 14px; }}
 .btn:hover {{ background: #1565c0; }}
-.link-row {{ margin: 8px 0; }}
-.builder-row {{ margin: 6px 0; }}
-.builder-row label {{ margin-right: 16px; cursor: pointer; }}
-.link-row a {{ color: #1976d2; text-decoration: none; }}
-.link-row a:hover {{ text-decoration: underline; }}
-small {{ color: #666; display: block; margin-top: 4px; }}
 </style>
 </head>
 <body>
@@ -558,82 +511,6 @@ small {{ color: #666; display: block; margin-top: 4px; }}
 <div class="info">
 <h3>MSX Setup URL</h3>
 <code>http://{safe_host}/msx/start.json</code>
-</div>
-
-<div class="info">
-<h3>Web Player</h3>
-<div class="link-row">
-<a href="/web">http://{safe_host}/web</a>
-<small>Browser-based player with library navigation (HTTP streaming)</small>
-</div>
-<div class="link-row">
-<a href="{kiosk_html5_url}">Kiosk Mode (HTML5)</a>
-<small>Fullscreen player with WebSocket push - ideal for dedicated displays</small>
-</div>
-</div>
-
-<div class="info info-sendspin">
-<h3>Sendspin Player (Synchronized Audio)</h3>
-<div class="link-row">
-<a href="{sendspin_web_url}">Web Player + Sendspin</a>
-<small>Library navigation with clock-synchronized audio</small>
-</div>
-<div class="link-row">
-<a href="{sendspin_kiosk_url}">Kiosk Mode (Sendspin)</a>
-<small>Fullscreen player with clock-synchronized audio</small>
-</div>
-<div class="link-row" style="margin-top: 12px;">
-<strong>Custom Sendspin URL:</strong><br>
-<code>/web?kiosk=1&amp;sendspin=1&amp;sendspin_url=http://&lt;ma-server&gt;:{SENDSPIN_SERVER_PORT}</code>
-</div>
-</div>
-
-<div class="info">
-<h3>Kiosk URL Builder</h3>
-<div id="kiosk-builder">
-<div class="builder-row">
-<label><input type="radio" name="kiosk-mode" value="html5" checked> HTML5</label>
-<label><input type="radio" name="kiosk-mode" value="sendspin"> Sendspin</label>
-</div>
-<div class="builder-row">
-<label><input type="checkbox" data-kiosk-param="controls" checked> Controls</label>
-<label><input type="checkbox" data-kiosk-param="party" checked> Party QR</label>
-<label><input type="checkbox" data-kiosk-param="viz" checked> Visualizer</label>
-<label><input type="checkbox" data-kiosk-param="lyrics" checked> Lyrics</label>
-</div>
-<div class="link-row">
-<a id="kiosk-builder-link" href="/web?kiosk=1" target="_blank">Open kiosk</a>
-</div>
-<code id="kiosk-builder-url"></code>
-</div>
-<script>
-(function () {{
-    var builder = document.getElementById('kiosk-builder');
-    var link = document.getElementById('kiosk-builder-link');
-    var urlOut = document.getElementById('kiosk-builder-url');
-
-    function rebuild() {{
-        var params = ['kiosk=1'];
-        var mode = builder.querySelector('input[name="kiosk-mode"]:checked').value;
-        if (mode === 'sendspin') {{
-            params.push('sendspin=1');
-        }}
-        var boxes = builder.querySelectorAll('input[data-kiosk-param]');
-        for (var i = 0; i < boxes.length; i++) {{
-            // only non-default choices land in the URL
-            if (!boxes[i].checked) {{
-                params.push(boxes[i].getAttribute('data-kiosk-param') + '=0');
-            }}
-        }}
-        var url = location.origin + '/web?' + params.join('&');
-        link.href = url;
-        urlOut.textContent = url;
-    }}
-
-    builder.addEventListener('change', rebuild);
-    rebuild();
-}})();
-</script>
 </div>
 
 <div class="info">
@@ -656,7 +533,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
         )
 
     async def _handle_launcher_json(self, request: web.Request) -> web.Response:
-        """Return MSX launcher page with MSX Player and Web Kiosk options."""
+        """Return MSX launcher page with the MSX Player."""
         prefix = self._get_prefix(request)
         content = MsxContent(
             headline="Music Assistant",
@@ -671,11 +548,6 @@ small {{ color: #666; display: block; margin-top: 4px; }}
                     label="MSX Player",
                     icon="msx-white-soft:tv",
                     action=f"menu:request:interaction:init@{prefix}/msx/plugin.html?v=19",
-                ),
-                MsxItem(
-                    label="Web Kiosk",
-                    icon="msx-white-soft:open-in-browser",
-                    action=f"link:{prefix}/web?kiosk=1",
                 ),
             ],
         )
@@ -702,12 +574,6 @@ small {{ color: #666; display: block; margin-top: 4px; }}
         """Serve input.html and ensure player is registered when Search is opened."""
         await self._ensure_player_for_request(request)
         return web.FileResponse(STATIC_DIR / "input.html")
-
-    async def _handle_web_app(self, request: web.Request) -> web.Response:
-        """Serve the web player SPA (browser-based, no MSX app needed)."""
-        response = cast("web.Response", web.FileResponse(STATIC_DIR / "web" / "index.html"))
-        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
-        return response
 
     # --- MSX Content Pages (native MSX JSON) ---
 
@@ -1748,83 +1614,6 @@ small {{ color: #666; display: block; margin-top: 4px; }}
             }
         )
 
-    async def _handle_lyrics(self, request: web.Request) -> web.Response:
-        """Return lyrics for the currently playing track on a given player."""
-        player_id = request.match_info["player_id"]
-        empty = web.json_response({"lyrics": None, "lrc_lyrics": None})
-
-        player = self.provider.mass.players.get_player(player_id)
-        if not player or not isinstance(player, MSXPlayer):
-            return empty
-
-        media = player.current_media
-        if not media or not media.source_id or not media.queue_item_id:
-            return empty
-
-        queue_item = self.provider.mass.player_queues.get_item(media.source_id, media.queue_item_id)
-        if not queue_item or not queue_item.media_item:
-            return empty
-
-        track = queue_item.media_item
-        if not isinstance(track, Track):
-            return empty
-        try:
-            lyrics, lrc_lyrics = await self.provider.mass.metadata.get_track_lyrics(track)
-        except MusicAssistantError, TimeoutError:
-            lyrics, lrc_lyrics = None, None
-
-        return web.json_response(
-            {
-                "title": getattr(track, "name", ""),
-                "artist": getattr(track, "artist_str", ""),
-                "lyrics": lyrics,
-                "lrc_lyrics": lrc_lyrics,
-            }
-        )
-
-    async def _handle_queue(self, request: web.Request) -> web.Response:
-        """Return the current playback queue for a given player."""
-        player_id = request.match_info["player_id"]
-
-        player = self.provider.mass.players.get_player(player_id)
-        if not player or not isinstance(player, MSXPlayer):
-            return web.json_response({"items": [], "current_index": -1})
-
-        queue_id = player_id
-        queue = self.provider.mass.player_queues.get(queue_id)
-        queue_items = self.provider.mass.player_queues.items(
-            queue_id, limit=_queue_item_limit(queue)
-        )
-
-        current_uri = None
-        media = player.current_media
-        if media and media.source_id and media.queue_item_id:
-            qi = self.provider.mass.player_queues.get_item(media.source_id, media.queue_item_id)
-            if qi and qi.media_item:
-                current_uri = getattr(qi.media_item, "uri", None)
-
-        items: list[dict[str, Any]] = []
-        current_index = -1
-        for i, qi in enumerate(queue_items):
-            mi = getattr(qi, "media_item", None)
-            uri = getattr(mi, "uri", None) or ""
-            img = None
-            if hasattr(qi, "image") and qi.image:
-                img = self.provider.mass.metadata.get_image_url(qi.image)
-            items.append(
-                {
-                    "title": getattr(mi, "name", None) or getattr(qi, "name", "") or "",
-                    "artist": getattr(mi, "artist_str", "") if mi else "",
-                    "duration": getattr(mi, "duration", None) or getattr(qi, "duration", 0) or 0,
-                    "image": img,
-                    "uri": uri,
-                }
-            )
-            if current_uri and uri == current_uri and current_index < 0:
-                current_index = i
-
-        return web.json_response({"items": items, "current_index": current_index})
-
     # --- Party Mode ---
 
     def _cached_party(self) -> PartyInfo | None:
@@ -1840,7 +1629,7 @@ small {{ color: #666; display: block; margin-top: 4px; }}
         return await self.party.get_active_party()
 
     async def _handle_party_status(self, request: web.Request) -> web.Response:
-        """Return party status for the kiosk overlay."""
+        """Return party status for MSX party pages."""
         return await self.party.handle_status(request)
 
     async def _handle_party_qr(self, request: web.Request) -> web.Response:

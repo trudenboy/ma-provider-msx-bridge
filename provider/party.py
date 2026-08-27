@@ -68,7 +68,7 @@ class PartyAdapter:
         Return details of the active party, or None when no party is active.
 
         Never raises: a broken or slow Party plugin degrades to "no party" so
-        the core UI (menu, kiosk) keeps working. Results are cached briefly.
+        the core UI (menu) keeps working. Results are cached briefly.
         """
         now = time.monotonic()
         if self.cache is not None and now - self.cache[0] < PARTY_CACHE_TTL:
@@ -92,7 +92,7 @@ class PartyAdapter:
         return info
 
     async def handle_status(self, _request: web.Request) -> web.Response:
-        """Return party status for the kiosk overlay."""
+        """Return party status for MSX party pages."""
         party = await self.get_active_party()
         if party is None:
             return web.json_response({"active": False})
