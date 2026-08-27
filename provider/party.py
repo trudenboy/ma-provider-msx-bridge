@@ -7,6 +7,7 @@ import functools
 import hashlib
 import io
 import logging
+import threading
 import time
 from typing import TYPE_CHECKING, Any, NamedTuple, cast
 from urllib.parse import quote, urlsplit
@@ -26,6 +27,7 @@ PARTY_CACHE_TTL = 10.0
 PARTY_CALL_TIMEOUT = 5.0
 COVER_FETCH_MAX_BYTES = 2 * 1024 * 1024
 COVER_MAX_PIXELS = 4096 * 4096
+_pillow_limit_lock = threading.Lock()
 
 
 class PartyInfo(NamedTuple):
@@ -234,17 +236,18 @@ def stamp_qr_on_cover(cover_bytes: bytes, qr_bytes: bytes) -> bytes:
 
     from PIL import Image  # noqa: PLC0415
 
-    previous_limit = Image.MAX_IMAGE_PIXELS
-    Image.MAX_IMAGE_PIXELS = COVER_MAX_PIXELS
-    try:
-        with warnings.catch_warnings():
-            warnings.simplefilter("error", Image.DecompressionBombWarning)
-            cover = Image.open(io.BytesIO(cover_bytes)).convert("RGB")
-            qr = Image.open(io.BytesIO(qr_bytes)).convert("RGB")
-    except (Image.DecompressionBombError, Image.DecompressionBombWarning) as err:
-        raise ValueError("image exceeds Pillow decompression limit") from err
-    finally:
-        Image.MAX_IMAGE_PIXELS = previous_limit
+    with _pillow_limit_lock:
+        previous_limit = Image.MAX_IMAGE_PIXELS
+        Image.MAX_IMAGE_PIXELS = COVER_MAX_PIXELS
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter("error", Image.DecompressionBombWarning)
+                cover = Image.open(io.BytesIO(cover_bytes)).convert("RGB")
+                qr = Image.open(io.BytesIO(qr_bytes)).convert("RGB")
+        except (Image.DecompressionBombError, Image.DecompressionBombWarning) as err:
+            raise ValueError("image exceeds Pillow decompression limit") from err
+        finally:
+            Image.MAX_IMAGE_PIXELS = previous_limit
     side = max(48, min(cover.width, cover.height) * 28 // 100)
     qr = qr.resize((side, side), Image.Resampling.NEAREST)
     margin = side // 8

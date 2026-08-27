@@ -11,6 +11,7 @@ import pytest
 from music_assistant_models.enums import ContentType
 from music_assistant_models.media_items import AudioFormat
 
+from music_assistant.providers.msx_bridge.audio_stream import AudioPipeline
 from music_assistant.providers.msx_bridge.http_server import MSXHTTPServer
 from music_assistant.providers.msx_bridge.player import MSXPlayer
 from music_assistant.providers.msx_bridge.provider import SharedGroupStream
@@ -180,3 +181,78 @@ async def test_shared_stream_paces_output(provider: MSXBridgeProvider, mass_mock
     extra_args = ffmpeg_mock.call_args.kwargs["extra_input_args"]
     assert "-readrate" in extra_args
     assert "-readrate_initial_burst" in extra_args
+
+
+async def _boom_after(chunk: bytes) -> AsyncIterator[bytes]:
+    """Yield one chunk, then fail with an unexpected error."""
+    yield chunk
+    raise ValueError("producer boom")
+
+
+async def test_stop_retrieves_already_failed_producer() -> None:
+    """stop() must await a producer that already failed so the exception is not lost."""
+    stream = SharedGroupStream("g1", "uri://test")
+    await stream.start(_boom_after(b"x"))
+    assert stream.producer_task is not None
+    await asyncio.wait({stream.producer_task}, timeout=5.0)
+    assert stream.producer_task.done()
+
+    await stream.stop()
+
+    assert isinstance(stream.producer_error, ValueError)
+    assert "producer boom" in str(stream.producer_error)
+
+
+async def test_unexpected_producer_failure_is_recorded_immediately() -> None:
+    """A producer crash outside the expected-error handler must be recorded without stop()."""
+    stream = SharedGroupStream("g1", "uri://test")
+    await stream.start(_boom_after(b"x"))
+    assert stream.producer_task is not None
+    await asyncio.wait({stream.producer_task}, timeout=5.0)
+    assert stream.producer_task.done()
+    assert isinstance(stream.producer_error, ValueError)
+    assert "producer boom" in str(stream.producer_error)
+
+
+async def test_serve_shared_registers_stream_so_stop_can_cancel(
+    provider: MSXBridgeProvider,
+) -> None:
+    """A shared-stream HTTP response must be cancellable via cancel_streams_for_player()."""
+    pipeline = AudioPipeline(provider)
+    player = MagicMock(spec=MSXPlayer)
+    player.player_id = "msx_tv"
+    media = Mock(uri="library://track/1", source_id=None, queue_item_id="")
+    hanging = asyncio.Event()
+    subscribed = asyncio.Event()
+
+    async def hanging_subscribe(_player_id: str) -> AsyncIterator[bytes]:
+        subscribed.set()
+        await hanging.wait()
+        return
+        yield b"x"
+
+    stream = SharedGroupStream("msx_tv", "library://track/1", session_id="")
+    stream.subscribe = hanging_subscribe  # type: ignore[method-assign]
+    provider.get_shared_stream = Mock(return_value=stream)  # type: ignore[method-assign]
+
+    request = Mock()
+    request.transport = Mock()
+    pcm = AudioFormat(content_type=ContentType.PCM_S16LE)
+    out = AudioFormat(content_type=ContentType.MP3)
+
+    with patch("music_assistant.providers.msx_bridge.audio_stream.web.StreamResponse") as resp_cls:
+        response = AsyncMock()
+        resp_cls.return_value = response
+        with patch(
+            "music_assistant.providers.msx_bridge.audio_stream.get_media_session_id",
+            return_value="",
+        ):
+            task = asyncio.create_task(
+                pipeline.serve_shared(request, player, media, "msx_tv", pcm, out, {})
+            )
+            await asyncio.wait_for(subscribed.wait(), timeout=2.0)
+            assert "msx_tv" in pipeline.active_stream_tasks
+            pipeline.cancel_streams_for_player("msx_tv")
+            with pytest.raises(asyncio.CancelledError):
+                await asyncio.wait_for(task, timeout=2.0)
+            assert "msx_tv" not in pipeline.active_stream_tasks

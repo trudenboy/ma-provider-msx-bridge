@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.18] - 2026-08-27
+
+### Fixed
+
+- Stopping a TV that shares a group stream now cuts that TV's audio instead of leaving it playing.
+- Party cover stamping is safe when two covers are processed at once.
+- A seek sent from Music Assistant no longer blocks the next seek on the TV remote if the first seek does not complete.
+- A shared group stream that has already failed is recorded on teardown instead of being left as an unhandled task.
+
 ## [1.4.17] - 2026-08-27
 
 ### Changed
