@@ -50,6 +50,15 @@ async def is_media_item_uri(uri: str) -> bool:
     return provider_instance_id_or_domain != "builtin"
 
 
+def queue_item_uri(item: Any) -> str | None:
+    """Return the playable URI stored on a queue item, if any."""
+    media = getattr(item, "media_item", None)
+    for candidate in (getattr(media, "uri", None), getattr(item, "uri", None)):
+        if isinstance(candidate, str) and candidate:
+            return candidate
+    return None
+
+
 def find_uri_in_active_queue(
     mass: Any,
     player_id: str,
@@ -62,10 +71,8 @@ def find_uri_in_active_queue(
         return None
     items = mass.player_queues.items(queue.queue_id, limit=queue.items)
     for item in items:
-        if (
-            item.media_item is not None
-            and item.media_item.uri == uri
-            and (queue_item_id is None or item.queue_item_id == queue_item_id)
+        if queue_item_uri(item) == uri and (
+            queue_item_id is None or item.queue_item_id == queue_item_id
         ):
             return queue.queue_id, item.queue_item_id
     return None
@@ -84,9 +91,7 @@ def current_media_matches_uri(
     if queue_item_id is not None and media.queue_item_id != queue_item_id:
         return False
     queue_item = mass.player_queues.get_item(media.source_id, media.queue_item_id)
-    if queue_item and queue_item.media_item:
-        return getattr(queue_item.media_item, "uri", None) == track_uri
-    return False
+    return queue_item_uri(queue_item) == track_uri
 
 
 def queue_items_to_tracks(queue_items: Any) -> list[Any]:
@@ -97,7 +102,7 @@ def queue_items_to_tracks(queue_items: Any) -> list[Any]:
         tracks.append(
             SimpleNamespace(
                 name=getattr(mi, "name", None) or getattr(qi, "name", "") or "",
-                uri=getattr(mi, "uri", None) or "",
+                uri=queue_item_uri(qi) or "",
                 duration=getattr(mi, "duration", None) or getattr(qi, "duration", 0) or 0,
                 artist_str=getattr(mi, "artist_str", "") if mi else "",
                 image=getattr(qi, "image", None),

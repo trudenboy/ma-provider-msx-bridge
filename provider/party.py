@@ -7,7 +7,6 @@ import functools
 import hashlib
 import io
 import logging
-import threading
 import time
 from typing import TYPE_CHECKING, Any, NamedTuple, cast
 from urllib.parse import quote, urlsplit
@@ -27,7 +26,6 @@ PARTY_CACHE_TTL = 10.0
 PARTY_CALL_TIMEOUT = 5.0
 COVER_FETCH_MAX_BYTES = 2 * 1024 * 1024
 COVER_MAX_PIXELS = 4096 * 4096
-_pillow_limit_lock = threading.Lock()
 
 
 class PartyInfo(NamedTuple):
@@ -230,24 +228,30 @@ async def _read_capped(resp: aiohttp.ClientResponse, max_bytes: int) -> bytes:
     return body
 
 
-def stamp_qr_on_cover(cover_bytes: bytes, qr_bytes: bytes) -> bytes:
-    """Composite the QR into the cover's bottom-right corner; returns PNG bytes."""
+def _open_rgb_image(data: bytes) -> Any:
+    """Open an image and reject it when the pixel count exceeds COVER_MAX_PIXELS."""
     import warnings  # noqa: PLC0415
 
     from PIL import Image  # noqa: PLC0415
 
-    with _pillow_limit_lock:
-        previous_limit = Image.MAX_IMAGE_PIXELS
-        Image.MAX_IMAGE_PIXELS = COVER_MAX_PIXELS
-        try:
-            with warnings.catch_warnings():
-                warnings.simplefilter("error", Image.DecompressionBombWarning)
-                cover = Image.open(io.BytesIO(cover_bytes)).convert("RGB")
-                qr = Image.open(io.BytesIO(qr_bytes)).convert("RGB")
-        except (Image.DecompressionBombError, Image.DecompressionBombWarning) as err:
-            raise ValueError("image exceeds Pillow decompression limit") from err
-        finally:
-            Image.MAX_IMAGE_PIXELS = previous_limit
+    image = Image.open(io.BytesIO(data))
+    width, height = image.size
+    if width <= 0 or height <= 0 or width * height > COVER_MAX_PIXELS:
+        raise ValueError("image exceeds size limit")
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", Image.DecompressionBombWarning)
+        return image.convert("RGB")
+
+
+def stamp_qr_on_cover(cover_bytes: bytes, qr_bytes: bytes) -> bytes:
+    """Composite the QR into the cover's bottom-right corner; returns PNG bytes."""
+    from PIL import Image  # noqa: PLC0415
+
+    try:
+        cover = _open_rgb_image(cover_bytes)
+        qr = _open_rgb_image(qr_bytes)
+    except (Image.DecompressionBombError, Image.DecompressionBombWarning) as err:
+        raise ValueError("image exceeds Pillow decompression limit") from err
     side = max(48, min(cover.width, cover.height) * 28 // 100)
     qr = qr.resize((side, side), Image.Resampling.NEAREST)
     margin = side // 8

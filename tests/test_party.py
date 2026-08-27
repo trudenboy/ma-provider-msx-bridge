@@ -7,14 +7,15 @@ import threading
 from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, Mock
 
+import pytest
 import segno
 from PIL import Image
 
+from music_assistant.providers.msx_bridge import party as party_module
 from music_assistant.providers.msx_bridge.http_server import _render_qr
 from music_assistant.providers.msx_bridge.party import stamp_qr_on_cover
 
 if TYPE_CHECKING:
-    import pytest
     from aiohttp.test_utils import TestClient
 
 JOIN_URL = "http://ma.local:8095/?join=ABC123"
@@ -234,8 +235,22 @@ async def test_msx_party_page_refreshes_player_activity(
     mass_mock.players.register.assert_awaited()
 
 
-def test_stamp_qr_on_cover_restores_pillow_limit_when_concurrent() -> None:
-    """Overlapping cover stamps must not leave Pillow's global pixel limit stuck."""
+def test_stamp_qr_on_cover_rejects_oversized_cover_without_changing_pillow_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An oversized cover is rejected without mutating Pillow's process-wide pixel cap."""
+    original = Image.MAX_IMAGE_PIXELS
+    cover_buf = io.BytesIO()
+    Image.new("RGB", (64, 64), color="black").save(cover_buf, format="PNG")
+    qr = _render_qr(JOIN_URL, "png")
+    monkeypatch.setattr(party_module, "COVER_MAX_PIXELS", 10)
+    with pytest.raises(ValueError, match="size limit"):
+        stamp_qr_on_cover(cover_buf.getvalue(), qr)
+    assert original == Image.MAX_IMAGE_PIXELS
+
+
+def test_stamp_qr_on_cover_does_not_change_pillow_limit_when_concurrent() -> None:
+    """Overlapping cover stamps must not change Pillow's process-wide pixel limit."""
     original = Image.MAX_IMAGE_PIXELS
     cover_buf = io.BytesIO()
     Image.new("RGB", (64, 64), color="black").save(cover_buf, format="PNG")
