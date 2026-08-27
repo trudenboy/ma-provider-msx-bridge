@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import io
 import threading
 from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, Mock
 
 import segno
+from PIL import Image
 
 from music_assistant.providers.msx_bridge.http_server import _render_qr
+from music_assistant.providers.msx_bridge.party import stamp_qr_on_cover
 
 if TYPE_CHECKING:
     import pytest
@@ -229,6 +232,22 @@ async def test_msx_party_page_refreshes_player_activity(
     resp = await http_client.get("/msx/party.json?device_id=partytv")
     assert resp.status == 200
     mass_mock.players.register.assert_awaited()
+
+
+def test_stamp_qr_on_cover_restores_pillow_limit_when_concurrent() -> None:
+    """Overlapping cover stamps must not leave Pillow's global pixel limit stuck."""
+    original = Image.MAX_IMAGE_PIXELS
+    cover_buf = io.BytesIO()
+    Image.new("RGB", (64, 64), color="black").save(cover_buf, format="PNG")
+    cover = cover_buf.getvalue()
+    qr = _render_qr(JOIN_URL, "png")
+    workers = [threading.Thread(target=stamp_qr_on_cover, args=(cover, qr)) for _ in range(8)]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join(timeout=5)
+        assert not worker.is_alive()
+    assert original == Image.MAX_IMAGE_PIXELS
 
 
 async def test_msx_party_page_inactive(http_client: TestClient[Any, Any]) -> None:

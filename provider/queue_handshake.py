@@ -20,14 +20,14 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_prepare_locks: dict[str, asyncio.Lock] = {}
 
-
-def _lock_for(player_id: str) -> asyncio.Lock:
-    lock = _prepare_locks.get(player_id)
-    if lock is None:
-        lock = asyncio.Lock()
-        _prepare_locks[player_id] = lock
+def _prepare_lock(player: Any) -> asyncio.Lock:
+    """Return the per-player prepare lock, creating it if missing (test doubles)."""
+    lock = getattr(player, "_prepare_lock", None)
+    if isinstance(lock, asyncio.Lock):
+        return lock
+    lock = asyncio.Lock()
+    player._prepare_lock = lock
     return lock
 
 
@@ -122,7 +122,7 @@ async def prepare_msx_audio(
     /msx/audio share one implementation.
     """
     provider.on_player_activity(player.player_id)
-    async with _lock_for(player.player_id):
+    async with _prepare_lock(player):
         return await _prepare_msx_audio_locked(
             provider,
             player,

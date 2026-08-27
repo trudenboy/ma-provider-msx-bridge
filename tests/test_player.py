@@ -18,6 +18,7 @@ def test_init_defaults(player: MSXPlayer) -> None:
     """MSXPlayer should have correct default attributes."""
     assert player._attr_name == "Test TV"
     assert player._attr_type == PlayerType.PLAYER
+    assert isinstance(player._prepare_lock, asyncio.Lock)
     assert PlayerFeature.PAUSE in player._attr_supported_features
     assert PlayerFeature.SET_MEMBERS in player._attr_supported_features
     assert PlayerFeature.VOLUME_SET in player._attr_supported_features
@@ -341,6 +342,9 @@ async def test_play_media_propagates_to_group_members(provider: Any, mass_mock: 
     member.update_state = Mock()  # type: ignore[misc,method-assign]
     member.play_media = AsyncMock()  # type: ignore[method-assign]
     mass_mock.players.get = mass_mock.players.get_player = Mock(return_value=member)
+    http = Mock()
+    http.cancel_streams_for_player = Mock()
+    leader.provider.http_server = http  # type: ignore[attr-defined]
 
     media = Mock(spec=PlayerMedia)
     media.uri = "library://track/123"
@@ -356,6 +360,7 @@ async def test_play_media_propagates_to_group_members(provider: Any, mass_mock: 
 
     # We call member.play_media directly (not mass.players.play_media) to avoid redirect
     member.play_media.assert_called_once_with(media)
+    http.cancel_streams_for_player.assert_called_once_with("msx_member")
 
 
 async def test_play_media_no_propagation_when_empty_group(provider: Any, mass_mock: Mock) -> None:

@@ -85,6 +85,7 @@ class SharedGroupStream:
         )
         self._start_time = time.monotonic()
         self.producer_task = asyncio.create_task(self._produce(audio_chunks))
+        self.producer_task.add_done_callback(self._record_producer_result)
 
     async def subscribe(self, player_id: str) -> AsyncIterator[bytes]:
         """
@@ -185,10 +186,18 @@ class SharedGroupStream:
             self.group_id,
             self._total_bytes,
         )
-        if self.producer_task and not self.producer_task.done():
-            self.producer_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self.producer_task
+        task = self.producer_task
+        if task is not None:
+            if not task.done():
+                task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            except Exception as exc:
+                if self.producer_error is None:
+                    self.producer_error = exc
+                    logger.exception("[SharedStream:%s] Producer error", self.group_id)
         self.finished = True
 
     @property
@@ -253,6 +262,22 @@ class SharedGroupStream:
                     self.group_id,
                     player_id,
                 )
+
+    def _record_producer_result(self, task: asyncio.Task[None]) -> None:
+        """Record a producer failure as soon as the background task ends."""
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if not isinstance(exc, Exception):
+            return
+        if self.producer_error is None:
+            self.producer_error = exc
+        logger.error(
+            "[SharedStream:%s] Producer failed: %s",
+            self.group_id,
+            exc,
+            exc_info=(type(exc), exc, exc.__traceback__),
+        )
 
 
 class AudioPipeline:
@@ -444,30 +469,7 @@ class AudioPipeline:
                 queue_item_id=getattr(media, "queue_item_id", None),
             )
 
-        response = web.StreamResponse(status=200, headers=headers)
-        await response.prepare(request)
-
-        total_bytes = 0
-        try:
-            async for chunk in shared_stream.subscribe(player_id):
-                await response.write(chunk)
-                total_bytes += len(chunk)
-        except ConnectionResetError, BrokenPipeError, ConnectionAbortedError:
-            logger.debug(
-                "[SharedStream] Client %s disconnected after %d bytes",
-                player_id,
-                total_bytes,
-            )
-        except asyncio.CancelledError:
-            logger.debug("[SharedStream] Stream cancelled for %s", player_id)
-            raise
-
-        logger.info(
-            "[SharedStream] Player %s finished, wrote %d bytes",
-            player_id,
-            total_bytes,
-        )
-        return response
+        return await self._write_shared_response(request, player_id, shared_stream, headers)
 
     async def serve_independent(
         self,
@@ -630,6 +632,44 @@ class AudioPipeline:
         if not self.active_stream_tasks[player_id]:
             del self.active_stream_tasks[player_id]
             del self.active_stream_transports[player_id]
+
+    async def _write_shared_response(
+        self,
+        request: web.Request,
+        player_id: str,
+        shared_stream: SharedGroupStream,
+        headers: dict[str, str],
+    ) -> web.StreamResponse:
+        """Pump a shared stream into an HTTP response and register it for cancel."""
+        response = web.StreamResponse(status=200, headers=headers)
+        await response.prepare(request)
+        total_bytes = 0
+
+        async def _pump() -> None:
+            nonlocal total_bytes
+            try:
+                async for chunk in shared_stream.subscribe(player_id):
+                    await response.write(chunk)
+                    total_bytes += len(chunk)
+            except ConnectionResetError, BrokenPipeError, ConnectionAbortedError:
+                logger.debug(
+                    "[SharedStream] Client %s disconnected after %d bytes",
+                    player_id,
+                    total_bytes,
+                )
+            except asyncio.CancelledError:
+                logger.debug("[SharedStream] Stream cancelled for %s", player_id)
+                raise
+
+        stream_task = asyncio.create_task(_pump())
+        transport = getattr(request, "transport", None)
+        await self.run_stream_task(player_id, stream_task, transport)
+        logger.info(
+            "[SharedStream] Player %s finished, wrote %d bytes",
+            player_id,
+            total_bytes,
+        )
+        return response
 
 
 def _signal_eof(queue: asyncio.Queue[bytes | None]) -> None:

@@ -74,6 +74,7 @@ class MSXPlayer(Player):
         self._attr_volume_level = 100
         self.output_format = output_format
         self._media_ready = asyncio.Event()
+        self._prepare_lock = asyncio.Lock()
         self._skip_ws_depth = 0
         self._accepted_position = False
 
@@ -463,7 +464,12 @@ class MSXPlayer(Player):
                 media = kwargs.get("media")
                 if media:
                     # Call member.play_media directly — mass.players.play_media
-                    # would redirect synced/grouped players back to the leader
+                    # would redirect synced/grouped players back to the leader.
+                    # Cancel the member's current HTTP stream first so a shared
+                    # or independent producer from the previous track is aborted.
+                    http_server = cast("MSXBridgeProvider", member.provider).http_server
+                    if http_server is not None:
+                        http_server.cancel_streams_for_player(member.player_id)
                     await member.play_media(media)
             elif command == "stop":
                 await member.stop()

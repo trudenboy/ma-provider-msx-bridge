@@ -102,6 +102,9 @@ async def test_plugin_html(http_client: TestClient[Any, Any]) -> None:
     assert "tvx.InteractionPlugin" in body
     assert "handleRequest" in body
     assert 'msg.type === "sendspin"' not in body
+    assert "pendingServerSeek" in body
+    assert "clearPendingServerSeek" in body
+    assert "seekedByServer" not in body
     assert resp.headers.get("Cache-Control") == "no-cache, no-store, must-revalidate"
 
 

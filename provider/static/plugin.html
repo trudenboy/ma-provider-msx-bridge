@@ -69,7 +69,8 @@
     var positionStartValue = 0;
     var pausedByServer = false;
     var resumedByServer = false;
-    var seekedByServer = false;
+    var pendingServerSeek = null;
+    var pendingServerSeekUntil = 0;
     var pausedAtPosition = 0;
     var monitoredElement = null;
     var mediaObserver = null;
@@ -81,7 +82,13 @@
         }
     }
 
+    function clearPendingServerSeek() {
+        pendingServerSeek = null;
+        pendingServerSeekUntil = 0;
+    }
+
     function resetPlaybackClock() {
+        clearPendingServerSeek();
         detachMediaListeners();
         pausedAtPosition = 0;
         startPositionTimer(0);
@@ -124,6 +131,7 @@
                 var msg = JSON.parse(ev.data);
                 if (msg.type === "stop" && typeof tvx.InteractionPlugin.executeAction === "function") {
                     stopPositionTimer();
+                    clearPendingServerSeek();
                     var action = msg.showNotification ? "eject" : "[player:eject|player:hide]";
                     tvx.InteractionPlugin.executeAction(action);
                 } else if (msg.type === "pause" && typeof tvx.InteractionPlugin.executeAction === "function") {
@@ -162,7 +170,8 @@
                 } else if (msg.type === "seek" && msg.position != null && typeof tvx.InteractionPlugin.executeAction === "function") {
                     var seekSecs = Math.round(msg.position);
                     startPositionTimer(seekSecs);
-                    seekedByServer = true;
+                    pendingServerSeek = seekSecs;
+                    pendingServerSeekUntil = Date.now() + 2000;
                     tvx.InteractionPlugin.executeAction("player:seek:" + seekSecs);
                 } else if (msg.type === "goto_index" && msg.index != null && typeof tvx.InteractionPlugin.executeAction === "function") {
                     resetPlaybackClock();
@@ -251,10 +260,15 @@
     }
 
     function onMediaSeeked() {
-        if (seekedByServer) {
-            seekedByServer = false;
-            return;
+        var now = Date.now();
+        if (pendingServerSeek != null && now <= pendingServerSeekUntil) {
+            var current = monitoredElement ? monitoredElement.currentTime : pendingServerSeek;
+            if (Math.abs(current - pendingServerSeek) <= 2) {
+                clearPendingServerSeek();
+                return;
+            }
         }
+        clearPendingServerSeek();
         if (monitoredElement) {
             var pos = monitoredElement.currentTime;
             startPositionTimer(pos);
