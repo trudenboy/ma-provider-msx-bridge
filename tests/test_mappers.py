@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from music_assistant_models.errors import MediaNotFoundError
 from music_assistant_models.media_items import Album, Track
 
 from music_assistant.providers.msx_bridge.mappers import (
+    get_album_image_fallback,
     map_album_to_msx,
     map_track_to_msx,
     msx_list_page,
@@ -121,6 +123,33 @@ def test_sort_album_tracks_uses_name_as_tiebreaker() -> None:
     late.track_number = 1
     late.name = "B"
     assert [t.name for t in sort_album_tracks([late, early])] == ["A", "B"]
+
+
+@pytest.mark.asyncio
+async def test_album_image_fallback_returns_none_on_music_assistant_error() -> None:
+    """A missing album from MA must not fail the album list page."""
+    prov = _mock_provider()
+    album = MagicMock(spec=Album)
+    album.item_id = "1"
+    album.provider = "library"
+    prov.mass.music.albums.tracks = AsyncMock(  # type: ignore[method-assign]
+        side_effect=MediaNotFoundError("gone")
+    )
+
+    assert await get_album_image_fallback(album, prov) is None
+
+
+@pytest.mark.asyncio
+async def test_album_image_fallback_does_not_swallow_unexpected_error() -> None:
+    """Programming errors while fetching album art must not be hidden."""
+    prov = _mock_provider()
+    album = MagicMock(spec=Album)
+    album.item_id = "1"
+    album.provider = "library"
+    prov.mass.music.albums.tracks = AsyncMock(side_effect=ValueError("bug"))  # type: ignore[method-assign]
+
+    with pytest.raises(ValueError, match="bug"):
+        await get_album_image_fallback(album, prov)
 
 
 def test_msx_list_page_uses_empty_title() -> None:

@@ -6,7 +6,9 @@ import asyncio
 from typing import Any
 from unittest.mock import AsyncMock, Mock, patch
 
+import pytest
 from music_assistant_models.enums import PlaybackState, PlayerFeature, PlayerType
+from music_assistant_models.errors import PlayerCommandFailed
 from music_assistant_models.player import PlayerMedia
 
 from music_assistant.providers.msx_bridge.player import MSXPlayer
@@ -530,6 +532,45 @@ async def test_play_media_queue_sends_playlist(player: MSXPlayer, mass_mock: Moc
     assert player._playing_from_queue is True
     assert player._playlist_offset == 2
     assert player._playlist_size == 5
+
+
+async def test_play_media_queue_size_does_not_swallow_unexpected_error(
+    player: MSXPlayer, mass_mock: Mock
+) -> None:
+    """A bug while reading queue length must not be hidden as a missing playlist."""
+    media = Mock(spec=PlayerMedia)
+    media.uri = "http://ma-server/stream/12345"
+    media.title = "Track 1"
+    media.artist = "Artist 1"
+    media.image_url = None
+    media.duration = 180
+    media.source_id = "msx_test"
+    media.queue_item_id = "qi1"
+    mass_mock.player_queues.get.return_value = Mock(current_index=0, items=1)
+    mass_mock.player_queues.items.side_effect = ValueError("bug")
+
+    with pytest.raises(ValueError, match="bug"):
+        await player.play_media(media)
+
+
+async def test_stop_propagates_when_one_member_fails(provider: Any, mass_mock: Mock) -> None:
+    """A failed member command must not prevent the other members from stopping."""
+    leader = MSXPlayer(provider, "msx_leader", name="Leader TV", output_format="mp3")
+    leader.update_state = Mock()  # type: ignore[misc,method-assign]
+    leader._attr_group_members = ["msx_leader", "msx_a", "msx_b"]
+    failing = MSXPlayer(provider, "msx_a", name="A", output_format="mp3")
+    failing.stop = AsyncMock(side_effect=PlayerCommandFailed("offline"))  # type: ignore[method-assign]
+    ok = MSXPlayer(provider, "msx_b", name="B", output_format="mp3")
+    ok.stop = AsyncMock()  # type: ignore[method-assign]
+    mass_mock.players.get = mass_mock.players.get_player = Mock(
+        side_effect=lambda pid, **_k: {"msx_a": failing, "msx_b": ok}.get(pid)
+    )
+
+    with patch.object(leader.provider, "notify_play_stopped", Mock()):
+        await leader.stop()
+
+    failing.stop.assert_awaited_once()
+    ok.stop.assert_awaited_once()
 
 
 async def test_play_media_reloads_playlist_when_playing_from_queue(

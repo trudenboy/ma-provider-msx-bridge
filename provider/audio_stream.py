@@ -187,14 +187,13 @@ class SharedGroupStream:
             self._total_bytes,
         )
         task = self.producer_task
-        if task is not None:
-            if not task.done():
-                task.cancel()
+        if task is not None and not task.done():
+            task.cancel()
             try:
                 await task
             except asyncio.CancelledError:
                 pass
-            except Exception as exc:
+            except (MusicAssistantError, OSError, RuntimeError) as exc:
                 if self.producer_error is None:
                     self.producer_error = exc
                     logger.exception("[SharedStream:%s] Producer error", self.group_id)
