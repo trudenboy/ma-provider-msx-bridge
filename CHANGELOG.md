@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.24] - 2026-08-28
+
+### Fixed
+
+- Group member playback now releases stale live-source sessions through Music Assistant's internal player handlers.
+
 ## [1.4.23] - 2026-08-27
 
 ### Fixed
