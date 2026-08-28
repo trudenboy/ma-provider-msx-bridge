@@ -448,7 +448,9 @@ class MSXPlayer(Player):
     async def _propagate_single(self, member: MSXPlayer, command: str, **kwargs: Any) -> None:
         """Propagate a single command to one group member."""
         try:
-            async with self.mass.players.get_player_lock(member.player_id, PlayerLockPurpose.PLAYBACK):
+            async with self.mass.players.get_player_lock(
+                member.player_id, PlayerLockPurpose.PLAYBACK
+            ):
                 if command == "play_media":
                     media = kwargs.get("media")
                     if media:
