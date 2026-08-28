@@ -5,7 +5,14 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+<<<<<<< provider
 import secrets
+||||||| upstream-base
+import time
+=======
+import secrets
+import time
+>>>>>>> upstream-head
 from html import escape as html_escape
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -13,8 +20,34 @@ from urllib.parse import quote
 
 import aiohttp
 from aiohttp import WSMsgType, web
+<<<<<<< provider
 from music_assistant_models.enums import RepeatMode
 from music_assistant_models.errors import MusicAssistantError
+||||||| upstream-base
+from music_assistant_models.enums import ContentType
+from music_assistant_models.media_items import AudioFormat, Track
+
+from music_assistant.constants import SENDSPIN_SERVER_PORT
+from music_assistant.controllers.streams.audio_processing import get_media_session_id
+from music_assistant.controllers.webserver.helpers.auth_middleware import ImpersonatedUser
+from music_assistant.helpers.ffmpeg import get_ffmpeg_stream
+from music_assistant.helpers.util import join_task
+=======
+from music_assistant_models.enums import ContentType
+from music_assistant_models.errors import InvalidProviderURI
+from music_assistant_models.media_items import AudioFormat, Track
+
+from music_assistant.constants import SENDSPIN_SERVER_PORT
+from music_assistant.controllers.streams.audio_processing import get_media_session_id
+from music_assistant.controllers.streams.constants import (
+    SINGLE_ITEM_READRATE,
+    SINGLE_ITEM_READRATE_INITIAL_BURST,
+)
+from music_assistant.controllers.webserver.helpers.auth_middleware import ImpersonatedUser
+from music_assistant.helpers.ffmpeg import get_ffmpeg_stream
+from music_assistant.helpers.uri import parse_uri
+from music_assistant.helpers.util import join_task
+>>>>>>> upstream-head
 
 from .audio_stream import AudioPipeline, build_audio_params, resolve_served_duration
 from .constants import (
@@ -71,6 +104,32 @@ STATIC_DIR = Path(__file__).parent / "static"
 
 _KNOWN_EXTENSIONS = (".mp3", ".json", ".flac", ".aac")
 
+<<<<<<< provider
+||||||| upstream-base
+PARTY_CACHE_TTL = 10.0
+PARTY_CALL_TIMEOUT = 5.0
+
+
+class PartyInfo(NamedTuple):
+    """Active-party details resolved from the MA Party plugin."""
+=======
+PARTY_CACHE_TTL = 10.0
+PARTY_CALL_TIMEOUT = 5.0
+
+# The local proxy modes encode audio themselves, so they carry the core streamserver's
+# pacing ceiling rather than handing a track over as fast as ffmpeg can produce it.
+# See the usage policy note on SINGLE_ITEM_READRATE.
+_READRATE_ARGS = [
+    "-readrate",
+    SINGLE_ITEM_READRATE,
+    "-readrate_initial_burst",
+    SINGLE_ITEM_READRATE_INITIAL_BURST,
+]
+
+
+class PartyInfo(NamedTuple):
+    """Active-party details resolved from the MA Party plugin."""
+>>>>>>> upstream-head
 
 def _queue_item_limit(queue: Any) -> int:
     """Return how many items to read from an in-memory MA queue."""
@@ -88,6 +147,7 @@ def _int_param(query: MultiMapping[str], name: str, default: int, max_val: int =
         return default
 
 
+<<<<<<< provider
 def _is_audio_path(path: str) -> bool:
     """Check whether the path is one of the audio routes."""
     return path.startswith(("/stream/", "/msx/audio/"))
@@ -107,6 +167,33 @@ def _msx_execute_error(status: int, message: str) -> web.Response:
     )
 
 
+||||||| upstream-base
+=======
+async def _is_media_item_uri(uri: str) -> bool:
+    """
+    Check that a caller-supplied uri names a media item rather than a raw stream URL.
+
+    Both spellings of a raw URL — bare, and wrapped as ``builtin://<media_type>/<url>`` —
+    resolve to the builtin provider, which would make the server fetch and play whatever
+    the caller names, so the resolved provider is what decides rather than the uri text.
+    The bridge only ever hands out uris of library or music provider items.
+    """
+    if "://" not in uri:
+        # keeps an item_id-shaped value away from parse_uri's local-file branch
+        return False
+    try:
+        _, provider_instance_id_or_domain, _ = await parse_uri(uri)
+    except InvalidProviderURI:
+        return False
+    return provider_instance_id_or_domain != "builtin"
+
+
+def _is_audio_path(path: str) -> bool:
+    """Check whether the path is one of the audio routes."""
+    return path.startswith(("/stream/", "/msx/audio/"))
+
+
+>>>>>>> upstream-head
 def _strip_known_extension(value: str) -> str:
     """Strip only known audio/data extensions from a value."""
     for ext in _KNOWN_EXTENSIONS:
@@ -450,10 +537,19 @@ class MSXHTTPServer:
         The MSX plugin (/msx/plugin.html) is served from the same origin, so
         browser playback-control POSTs from the status dashboard are same-origin.
         MSX TV app only makes GET requests. This matches MA's own webserver pattern.
+<<<<<<< provider
 
         The audio routes are the exception and get no header at all: a media element
         plays a cross-origin source without CORS, so withholding it costs nothing
         and keeps a cross-origin fetch() from reading the audio.
+||||||| upstream-base
+=======
+
+        The audio routes are the exception and get no header at all: a media element
+        plays a cross-origin source without CORS, and the kiosk visualizer reads the
+        stream same-origin, so withholding it costs nothing and keeps a cross-origin
+        fetch() from reading the audio.
+>>>>>>> upstream-head
         """
         if request.method == "OPTIONS":
             return web.Response(
@@ -1200,7 +1296,13 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
         player_id = _strip_known_extension(request.match_info["player_id"])
 
         uri = request.query.get("uri")
+<<<<<<< provider
         if not uri:
+||||||| upstream-base
+        if not uri or "://" not in uri:
+=======
+        if not uri or not await _is_media_item_uri(uri):
+>>>>>>> upstream-head
             return web.Response(status=400, text="Invalid uri parameter")
 
         from_playlist = request.query.get("from_playlist") == "1"
@@ -1209,6 +1311,7 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
         player = self.provider.mass.players.get_player(player_id)
         if not player or not isinstance(player, MSXPlayer):
             return web.Response(status=404, text="Player not found")
+<<<<<<< provider
         if rejected := self._reject_invalid_stream_token(request, player_id):
             return rejected
         prepared = await prepare_msx_audio(
@@ -1220,6 +1323,82 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
         )
         if isinstance(prepared, PrepareFailure):
             return web.Response(status=prepared.status, text=prepared.text)
+||||||| upstream-base
+
+        # When MA is driving the queue (next/prev from MA UI), current_media is
+        # already set by player.play_media() before the WS goto_index reaches MSX.
+        # Re-enqueuing would recreate the queue from the track URI, destroying it.
+        # We verify by checking that current_media's queue item URI matches the
+        # requested track URI — if not, MSX auto-advanced and we must re-enqueue.
+        if (
+            from_playlist
+            and player._playing_from_queue
+            and self._current_media_matches_uri(player, uri)
+        ):
+            logger.debug("Queue-driven: using current_media for %s", uri)
+            media = player.current_media
+        else:
+            # Suppress WS broadcast when called from MSX playlist to avoid conflicts
+            if from_playlist:
+                player._skip_ws_notify = True
+
+            # Arm BEFORE enqueuing so wait_for_media() waits for the new track's
+            # play_media() instead of returning the previous track's media.
+            player.expect_new_media()
+            try:
+                async with ImpersonatedUser(
+                    self.provider.mass, await self.provider.get_owner_username()
+                ):
+                    await self.provider.mass.player_queues.play_media(player_id, uri)
+            finally:
+                if from_playlist:
+                    player._skip_ws_notify = False
+
+            # Wait for play_media() to signal media is ready (replaces 10s polling loop)
+            media = await player.wait_for_media(timeout=10.0)
+
+        if not media:
+            return web.Response(status=504, text="Playback setup timeout")
+=======
+        if rejected := self._reject_invalid_stream_token(request, player_id):
+            return rejected
+        self.provider.on_player_activity(player_id)
+
+        # When MA is driving the queue (next/prev from MA UI), current_media is
+        # already set by player.play_media() before the WS goto_index reaches MSX.
+        # Re-enqueuing would recreate the queue from the track URI, destroying it.
+        # We verify by checking that current_media's queue item URI matches the
+        # requested track URI — if not, MSX auto-advanced and we must re-enqueue.
+        if (
+            from_playlist
+            and player._playing_from_queue
+            and self._current_media_matches_uri(player, uri)
+        ):
+            logger.debug("Queue-driven: using current_media for %s", uri)
+            media = player.current_media
+        else:
+            # Suppress WS broadcast when called from MSX playlist to avoid conflicts
+            if from_playlist:
+                player._skip_ws_notify = True
+
+            # Arm BEFORE enqueuing so wait_for_media() waits for the new track's
+            # play_media() instead of returning the previous track's media.
+            player.expect_new_media()
+            try:
+                async with ImpersonatedUser(
+                    self.provider.mass, await self.provider.get_owner_username()
+                ):
+                    await self.provider.mass.player_queues.play_media(player_id, uri)
+            finally:
+                if from_playlist:
+                    player._skip_ws_notify = False
+
+            # Wait for play_media() to signal media is ready (replaces 10s polling loop)
+            media = await player.wait_for_media(timeout=10.0)
+
+        if not media:
+            return web.Response(status=504, text="Playback setup timeout")
+>>>>>>> upstream-head
 
         return await self._serve_audio_stream(
             request,
@@ -1261,9 +1440,242 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
         out_format: Any,
         headers: dict[str, str],
     ) -> web.StreamResponse:
+<<<<<<< provider
         """Serve audio from a shared group stream."""
         return await self.audio.serve_shared(
             request, player, media, group_id, pcm_format, out_format, headers
+||||||| upstream-base
+        """
+        Serve audio from a shared group stream.
+
+        Multiple players in a group read from the same SharedGroupStream,
+        which has a single ffmpeg producer.
+        """
+        player_id = player.player_id
+        media_uri = getattr(media, "uri", "") or str(media)
+
+        # Check if we need to create a new shared stream (leader creates it)
+        existing_stream = self.provider._shared_streams.get(group_id)
+        is_leader = player_id == group_id
+
+        if existing_stream and not existing_stream.finished:
+            # Reuse existing stream
+            logger.debug(
+                "[SharedStream] Player %s subscribing to existing stream for group %s",
+                player_id,
+                group_id,
+            )
+            shared_stream = existing_stream
+        elif is_leader:
+            # Leader creates the shared stream
+            logger.info(
+                "[SharedStream] Leader %s creating shared stream for group %s",
+                player_id,
+                group_id,
+            )
+            audio_source = self.provider.mass.streams.get_stream(
+                media,
+                pcm_format,
+                force_flow_mode=False,
+            )
+            output_plan = self.provider.mass.streams.audio.get_player_output_plan(
+                player_id,
+                pcm_format,
+                out_format,
+                queue_id=getattr(media, "source_id", None),
+                session_id=get_media_session_id(media),
+                queue_item_id=getattr(media, "queue_item_id", None),
+            )
+            # Create ffmpeg chunk generator
+            audio_chunks = get_ffmpeg_stream(
+                audio_input=audio_source,
+                input_format=pcm_format,
+                output_format=out_format,
+                filter_params=output_plan.filter_params,
+            )
+            shared_stream = await self.provider.get_or_create_shared_stream(
+                group_id, media_uri, audio_chunks
+            )
+            shared_stream.output_plan = output_plan
+        else:
+            # Member but no existing stream - wait briefly for leader
+            logger.info(
+                "[SharedStream] Member %s waiting for leader to create stream for group %s",
+                player_id,
+                group_id,
+            )
+            for _ in range(30):  # Wait up to 3 seconds
+                await asyncio.sleep(0.1)
+                existing_stream = self.provider._shared_streams.get(group_id)
+                if existing_stream and not existing_stream.finished:
+                    shared_stream = existing_stream
+                    break
+            else:
+                # Timeout - fallback to independent stream
+                logger.warning(
+                    "[SharedStream] Timeout waiting for leader stream, "
+                    "falling back to independent for %s",
+                    player_id,
+                )
+                return await self._serve_independent_stream(
+                    request, player, media, pcm_format, out_format, headers
+                )
+
+        queue_id = getattr(media, "source_id", None)
+        session_id = get_media_session_id(media)
+        if (
+            shared_stream.output_plan is not None
+            and queue_id is not None
+            and session_id is not None
+        ):
+            self.provider.mass.streams.audio_processing.update_output(
+                player_id,
+                shared_stream.output_plan,
+                queue_id=queue_id,
+                session_id=session_id,
+                queue_item_id=getattr(media, "queue_item_id", None),
+            )
+
+        # Subscribe to shared stream
+        response = web.StreamResponse(status=200, headers=headers)
+        await response.prepare(request)
+
+        total_bytes = 0
+        try:
+            async for chunk in shared_stream.subscribe(player_id):
+                await response.write(chunk)
+                total_bytes += len(chunk)
+        except ConnectionResetError, BrokenPipeError, ConnectionAbortedError:
+            logger.debug(
+                "[SharedStream] Client %s disconnected after %d bytes",
+                player_id,
+                total_bytes,
+            )
+        except asyncio.CancelledError:
+            logger.debug("[SharedStream] Stream cancelled for %s", player_id)
+            raise
+
+        logger.info(
+            "[SharedStream] Player %s finished, wrote %d bytes",
+            player_id,
+            total_bytes,
+=======
+        """
+        Serve audio from a shared group stream.
+
+        Multiple players in a group read from the same SharedGroupStream,
+        which has a single ffmpeg producer.
+        """
+        player_id = player.player_id
+        media_uri = getattr(media, "uri", "") or str(media)
+
+        # Check if we need to create a new shared stream (leader creates it)
+        existing_stream = self.provider._shared_streams.get(group_id)
+        is_leader = player_id == group_id
+
+        if existing_stream and not existing_stream.finished:
+            # Reuse existing stream
+            logger.debug(
+                "[SharedStream] Player %s subscribing to existing stream for group %s",
+                player_id,
+                group_id,
+            )
+            shared_stream = existing_stream
+        elif is_leader:
+            # Leader creates the shared stream
+            logger.info(
+                "[SharedStream] Leader %s creating shared stream for group %s",
+                player_id,
+                group_id,
+            )
+            audio_source = self.provider.mass.streams.get_stream(
+                media,
+                pcm_format,
+                force_flow_mode=False,
+            )
+            output_plan = self.provider.mass.streams.audio.get_player_output_plan(
+                player_id,
+                pcm_format,
+                out_format,
+                queue_id=getattr(media, "source_id", None),
+                session_id=get_media_session_id(media),
+                queue_item_id=getattr(media, "queue_item_id", None),
+            )
+            # Create ffmpeg chunk generator
+            audio_chunks = get_ffmpeg_stream(
+                audio_input=audio_source,
+                input_format=pcm_format,
+                output_format=out_format,
+                filter_params=output_plan.filter_params,
+                extra_input_args=_READRATE_ARGS,
+            )
+            shared_stream = await self.provider.get_or_create_shared_stream(
+                group_id, media_uri, audio_chunks
+            )
+            shared_stream.output_plan = output_plan
+        else:
+            # Member but no existing stream - wait briefly for leader
+            logger.info(
+                "[SharedStream] Member %s waiting for leader to create stream for group %s",
+                player_id,
+                group_id,
+            )
+            for _ in range(30):  # Wait up to 3 seconds
+                await asyncio.sleep(0.1)
+                existing_stream = self.provider._shared_streams.get(group_id)
+                if existing_stream and not existing_stream.finished:
+                    shared_stream = existing_stream
+                    break
+            else:
+                # Timeout - fallback to independent stream
+                logger.warning(
+                    "[SharedStream] Timeout waiting for leader stream, "
+                    "falling back to independent for %s",
+                    player_id,
+                )
+                return await self._serve_independent_stream(
+                    request, player, media, pcm_format, out_format, headers
+                )
+
+        queue_id = getattr(media, "source_id", None)
+        session_id = get_media_session_id(media)
+        if (
+            shared_stream.output_plan is not None
+            and queue_id is not None
+            and session_id is not None
+        ):
+            self.provider.mass.streams.audio_processing.update_output(
+                player_id,
+                shared_stream.output_plan,
+                queue_id=queue_id,
+                session_id=session_id,
+                queue_item_id=getattr(media, "queue_item_id", None),
+            )
+
+        # Subscribe to shared stream
+        response = web.StreamResponse(status=200, headers=headers)
+        await response.prepare(request)
+
+        total_bytes = 0
+        try:
+            async for chunk in shared_stream.subscribe(player_id):
+                await response.write(chunk)
+                total_bytes += len(chunk)
+        except ConnectionResetError, BrokenPipeError, ConnectionAbortedError:
+            logger.debug(
+                "[SharedStream] Client %s disconnected after %d bytes",
+                player_id,
+                total_bytes,
+            )
+        except asyncio.CancelledError:
+            logger.debug("[SharedStream] Stream cancelled for %s", player_id)
+            raise
+
+        logger.info(
+            "[SharedStream] Player %s finished, wrote %d bytes",
+            player_id,
+            total_bytes,
+>>>>>>> upstream-head
         )
 
     async def _serve_independent_stream(
@@ -1279,6 +1691,235 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
         return await self.audio.serve_independent(
             request, player, media, pcm_format, out_format, headers
         )
+<<<<<<< provider
+||||||| upstream-base
+        output_plan = self.provider.mass.streams.audio.get_player_output_plan(
+            player_id,
+            pcm_format,
+            out_format,
+            queue_id=getattr(media, "source_id", None),
+            session_id=get_media_session_id(media),
+            queue_item_id=getattr(media, "queue_item_id", None),
+        )
+
+        response = web.StreamResponse(status=200, headers=headers)
+        stream_task: asyncio.Task[None] = asyncio.create_task(
+            self._stream_with_prebuffer(
+                request,
+                response,
+                player,
+                headers,
+                audio_source,
+                pcm_format,
+                out_format,
+                output_plan.filter_params,
+            )
+        )
+        transport = getattr(request, "transport", None)
+        await self._run_stream_task(player_id, stream_task, transport)
+
+        return response
+
+    async def _stream_with_prebuffer(
+        self,
+        request: web.Request,
+        response: web.StreamResponse,
+        player: MSXPlayer,
+        headers: dict[str, str],
+        audio_source: Any,
+        pcm_format: AudioFormat,
+        out_format: AudioFormat,
+        filter_params: Sequence[str | ComplexFilter],
+    ) -> None:
+        """Pre-buffer audio chunks, then send HTTP headers and stream remaining data."""
+        player_id = player.player_id
+        chunk_queue: asyncio.Queue[bytes | None] = asyncio.Queue(maxsize=32)
+
+        async def producer() -> None:
+            try:
+                async for chunk in get_ffmpeg_stream(
+                    audio_input=audio_source,
+                    input_format=pcm_format,
+                    output_format=out_format,
+                    filter_params=filter_params,
+                ):
+                    await chunk_queue.put(chunk)
+            finally:
+                with contextlib.suppress(asyncio.QueueFull):
+                    chunk_queue.put_nowait(None)
+
+        producer_task: asyncio.Task[None] | None = None
+        total_bytes = 0
+        try:
+            producer_task = asyncio.create_task(producer())
+
+            # Phase 1: Pre-buffer — collect chunks until we have enough data
+            pre_buffer: list[bytes] = []
+            pre_buffer_size = 0
+            while pre_buffer_size < PRE_BUFFER_BYTES:
+                chunk = await chunk_queue.get()
+                if chunk is None:
+                    break
+                pre_buffer.append(chunk)
+                pre_buffer_size += len(chunk)
+
+            # Re-check: stop may have been called while buffering
+            if not player.current_media and not pre_buffer:
+                return
+
+            # NOW send HTTP headers + pre-buffer burst
+            await response.prepare(request)
+            for buf_chunk in pre_buffer:
+                await response.write(buf_chunk)
+                total_bytes += len(buf_chunk)
+
+            # If pre-buffer ended with sentinel, we're done
+            if chunk is None:
+                return
+
+            # Phase 2: Stream remaining chunks normally
+            while True:
+                chunk = await chunk_queue.get()
+                if chunk is None:
+                    break
+                await response.write(chunk)
+                total_bytes += len(chunk)
+        except ConnectionResetError, BrokenPipeError, ConnectionAbortedError:
+            logger.debug("Client disconnected from stream %s", player_id)
+        except asyncio.CancelledError:
+            logger.debug("Stream cancelled for player %s", player_id)
+            raise
+        finally:
+            if producer_task and not producer_task.done():
+                producer_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await producer_task
+            content_length = headers.get("Content-Length")
+            if content_length:
+                logger.debug(
+                    "Stream %s: wrote %d bytes, Content-Length=%s, diff=%d",
+                    player_id,
+                    total_bytes,
+                    content_length,
+                    total_bytes - int(content_length),
+                )
+            else:
+                logger.debug("Stream %s finished: wrote %d bytes", player_id, total_bytes)
+=======
+        output_plan = self.provider.mass.streams.audio.get_player_output_plan(
+            player_id,
+            pcm_format,
+            out_format,
+            queue_id=getattr(media, "source_id", None),
+            session_id=get_media_session_id(media),
+            queue_item_id=getattr(media, "queue_item_id", None),
+        )
+
+        response = web.StreamResponse(status=200, headers=headers)
+        stream_task: asyncio.Task[None] = asyncio.create_task(
+            self._stream_with_prebuffer(
+                request,
+                response,
+                player,
+                headers,
+                audio_source,
+                pcm_format,
+                out_format,
+                output_plan.filter_params,
+            )
+        )
+        transport = getattr(request, "transport", None)
+        await self._run_stream_task(player_id, stream_task, transport)
+
+        return response
+
+    async def _stream_with_prebuffer(
+        self,
+        request: web.Request,
+        response: web.StreamResponse,
+        player: MSXPlayer,
+        headers: dict[str, str],
+        audio_source: Any,
+        pcm_format: AudioFormat,
+        out_format: AudioFormat,
+        filter_params: Sequence[str | ComplexFilter],
+    ) -> None:
+        """Pre-buffer audio chunks, then send HTTP headers and stream remaining data."""
+        player_id = player.player_id
+        chunk_queue: asyncio.Queue[bytes | None] = asyncio.Queue(maxsize=32)
+
+        async def producer() -> None:
+            try:
+                async for chunk in get_ffmpeg_stream(
+                    audio_input=audio_source,
+                    input_format=pcm_format,
+                    output_format=out_format,
+                    filter_params=filter_params,
+                    extra_input_args=_READRATE_ARGS,
+                ):
+                    await chunk_queue.put(chunk)
+            finally:
+                with contextlib.suppress(asyncio.QueueFull):
+                    chunk_queue.put_nowait(None)
+
+        producer_task: asyncio.Task[None] | None = None
+        total_bytes = 0
+        try:
+            producer_task = asyncio.create_task(producer())
+
+            # Phase 1: Pre-buffer — collect chunks until we have enough data
+            pre_buffer: list[bytes] = []
+            pre_buffer_size = 0
+            while pre_buffer_size < PRE_BUFFER_BYTES:
+                chunk = await chunk_queue.get()
+                if chunk is None:
+                    break
+                pre_buffer.append(chunk)
+                pre_buffer_size += len(chunk)
+
+            # Re-check: stop may have been called while buffering
+            if not player.current_media and not pre_buffer:
+                return
+
+            # NOW send HTTP headers + pre-buffer burst
+            await response.prepare(request)
+            for buf_chunk in pre_buffer:
+                await response.write(buf_chunk)
+                total_bytes += len(buf_chunk)
+
+            # If pre-buffer ended with sentinel, we're done
+            if chunk is None:
+                return
+
+            # Phase 2: Stream remaining chunks normally
+            while True:
+                chunk = await chunk_queue.get()
+                if chunk is None:
+                    break
+                await response.write(chunk)
+                total_bytes += len(chunk)
+        except ConnectionResetError, BrokenPipeError, ConnectionAbortedError:
+            logger.debug("Client disconnected from stream %s", player_id)
+        except asyncio.CancelledError:
+            logger.debug("Stream cancelled for player %s", player_id)
+            raise
+        finally:
+            if producer_task and not producer_task.done():
+                producer_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await producer_task
+            content_length = headers.get("Content-Length")
+            if content_length:
+                logger.debug(
+                    "Stream %s: wrote %d bytes, Content-Length=%s, diff=%d",
+                    player_id,
+                    total_bytes,
+                    content_length,
+                    total_bytes - int(content_length),
+                )
+            else:
+                logger.debug("Stream %s finished: wrote %d bytes", player_id, total_bytes)
+>>>>>>> upstream-head
 
     async def _run_stream_task(
         self,
@@ -1674,6 +2315,22 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
             return web.Response(status=403, text="Invalid or missing stream token")
         return None
 
+    def _reject_invalid_stream_token(
+        self, request: web.Request, player_id: str
+    ) -> web.Response | None:
+        """
+        Reject an audio request that does not carry the player's own stream token.
+
+        A TV cannot send an auth header, so the token travels in the URL the bridge
+        itself generated. This stops a request that was never handed out — a web page
+        firing an <audio> tag at this LAN server. A URL that was handed out stays valid
+        until the provider reloads, so this is not a defence against a captured URL.
+        """
+        expected = self.provider.get_stream_token(player_id)
+        if not secrets.compare_digest(request.query.get("token", ""), expected):
+            return web.Response(status=403, text="Invalid or missing stream token")
+        return None
+
     @staticmethod
     def _reject_cross_site(request: web.Request) -> web.Response | None:
         """
@@ -1727,8 +2384,14 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
             return web.json_response({"error": "Invalid track_uri or player_id"}, status=400)
         if not track_uri or not player_id:
             return web.json_response({"error": "Missing track_uri or player_id"}, status=400)
+<<<<<<< provider
         if not await is_media_item_uri(track_uri):
             return web.json_response({"error": "Invalid track_uri"}, status=400)
+||||||| upstream-base
+=======
+        if not await _is_media_item_uri(track_uri):
+            return web.json_response({"error": "Invalid track_uri"}, status=400)
+>>>>>>> upstream-head
 
         if self._get_msx_player(player_id) is None:
             return web.json_response({"error": "Unknown MSX player"}, status=404)

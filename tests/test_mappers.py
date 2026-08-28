@@ -50,6 +50,7 @@ def test_map_track_to_msx() -> None:
     assert item.action is not None
     assert "audio:http://localhost/msx/audio/msx_123" in item.action
     assert "uri=library%3A%2F%2Ftrack%2F1" in item.action
+<<<<<<< provider
     assert "token=tok123" in item.action
     assert "device_id=abc" in item.action
     assert item.properties is not None
@@ -81,6 +82,10 @@ def test_map_track_to_msx_play_context() -> None:
     assert "uri=library%3A%2F%2Falbum%2F9" in item.action
     assert "start=3" in item.action
     assert "track=library%3A%2F%2Ftrack%2F1" in item.action
+||||||| upstream-base
+=======
+    assert "token=tok123" in item.action
+>>>>>>> upstream-head
     assert "device_id=abc" in item.action
 
 

@@ -442,3 +442,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - feat: add MSX Bridge Player Provider
 - fix: release stale live source sessions before group playback
+- Reverse-synced upstream PR #5849 (WIP)

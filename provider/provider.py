@@ -360,6 +360,7 @@ class MSXBridgeProvider(PlayerProvider):
         """
         return self.group_stream_mode == GROUP_STREAM_MODE_REDIRECT
 
+<<<<<<< provider
     def get_stream_token(self, player_id: str) -> str:
         """
         Return the token that authorizes the audio routes for the given player.
@@ -374,6 +375,23 @@ class MSXBridgeProvider(PlayerProvider):
         digest = hmac.new(self._stream_token_secret, player_id.encode(), hashlib.sha256)
         return digest.hexdigest()[:32]
 
+||||||| upstream-base
+=======
+    def get_stream_token(self, player_id: str) -> str:
+        """
+        Return the token that authorizes the audio routes for the given player.
+
+        Derived rather than stored, so a caller cannot grow provider state by asking for
+        tokens under new player ids. It stays the same for the provider's lifetime: an
+        idle TV is unregistered after the configured timeout, and changing the token there
+        would strand the URLs a long-running kiosk has already cached.
+
+        :param player_id: The player to build an audio URL for.
+        """
+        digest = hmac.new(self._stream_token_secret, player_id.encode(), hashlib.sha256)
+        return digest.hexdigest()[:32]
+
+>>>>>>> upstream-head
     def get_group_id_for_player(self, player: MSXPlayer) -> str | None:
         """
         Get group ID if player is in a group (as leader or member).

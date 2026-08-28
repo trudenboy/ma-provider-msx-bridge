@@ -11,10 +11,18 @@ import pytest
 from music_assistant_models.enums import ContentType
 from music_assistant_models.media_items import AudioFormat
 
+<<<<<<< provider
 from music_assistant.providers.msx_bridge.audio_stream import AudioPipeline
 from music_assistant.providers.msx_bridge.http_server import MSXHTTPServer
 from music_assistant.providers.msx_bridge.player import MSXPlayer
 from music_assistant.providers.msx_bridge.provider import SharedGroupStream
+||||||| upstream-base
+from provider.provider import SharedGroupStream
+=======
+from provider.http_server import MSXHTTPServer
+from provider.player import MSXPlayer
+from provider.provider import SharedGroupStream
+>>>>>>> upstream-head
 
 if TYPE_CHECKING:
     from music_assistant.providers.msx_bridge.provider import MSXBridgeProvider
@@ -150,6 +158,7 @@ async def test_cancel_stops_subscription() -> None:
         stream.producer_task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await stream.producer_task
+<<<<<<< provider
 
 
 async def test_resubscribe_same_player_ends_prior_without_detaching_new() -> None:
@@ -355,3 +364,37 @@ async def test_serve_shared_reuses_stream_when_member_codec_matches(
 
     write_shared.assert_awaited_once()
     independent.assert_not_awaited()
+||||||| upstream-base
+=======
+
+
+async def test_shared_stream_paces_output(provider: MSXBridgeProvider, mass_mock: Mock) -> None:
+    """The shared group encoder carries the same pacing ceiling as the per-player one."""
+    server = MSXHTTPServer(provider, 0)
+    player = MagicMock(spec=MSXPlayer)
+    player.player_id = "msx_leader"
+    media = Mock(source_id=None, queue_item_id=None)
+
+    mass_mock.streams = Mock()
+    mass_mock.streams.get_stream = Mock(return_value=_chunks(b"pcm"))
+    mass_mock.streams.audio.get_player_output_plan = Mock(return_value=Mock(filter_params=[]))
+    provider.get_or_create_shared_stream = AsyncMock(  # type: ignore[method-assign]
+        side_effect=RuntimeError("stop here")
+    )
+
+    pcm = AudioFormat(content_type=ContentType.PCM_S16LE)
+    out = AudioFormat(content_type=ContentType.MP3)
+    with (
+        patch(
+            "provider.http_server.get_ffmpeg_stream",
+            return_value=_chunks(b"encoded"),
+        ) as ffmpeg_mock,
+        pytest.raises(RuntimeError),
+    ):
+        # leader path: player_id == group_id
+        await server._serve_shared_stream(Mock(), player, media, "msx_leader", pcm, out, {})
+
+    extra_args = ffmpeg_mock.call_args.kwargs["extra_input_args"]
+    assert "-readrate" in extra_args
+    assert "-readrate_initial_burst" in extra_args
+>>>>>>> upstream-head
