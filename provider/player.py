@@ -13,6 +13,7 @@ from music_assistant_models.errors import MusicAssistantError, PlayerUnavailable
 from music_assistant_models.player import DeviceInfo
 
 from music_assistant.constants import CONF_ENTRY_OUTPUT_CODEC_DEFAULT_MP3
+from music_assistant.controllers.players.constants import PlayerLockPurpose
 from music_assistant.models.player import Player, PlayerMedia
 
 if TYPE_CHECKING:
@@ -446,23 +447,27 @@ class MSXPlayer(Player):
 
     async def _propagate_single(self, member: MSXPlayer, command: str, **kwargs: Any) -> None:
         """Propagate a single command to one group member."""
-        if command == "play_media":
-            media = kwargs.get("media")
-            if media:
-                # Call member.play_media directly — mass.players.play_media
-                # would redirect synced/grouped players back to the leader.
-                # Cancel the member's current HTTP stream first so a shared
-                # or independent producer from the previous track is aborted.
-                http_server = cast("MSXBridgeProvider", member.provider).http_server
-                if http_server is not None:
-                    http_server.cancel_streams_for_player(member.player_id)
-                await member.play_media(media)
-        elif command == "stop":
-            await member.stop()
-        elif command == "pause":
-            await member.pause()
-        elif command == "play":
-            await member.play()
+        try:
+            async with self.mass.players.get_player_lock(member.player_id, PlayerLockPurpose.PLAYBACK):
+                if command == "play_media":
+                    media = kwargs.get("media")
+                    if media:
+                        # Avoid the public redirect back to the leader while releasing
+                        # the member's active source session through MA's handler.
+                        await self.mass.players._handle_play_media(member.player_id, media)
+                elif command == "stop":
+                    await self.mass.players._handle_cmd_stop(member.player_id)
+                elif command == "pause":
+                    await self.mass.players._handle_cmd_pause(member.player_id)
+                elif command == "play":
+                    await self.mass.players._handle_cmd_play(member.player_id)
+        except Exception:
+            self.logger.warning(
+                "Failed to propagate %s to member %s",
+                command,
+                member.player_id,
+                exc_info=True,
+            )
 
     def _queue_length(self, source_id: str, fallback: int) -> int:
         """Return the queue length, or fallback when the controller cannot be read."""
