@@ -239,13 +239,7 @@ def map_track_to_msx(
     elif playlist_url:
         action = f"playlist:{playlist_url}"
     else:
-        action = _build_audio_action(
-            prefix=prefix,
-            player_id=player_id,
-            track_uri=track.uri,
-            token=provider.get_stream_token(player_id),
-            device_param=device_param,
-        )
+        raise ValueError("context_uri or playlist_url is required")
 
     return MsxItem(
         title_header="{txt:msx-white:" + track.name + "}",

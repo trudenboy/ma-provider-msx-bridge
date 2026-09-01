@@ -2,41 +2,29 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
-from dataclasses import dataclass
+from collections.abc import Sequence
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
-from music_assistant_models.errors import InvalidProviderURI
+from music_assistant_models.errors import (
+    InvalidDataError,
+    InvalidProviderURI,
+    ResourceTemporarilyUnavailable,
+)
 
 from music_assistant.helpers.uri import parse_uri
 
 if TYPE_CHECKING:
     from music_assistant_models.player import PlayerMedia
+    from music_assistant_models.queue_item import QueueItem
+
+    from music_assistant.mass import MusicAssistant
 
     from .player import MSXPlayer
     from .provider import MSXBridgeProvider
 
 logger = logging.getLogger(__name__)
-
-
-def _prepare_lock(player: Any) -> asyncio.Lock:
-    """Return the per-player prepare lock, creating it if missing (test doubles)."""
-    lock = getattr(player, "_prepare_lock", None)
-    if isinstance(lock, asyncio.Lock):
-        return lock
-    lock = asyncio.Lock()
-    player._prepare_lock = lock
-    return lock
-
-
-@dataclass(frozen=True, slots=True)
-class PrepareFailure:
-    """HTTP-shaped failure from preparing MSX audio."""
-
-    status: int
-    text: str
 
 
 async def is_media_item_uri(uri: str) -> bool:
@@ -50,17 +38,8 @@ async def is_media_item_uri(uri: str) -> bool:
     return provider_instance_id_or_domain != "builtin"
 
 
-def queue_item_uri(item: Any) -> str | None:
-    """Return the playable URI stored on a queue item, if any."""
-    media = getattr(item, "media_item", None)
-    for candidate in (getattr(media, "uri", None), getattr(item, "uri", None)):
-        if isinstance(candidate, str) and candidate:
-            return candidate
-    return None
-
-
 def find_uri_in_active_queue(
-    mass: Any,
+    mass: MusicAssistant,
     player_id: str,
     uri: str,
     queue_item_id: str | None = None,
@@ -71,15 +50,13 @@ def find_uri_in_active_queue(
         return None
     items = mass.player_queues.items(queue.queue_id, limit=queue.items)
     for item in items:
-        if queue_item_uri(item) == uri and (
-            queue_item_id is None or item.queue_item_id == queue_item_id
-        ):
+        if item.uri == uri and (queue_item_id is None or item.queue_item_id == queue_item_id):
             return queue.queue_id, item.queue_item_id
     return None
 
 
 def current_media_matches_uri(
-    mass: Any,
+    mass: MusicAssistant,
     player: MSXPlayer,
     track_uri: str,
     queue_item_id: str | None = None,
@@ -91,22 +68,22 @@ def current_media_matches_uri(
     if queue_item_id is not None and media.queue_item_id != queue_item_id:
         return False
     queue_item = mass.player_queues.get_item(media.source_id, media.queue_item_id)
-    return queue_item_uri(queue_item) == track_uri
+    return queue_item is not None and queue_item.uri == track_uri
 
 
-def queue_items_to_tracks(queue_items: Any) -> list[Any]:
+def queue_items_to_tracks(queue_items: Sequence[QueueItem]) -> list[Any]:
     """Adapt MA queue items into track-like objects for the playlist mapper."""
     tracks: list[Any] = []
     for qi in queue_items:
-        mi = getattr(qi, "media_item", None)
+        mi = qi.media_item
         tracks.append(
             SimpleNamespace(
-                name=getattr(mi, "name", None) or getattr(qi, "name", "") or "",
-                uri=queue_item_uri(qi) or "",
-                duration=getattr(mi, "duration", None) or getattr(qi, "duration", 0) or 0,
+                name=mi.name if mi else qi.name,
+                uri=qi.uri,
+                duration=(mi.duration if mi else qi.duration) or 0,
                 artist_str=getattr(mi, "artist_str", "") if mi else "",
-                image=getattr(qi, "image", None),
-                queue_item_id=getattr(qi, "queue_item_id", None),
+                image=qi.image,
+                queue_item_id=qi.queue_item_id,
             )
         )
     return tracks
@@ -119,7 +96,7 @@ async def prepare_msx_audio(
     *,
     from_playlist: bool,
     queue_item_id: str | None,
-) -> PlayerMedia | PrepareFailure:
+) -> PlayerMedia:
     """
     Resolve the PlayerMedia MSX should stream for this URI.
 
@@ -127,7 +104,7 @@ async def prepare_msx_audio(
     and MSX-driven /msx/audio share one implementation.
     """
     provider.on_player_activity(player.player_id)
-    async with _prepare_lock(player):
+    async with player._prepare_lock:
         return await _prepare_msx_audio_locked(
             provider,
             player,
@@ -144,17 +121,17 @@ async def _prepare_msx_audio_locked(
     *,
     from_playlist: bool,
     queue_item_id: str | None,
-) -> PlayerMedia | PrepareFailure:
+) -> PlayerMedia:
     """Select the queued item under the per-player lock."""
     queue_item = find_uri_in_active_queue(provider.mass, player.player_id, uri, queue_item_id)
     if queue_item is None:
-        return PrepareFailure(400, "Invalid uri parameter")
+        raise InvalidDataError("Invalid uri parameter")
 
     if from_playlist and current_media_matches_uri(provider.mass, player, uri, queue_item_id):
         logger.debug("Queue-driven: using current_media for %s", uri)
         media = player.current_media
         if media is None:
-            return PrepareFailure(504, "Playback setup timeout")
+            raise ResourceTemporarilyUnavailable("Playback setup timeout")
         return media
 
     player.expect_new_media()
@@ -167,7 +144,7 @@ async def _prepare_msx_audio_locked(
 
     media = await player.wait_for_media(timeout=10.0)
     if not media:
-        return PrepareFailure(504, "Playback setup timeout")
+        raise ResourceTemporarilyUnavailable("Playback setup timeout")
     if media.source_id:
         player.mark_queue_playback(media.source_id)
     return media
