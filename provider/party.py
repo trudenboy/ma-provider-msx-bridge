@@ -76,8 +76,8 @@ class PartyAdapter:
         """
         Return details of the active party, or None when no party is active.
 
-        Never raises: a broken or slow Party plugin degrades to "no party" so
-        the core UI (menu) keeps working. Results are cached briefly.
+        Expected Party provider failures and timeouts degrade to no active party.
+        Results are cached briefly.
         """
         now = time.monotonic()
         if self.cache is not None and now - self.cache[0] < PARTY_CACHE_TTL:
