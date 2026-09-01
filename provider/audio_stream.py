@@ -197,6 +197,13 @@ class SharedGroupStream:
             self.group_id,
             self._total_bytes,
         )
+        self.finished = True
+        self.started.set()
+        async with self._lock:
+            pending = list(self.subscribers.values())
+        for queue in pending:
+            _signal_eof(queue, replace=True)
+
         task = self.producer_task
         if task is not None and not task.done():
             task.cancel()
@@ -208,7 +215,6 @@ class SharedGroupStream:
                 if self.producer_error is None:
                     self.producer_error = exc
                     logger.exception("[SharedStream:%s] Producer error", self.group_id)
-        self.finished = True
 
     @property
     def subscriber_count(self) -> int:
