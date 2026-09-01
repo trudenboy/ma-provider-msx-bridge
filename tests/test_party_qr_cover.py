@@ -82,8 +82,9 @@ def _failing_http_session_mock(release: asyncio.Event) -> Mock:
 
     async def _gated_chunks(_size: int) -> AsyncGenerator[bytes]:
         await release.wait()
-        raise ConnectionResetError("connection reset while fetching the cover")
-        yield b""  # pragma: no cover
+        if release.is_set():
+            raise ConnectionResetError("connection reset while fetching the cover")
+        yield b""
 
     resp = AsyncMock()
     resp.status = 200

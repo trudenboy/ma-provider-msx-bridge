@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
@@ -232,7 +232,7 @@ async def test_resubscribe_replaces_audio_with_eof_when_prior_queue_is_full() ->
     stream.subscribers["tv1"] = previous
 
     replacement = stream.subscribe("tv1")
-    next_chunk = asyncio.create_task(anext(replacement))
+    next_chunk = asyncio.ensure_future(anext(replacement))
     while stream.subscribers.get("tv1") is previous:
         await asyncio.sleep(0)
 
@@ -324,7 +324,9 @@ async def test_serve_shared_registers_stream_so_stop_can_cancel(
     stream.output_plan = Mock(filter_params=[])
     stream.subscribe = hanging_subscribe  # type: ignore[assignment]
     provider.get_shared_stream = Mock(return_value=stream)  # type: ignore[method-assign]
-    provider.mass.streams.audio.get_player_output_plan.return_value = Mock(filter_params=[])
+    cast("Any", provider.mass.streams.audio).get_player_output_plan = Mock(
+        return_value=Mock(filter_params=[])
+    )
 
     request = Mock()
     request.transport = Mock()
@@ -388,8 +390,8 @@ async def test_serve_shared_falls_back_when_member_filters_differ(
     )
     stream.output_plan = Mock(filter_params=["pan=mono|c0=c0"])
     provider._shared_streams["msx_leader"] = stream
-    provider.mass.streams.audio.get_player_output_plan.return_value = Mock(
-        filter_params=["pan=mono|c0=c1"]
+    cast("Any", provider.mass.streams.audio).get_player_output_plan = Mock(
+        return_value=Mock(filter_params=["pan=mono|c0=c1"])
     )
     pipeline = AudioPipeline(provider)
     member = MagicMock(spec=MSXPlayer)
@@ -424,7 +426,9 @@ async def test_serve_shared_reuses_stream_when_member_codec_matches(
     )
     stream.output_plan = Mock(filter_params=[])
     provider._shared_streams["msx_leader"] = stream
-    provider.mass.streams.audio.get_player_output_plan.return_value = Mock(filter_params=[])
+    cast("Any", provider.mass.streams.audio).get_player_output_plan = Mock(
+        return_value=Mock(filter_params=[])
+    )
     pipeline = AudioPipeline(provider)
     member = MagicMock(spec=MSXPlayer)
     member.player_id = "msx_member"
