@@ -745,6 +745,12 @@ async def test_control_endpoints_reject_cross_site(http_client: TestClient[Any, 
     assert resp.status == 403, "/api/play must reject cross-site POST"
 
 
+async def test_control_endpoints_reject_same_site(http_client: TestClient[Any, Any]) -> None:
+    """A sibling service on another port must not pass the CSRF guard."""
+    response = await http_client.get("/api/pause/msx_x", headers={"Sec-Fetch-Site": "same-site"})
+    assert response.status == 403
+
+
 async def test_control_endpoints_allow_same_origin(
     provider: MSXBridgeProvider, mass_mock: Mock
 ) -> None:
@@ -757,6 +763,44 @@ async def test_control_endpoints_allow_same_origin(
         resp = await client.get("/api/pause/msx_test", headers={"Sec-Fetch-Site": "same-origin"})
         assert resp.status == 200
         mass_mock.players.cmd_pause.assert_awaited_once_with("msx_test")
+    finally:
+        await client.close()
+
+
+async def test_websocket_rejects_cross_origin_browser(
+    provider: MSXBridgeProvider,
+) -> None:
+    """A browser from another origin cannot claim a TV control socket."""
+    server = MSXHTTPServer(provider, 0)
+    client = AiohttpTestClient(TestServer(server.app))
+    await client.start_server()
+    try:
+        with pytest.raises(aiohttp.WSServerHandshakeError) as err:
+            await client.ws_connect(
+                "/ws?device_id=LivingRoom",
+                headers={
+                    "Origin": "https://attacker.example",
+                    "Sec-Fetch-Site": "cross-site",
+                },
+            )
+        assert err.value.status == 403
+        assert provider.players == []
+    finally:
+        await client.close()
+
+
+async def test_websocket_allows_originless_native_client(
+    provider: MSXBridgeProvider, mass_mock: Mock
+) -> None:
+    """The native MSX client may connect without browser security headers."""
+    _register_msx_player(mass_mock, provider, "msx_LivingRoom")
+    server = MSXHTTPServer(provider, 0)
+    client = AiohttpTestClient(TestServer(server.app))
+    await client.start_server()
+    try:
+        ws = await client.ws_connect("/ws?device_id=LivingRoom")
+        assert not ws.closed
+        await ws.close()
     finally:
         await client.close()
 
