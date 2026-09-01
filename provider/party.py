@@ -26,6 +26,7 @@ PARTY_CACHE_TTL = 10.0
 PARTY_CALL_TIMEOUT = 5.0
 COVER_FETCH_MAX_BYTES = 2 * 1024 * 1024
 COVER_MAX_PIXELS = 4096 * 4096
+MAX_CONCURRENT_COVER_RENDERS = 2
 
 
 class PartyInfo(NamedTuple):
@@ -46,6 +47,7 @@ class PartyAdapter:
         self.cache: tuple[float, PartyInfo | None] | None = None
         self.qr_cover_cache: dict[tuple[str, str], bytes] = {}
         self.qr_cover_inflight: dict[tuple[str, str], asyncio.Task[bytes]] = {}
+        self._cover_render_slots = asyncio.Semaphore(MAX_CONCURRENT_COVER_RENDERS)
 
     def cached_party(self) -> PartyInfo | None:
         """Return the last cached party state without refreshing (sync contexts)."""
@@ -142,6 +144,11 @@ class PartyAdapter:
             raise web.HTTPFound(location=image_url)
         cache_key = (image_url, party.qr_version)
         if (cached := self.qr_cover_cache.get(cache_key)) is None:
+            if (
+                cache_key not in self.qr_cover_inflight
+                and len(self.qr_cover_inflight) >= MAX_CONCURRENT_COVER_RENDERS
+            ):
+                raise web.HTTPFound(location=image_url)
             try:
                 cached = await join_task(self.qr_cover_task(cache_key, image_url, party.join_url))
             except (aiohttp.ClientError, OSError, RuntimeError, ValueError) as err:
@@ -173,23 +180,24 @@ class PartyAdapter:
         self, cache_key: tuple[str, str], image_url: str, join_url: str
     ) -> bytes:
         """Fetch the cover, composite the QR onto it, and cache the PNG."""
-        async with self.provider.mass.http_session.get(
-            image_url,
-            timeout=aiohttp.ClientTimeout(total=10),
-            allow_redirects=False,
-        ) as resp:
-            if resp.status != 200:
-                raise ValueError(f"cover fetch returned HTTP {resp.status}")
-            raw_len = resp.headers.get("Content-Length")
-            if isinstance(raw_len, (str, bytes, int)):
-                try:
-                    declared = int(raw_len)
-                except TypeError, ValueError:
-                    declared = 0
-                if declared > COVER_FETCH_MAX_BYTES:
-                    raise ValueError("cover exceeds size limit")
-            cover_bytes = await _read_capped(resp, COVER_FETCH_MAX_BYTES)
-        rendered = await asyncio.to_thread(render_qr_cover, join_url, cover_bytes)
+        async with self._cover_render_slots:
+            async with self.provider.mass.http_session.get(
+                image_url,
+                timeout=aiohttp.ClientTimeout(total=10),
+                allow_redirects=False,
+            ) as resp:
+                if resp.status != 200:
+                    raise ValueError(f"cover fetch returned HTTP {resp.status}")
+                raw_len = resp.headers.get("Content-Length")
+                if isinstance(raw_len, (str, bytes, int)):
+                    try:
+                        declared = int(raw_len)
+                    except TypeError, ValueError:
+                        declared = 0
+                    if declared > COVER_FETCH_MAX_BYTES:
+                        raise ValueError("cover exceeds size limit")
+                cover_bytes = await _read_capped(resp, COVER_FETCH_MAX_BYTES)
+            rendered = await asyncio.to_thread(render_qr_cover, join_url, cover_bytes)
         if len(self.qr_cover_cache) >= 32:
             self.qr_cover_cache.clear()
         self.qr_cover_cache[cache_key] = rendered
