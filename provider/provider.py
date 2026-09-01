@@ -443,8 +443,10 @@ class MSXBridgeProvider(PlayerProvider):
                 )
                 and (
                     output_plan is None
-                    or (existing.output_plan is not None
-                    and existing.output_plan.filter_params == output_plan.filter_params)
+                    or (
+                        existing.output_plan is not None
+                        and existing.output_plan.filter_params == output_plan.filter_params
+                    )
                 )
             ):
                 logger.info(
