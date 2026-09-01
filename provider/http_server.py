@@ -1282,6 +1282,13 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
         stream endpoints so broadcast_stop reaches the correct client.
         Registers the player in MA on connect so the player appears when MSX starts.
         """
+        if self._reject_cross_site(request):
+            raise web.HTTPForbidden(text="Cross-site WebSocket rejected")
+        if origin := request.headers.get("Origin"):
+            request_origin = f"{request.scheme}://{request.host}"
+            if origin.rstrip("/").lower() != request_origin.rstrip("/").lower():
+                raise web.HTTPForbidden(text="Cross-origin WebSocket rejected")
+
         ws = web.WebSocketResponse(heartbeat=30)
         await ws.prepare(request)
 
@@ -1646,7 +1653,8 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
         player, MSX interaction plugin, dashboard) or non-browser clients that
         omit the header entirely — both pass.
         """
-        if request.headers.get("Sec-Fetch-Site", "").lower() == "cross-site":
+        fetch_site = request.headers.get("Sec-Fetch-Site", "").lower()
+        if fetch_site not in ("", "none", "same-origin"):
             return web.json_response({"error": "Cross-site request rejected"}, status=403)
         return None
 
