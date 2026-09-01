@@ -64,9 +64,8 @@ def sort_album_tracks(tracks: list[Any]) -> list[Any]:
     """
     Sort album tracks deterministically.
 
-    MA sorts by (disc_number, track_number) but tracks with identical values
-    get non-deterministic ordering between calls. Adding name as a tiebreaker
-    ensures the display page and playlist endpoint always agree on track order.
+    Include stable track identity so separate display and playlist requests
+    agree even when disc, track number, and title are identical.
     """
     return sorted(
         tracks,
@@ -74,6 +73,7 @@ def sort_album_tracks(tracks: list[Any]) -> list[Any]:
             getattr(t, "disc_number", 0) or 0,
             getattr(t, "track_number", 0) or 0,
             getattr(t, "name", "") or "",
+            getattr(t, "uri", "") or getattr(t, "item_id", "") or "",
         ),
     )
 

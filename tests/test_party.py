@@ -251,18 +251,27 @@ def test_stamp_qr_on_cover_rejects_oversized_cover_without_changing_pillow_limit
 
 def test_stamp_qr_on_cover_does_not_change_pillow_limit_when_concurrent() -> None:
     """Overlapping cover stamps must not change Pillow's process-wide pixel limit."""
+    errors: list[BaseException] = []
     original = Image.MAX_IMAGE_PIXELS
     cover_buf = io.BytesIO()
     Image.new("RGB", (64, 64), color="black").save(cover_buf, format="PNG")
     cover = cover_buf.getvalue()
     qr = _render_qr(JOIN_URL, "png")
-    workers = [threading.Thread(target=stamp_qr_on_cover, args=(cover, qr)) for _ in range(8)]
+
+    def _stamp() -> None:
+        try:
+            stamp_qr_on_cover(cover, qr)
+        except BaseException as err:
+            errors.append(err)
+
+    workers = [threading.Thread(target=_stamp) for _ in range(8)]
     for worker in workers:
         worker.start()
     for worker in workers:
         worker.join(timeout=5)
         assert not worker.is_alive()
     assert original == Image.MAX_IMAGE_PIXELS
+    assert errors == []
 
 
 async def test_msx_party_page_inactive(http_client: TestClient[Any, Any]) -> None:
@@ -270,7 +279,7 @@ async def test_msx_party_page_inactive(http_client: TestClient[Any, Any]) -> Non
     resp = await http_client.get("/msx/party.json")
     assert resp.status == 200
     data = await resp.json()
-    assert not any("/api/party/qr.svg" in (item.get("image") or "") for item in data["items"])
+    assert all(item.get("image") is None for item in data["items"])
 
 
 # --- MSX menu entry ---

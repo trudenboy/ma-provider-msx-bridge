@@ -51,6 +51,15 @@ class PartyAdapter:
         """Return the last cached party state without refreshing (sync contexts)."""
         return self.cache[1] if self.cache else None
 
+    async def stop(self) -> None:
+        """Cancel and await cover renders owned by this adapter."""
+        tasks = list(self.qr_cover_inflight.values())
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        self.qr_cover_inflight.clear()
+
     async def qr_cover_base(self, prefix: str) -> str | None:
         """Return the QR-cover endpoint base when a party is active, else None."""
         if await self.get_active_party() is None:
@@ -208,24 +217,12 @@ def render_qr_cover(join_url: str, cover_bytes: bytes) -> bytes:
 
 async def _read_capped(resp: aiohttp.ClientResponse, max_bytes: int) -> bytes:
     """Read a response body, aborting if it exceeds max_bytes."""
-    content = getattr(resp, "content", None)
-    iter_chunked = getattr(content, "iter_chunked", None)
-    if callable(iter_chunked):
-        buf = bytearray()
-        try:
-            async for chunk in iter_chunked(65536):
-                if not isinstance(chunk, (bytes, bytearray)):
-                    raise TypeError
-                buf.extend(chunk)
-                if len(buf) > max_bytes:
-                    raise ValueError("cover exceeds size limit")
-            return bytes(buf)
-        except TypeError:
-            pass
-    body = await resp.read()
-    if len(body) > max_bytes:
-        raise ValueError("cover exceeds size limit")
-    return body
+    buf = bytearray()
+    async for chunk in resp.content.iter_chunked(65536):
+        buf.extend(chunk)
+        if len(buf) > max_bytes:
+            raise ValueError("cover exceeds size limit")
+    return bytes(buf)
 
 
 def _open_rgb_image(data: bytes) -> Any:

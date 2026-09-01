@@ -376,7 +376,6 @@ async def test_play_media_no_propagation_when_empty_group(provider: Any, mass_mo
     leader = MSXPlayer(provider, "msx_leader", name="Leader TV", output_format="mp3")
     cast("Any", leader).update_state = Mock()
     leader._attr_group_members = []
-    mass_mock.players.play_media = AsyncMock()
 
     media = Mock(spec=PlayerMedia)
     media.uri = "library://track/123"
@@ -390,7 +389,7 @@ async def test_play_media_no_propagation_when_empty_group(provider: Any, mass_mo
     with patch.object(leader.provider, "notify_play_started", Mock()):
         await leader.play_media(media)
 
-    mass_mock.players.play_media.assert_not_called()
+    mass_mock.players._handle_play_media.assert_not_awaited()
 
 
 async def test_stop_propagates_to_group_members(provider: Any, mass_mock: Mock) -> None:
@@ -432,8 +431,6 @@ async def test_propagation_skipped_when_grouping_disabled(provider: Any, mass_mo
         output_format="mp3",
         grouping_enabled=False,
     )
-    member_play_media = AsyncMock()
-    cast("Any", member).play_media = member_play_media
     mass_mock.players.get = mass_mock.players.get_player = Mock(return_value=member)
 
     media = Mock(spec=PlayerMedia)
@@ -448,7 +445,7 @@ async def test_propagation_skipped_when_grouping_disabled(provider: Any, mass_mo
     with patch.object(leader.provider, "notify_play_started", Mock()):
         await leader.play_media(media)
 
-    member_play_media.assert_not_called()
+    mass_mock.players._handle_play_media.assert_not_awaited()
 
 
 def test_no_set_members_feature_when_grouping_disabled(provider: Any) -> None:
@@ -505,6 +502,7 @@ async def test_propagation_recursion_guard(provider: Any, mass_mock: Mock) -> No
 
     # Leader played successfully (no exception from recursion)
     assert leader._attr_playback_state == PlaybackState.PLAYING
+    assert mass_mock.players._handle_play_media.await_count == 2
 
 
 # --- Queue-backed playlist playback ---

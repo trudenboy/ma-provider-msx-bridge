@@ -131,7 +131,7 @@ class SharedGroupStream:
                 already_finished = self.finished
                 previous = self.subscribers.get(player_id)
                 if previous is not None and previous is not q:
-                    _signal_eof(previous)
+                    _signal_eof(previous, replace=True)
                 self.subscribers[player_id] = q
                 if already_finished:
                     q.put_nowait(None)
@@ -387,6 +387,14 @@ class AudioPipeline:
         player_id = player.player_id
         media_uri = getattr(media, "uri", "") or str(media)
         session_id = get_media_session_id(media) or getattr(media, "queue_item_id", None) or ""
+        output_plan = self.provider.mass.streams.audio.get_player_output_plan(
+            player_id,
+            pcm_format,
+            out_format,
+            queue_id=getattr(media, "source_id", None),
+            session_id=get_media_session_id(media),
+            queue_item_id=getattr(media, "queue_item_id", None),
+        )
 
         existing_stream = self.provider.get_shared_stream(group_id)
         if existing_stream is not None:
@@ -396,6 +404,10 @@ class AudioPipeline:
                 )
             if not _shared_stream_matches(existing_stream, media_uri, session_id, out_format):
                 existing_stream = None
+            elif not _shared_output_plan_matches(existing_stream, output_plan):
+                return await self.serve_independent(
+                    request, player, media, pcm_format, out_format, headers
+                )
         is_leader = player_id == group_id
 
         if existing_stream is not None:
@@ -416,14 +428,6 @@ class AudioPipeline:
                 pcm_format,
                 force_flow_mode=False,
             )
-            output_plan = self.provider.mass.streams.audio.get_player_output_plan(
-                player_id,
-                pcm_format,
-                out_format,
-                queue_id=getattr(media, "source_id", None),
-                session_id=get_media_session_id(media),
-                queue_item_id=getattr(media, "queue_item_id", None),
-            )
             audio_chunks = get_ffmpeg_stream(
                 audio_input=audio_source,
                 input_format=pcm_format,
@@ -437,8 +441,8 @@ class AudioPipeline:
                 audio_chunks,
                 session_id=session_id,
                 content_type=out_format.content_type,
+                output_plan=output_plan,
             )
-            shared_stream.output_plan = output_plan
         else:
             logger.info(
                 "[SharedStream] Member %s waiting for leader to create stream for group %s",
@@ -449,8 +453,10 @@ class AudioPipeline:
             for _ in range(30):
                 await asyncio.sleep(0.1)
                 shared_stream = self.provider.get_shared_stream(group_id)
-                if shared_stream is not None and _shared_stream_matches(
-                    shared_stream, media_uri, session_id, out_format
+                if (
+                    shared_stream is not None
+                    and _shared_stream_matches(shared_stream, media_uri, session_id, out_format)
+                    and _shared_output_plan_matches(shared_stream, output_plan)
                 ):
                     break
                 shared_stream = None
@@ -464,21 +470,13 @@ class AudioPipeline:
                     request, player, media, pcm_format, out_format, headers
                 )
 
-        if shared_stream is None:
-            return await self.serve_independent(
-                request, player, media, pcm_format, out_format, headers
-            )
-
         queue_id = getattr(media, "source_id", None)
         session_id = get_media_session_id(media)
-        if (
-            shared_stream.output_plan is not None
-            and queue_id is not None
-            and session_id is not None
-        ):
+        assert shared_stream is not None
+        if queue_id is not None and session_id is not None:
             self.provider.mass.streams.audio_processing.update_output(
                 player_id,
-                shared_stream.output_plan,
+                output_plan,
                 queue_id=queue_id,
                 session_id=session_id,
                 queue_item_id=getattr(media, "queue_item_id", None),
@@ -621,7 +619,7 @@ class AudioPipeline:
             await stream_task
         except asyncio.CancelledError:
             raise
-        except MusicAssistantError, OSError, RuntimeError:
+        except MusicAssistantError, OSError:
             logger.exception("Stream error for player %s", player_id)
         finally:
             self.unregister_stream(player_id, stream_task, transport)
@@ -656,7 +654,8 @@ class AudioPipeline:
         headers: dict[str, str],
     ) -> web.StreamResponse:
         """Pump a shared stream into an HTTP response and register it for cancel."""
-        response = web.StreamResponse(status=200, headers=headers)
+        shared_headers = {key: value for key, value in headers.items() if key != "Content-Length"}
+        response = web.StreamResponse(status=200, headers=shared_headers)
         await response.prepare(request)
         total_bytes = 0
 
@@ -687,8 +686,10 @@ class AudioPipeline:
         return response
 
 
-def _signal_eof(queue: asyncio.Queue[bytes | None]) -> None:
-    """Best-effort EOF; consumers also stop when the producer is finished."""
+def _signal_eof(queue: asyncio.Queue[bytes | None], *, replace: bool = False) -> None:
+    """Signal EOF, optionally replacing stale buffered data during reconnect."""
+    if replace and queue.full():
+        queue.get_nowait()
     with contextlib.suppress(asyncio.QueueFull):
         queue.put_nowait(None)
 
@@ -755,6 +756,14 @@ def _shared_codec_mismatch(
         and stream.session_id == session_id
         and stream.content_type is not None
         and stream.content_type != out_format.content_type
+    )
+
+
+def _shared_output_plan_matches(stream: SharedGroupStream, output_plan: AudioOutputPlan) -> bool:
+    """Return whether this player requests the bytes encoded for the shared stream."""
+    return (
+        stream.output_plan is not None
+        and stream.output_plan.filter_params == output_plan.filter_params
     )
 
 

@@ -160,6 +160,22 @@ def test_sort_album_tracks_uses_name_as_tiebreaker() -> None:
     assert [t.name for t in sort_album_tracks([late, early])] == ["A", "B"]
 
 
+def test_sort_album_tracks_uses_uri_as_final_tiebreaker() -> None:
+    """Tracks with identical numbering and names still sort deterministically."""
+    early = MagicMock()
+    early.disc_number = 1
+    early.track_number = 1
+    early.name = "Same"
+    early.uri = "library://track/a"
+    late = MagicMock()
+    late.disc_number = 1
+    late.track_number = 1
+    late.name = "Same"
+    late.uri = "library://track/b"
+
+    assert sort_album_tracks([late, early]) == [early, late]
+
+
 @pytest.mark.asyncio
 async def test_album_image_fallback_returns_none_on_music_assistant_error() -> None:
     """A missing album from MA must not fail the album list page."""

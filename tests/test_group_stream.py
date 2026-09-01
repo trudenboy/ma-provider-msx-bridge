@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
@@ -124,6 +124,39 @@ async def test_concurrent_replace_yields_single_stream(provider: MSXBridgeProvid
         )
 
 
+async def test_concurrent_leaders_do_not_relabel_an_incompatible_stream(
+    provider: MSXBridgeProvider,
+) -> None:
+    """A reused producer must retain the output plan that encoded its bytes."""
+    first_plan = Mock(filter_params=["pan=mono|c0=c0"])
+    second_plan = Mock(filter_params=["pan=mono|c0=c1"])
+
+    first, second = await asyncio.gather(
+        provider.get_or_create_shared_stream(
+            "g1",
+            "uri://same",
+            _chunks(b"first"),
+            session_id="session",
+            content_type=ContentType.MP3,
+            output_plan=first_plan,
+        ),
+        provider.get_or_create_shared_stream(
+            "g1",
+            "uri://same",
+            _chunks(b"second"),
+            session_id="session",
+            content_type=ContentType.MP3,
+            output_plan=second_plan,
+        ),
+    )
+
+    assert first is not second
+    assert first.output_plan is first_plan
+    assert second.output_plan is second_plan
+    assert provider._shared_streams["g1"] is second
+    await asyncio.gather(first.stop(), second.stop())
+
+
 async def test_cancel_stops_subscription() -> None:
     """Cancelling a subscriber's task cleans up the subscriber registry."""
 
@@ -187,6 +220,27 @@ async def test_resubscribe_same_player_ends_prior_without_detaching_new() -> Non
         assert "tv1" not in stream.subscribers
     finally:
         await stream.stop()
+
+
+async def test_resubscribe_replaces_audio_with_eof_when_prior_queue_is_full() -> None:
+    """A reconnect must terminate a replaced subscriber even at full backlog."""
+    stream = SharedGroupStream("g1", "uri://test")
+    stream.started.set()
+    previous: asyncio.Queue[bytes | None] = asyncio.Queue(maxsize=2)
+    previous.put_nowait(b"stale-1")
+    previous.put_nowait(b"stale-2")
+    stream.subscribers["tv1"] = previous
+
+    replacement = stream.subscribe("tv1")
+    next_chunk = asyncio.ensure_future(anext(replacement))
+    while stream.subscribers.get("tv1") is previous:
+        await asyncio.sleep(0)
+
+    assert previous.get_nowait() == b"stale-2"
+    assert previous.get_nowait() is None
+    next_chunk.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await next_chunk
 
 
 async def test_shared_stream_paces_output(provider: MSXBridgeProvider, mass_mock: Mock) -> None:
@@ -267,8 +321,12 @@ async def test_serve_shared_registers_stream_so_stop_can_cancel(
         yield b"x"
 
     stream = SharedGroupStream("msx_tv", "library://track/1", session_id="")
+    stream.output_plan = Mock(filter_params=[])
     stream.subscribe = hanging_subscribe  # type: ignore[assignment]
     provider.get_shared_stream = Mock(return_value=stream)  # type: ignore[method-assign]
+    cast("Any", provider.mass.streams.audio).get_player_output_plan = Mock(
+        return_value=Mock(filter_params=[])
+    )
 
     request = Mock()
     request.transport = Mock()
@@ -323,6 +381,42 @@ async def test_serve_shared_falls_back_when_member_codec_differs(
     write_shared.assert_not_awaited()
 
 
+async def test_serve_shared_falls_back_when_member_filters_differ(
+    provider: MSXBridgeProvider,
+) -> None:
+    """A member must not reuse audio encoded with another player's filters."""
+    stream = SharedGroupStream(
+        "msx_leader", "library://track/1", session_id="", content_type=ContentType.MP3
+    )
+    stream.output_plan = Mock(filter_params=["pan=mono|c0=c0"])
+    provider._shared_streams["msx_leader"] = stream
+    cast("Any", provider.mass.streams.audio).get_player_output_plan = Mock(
+        return_value=Mock(filter_params=["pan=mono|c0=c1"])
+    )
+    pipeline = AudioPipeline(provider)
+    member = MagicMock(spec=MSXPlayer)
+    member.player_id = "msx_member"
+    media = Mock(uri="library://track/1", source_id=None, queue_item_id=None)
+    pcm = AudioFormat(content_type=ContentType.PCM_S16LE)
+    mp3 = AudioFormat(content_type=ContentType.MP3)
+    independent = AsyncMock(return_value=Mock())
+
+    with (
+        patch(
+            "music_assistant.providers.msx_bridge.audio_stream.get_media_session_id",
+            return_value="",
+        ),
+        patch.object(pipeline, "serve_independent", independent),
+        patch.object(pipeline, "_write_shared_response", AsyncMock()) as write_shared,
+    ):
+        await pipeline.serve_shared(
+            Mock(), member, media, "msx_leader", pcm, mp3, {"Content-Type": "audio/mpeg"}
+        )
+
+    independent.assert_awaited_once()
+    write_shared.assert_not_awaited()
+
+
 async def test_serve_shared_reuses_stream_when_member_codec_matches(
     provider: MSXBridgeProvider,
 ) -> None:
@@ -330,7 +424,11 @@ async def test_serve_shared_reuses_stream_when_member_codec_matches(
     stream = SharedGroupStream(
         "msx_leader", "library://track/1", session_id="", content_type=ContentType.MP3
     )
+    stream.output_plan = Mock(filter_params=[])
     provider._shared_streams["msx_leader"] = stream
+    cast("Any", provider.mass.streams.audio).get_player_output_plan = Mock(
+        return_value=Mock(filter_params=[])
+    )
     pipeline = AudioPipeline(provider)
     member = MagicMock(spec=MSXPlayer)
     member.player_id = "msx_member"
@@ -352,3 +450,22 @@ async def test_serve_shared_reuses_stream_when_member_codec_matches(
 
     write_shared.assert_awaited_once()
     independent.assert_not_awaited()
+
+
+async def test_shared_response_omits_content_length(provider: MSXBridgeProvider) -> None:
+    """A shared subscriber must not advertise a full-track byte count."""
+    pipeline = AudioPipeline(provider)
+    stream = SharedGroupStream("g1", "uri://test")
+    stream.started.set()
+    stream.finished = True
+
+    with patch("music_assistant.providers.msx_bridge.audio_stream.web.StreamResponse") as response:
+        response.return_value.prepare = AsyncMock()
+        await pipeline._write_shared_response(
+            Mock(transport=None),
+            "tv1",
+            stream,
+            {"Content-Type": "audio/mpeg", "Content-Length": "40000"},
+        )
+
+    assert response.call_args.kwargs["headers"] == {"Content-Type": "audio/mpeg"}

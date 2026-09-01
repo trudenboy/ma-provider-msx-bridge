@@ -447,29 +447,19 @@ class MSXPlayer(Player):
 
     async def _propagate_single(self, member: MSXPlayer, command: str, **kwargs: Any) -> None:
         """Propagate a single command to one group member."""
-        try:
-            async with self.mass.players.get_player_lock(
-                member.player_id, PlayerLockPurpose.PLAYBACK
-            ):
-                if command == "play_media":
-                    media = kwargs.get("media")
-                    if media:
-                        # Avoid the public redirect back to the leader while releasing
-                        # the member's active source session through MA's handler.
-                        await self.mass.players._handle_play_media(member.player_id, media)
-                elif command == "stop":
-                    await self.mass.players._handle_cmd_stop(member.player_id)
-                elif command == "pause":
-                    await self.mass.players._handle_cmd_pause(member.player_id)
-                elif command == "play":
-                    await self.mass.players._handle_cmd_play(member.player_id)
-        except Exception:
-            self.logger.warning(
-                "Failed to propagate %s to member %s",
-                command,
-                member.player_id,
-                exc_info=True,
-            )
+        async with self.mass.players.get_player_lock(member.player_id, PlayerLockPurpose.PLAYBACK):
+            if command == "play_media":
+                media = kwargs.get("media")
+                if media:
+                    # Avoid the public redirect back to the leader while releasing
+                    # the member's active source session through MA's handler.
+                    await self.mass.players._handle_play_media(member.player_id, media)
+            elif command == "stop":
+                await self.mass.players._handle_cmd_stop(member.player_id)
+            elif command == "pause":
+                await self.mass.players._handle_cmd_pause(member.player_id)
+            elif command == "play":
+                await self.mass.players._handle_cmd_play(member.player_id)
 
     def _queue_length(self, source_id: str, fallback: int) -> int:
         """Return the queue length, or fallback when the controller cannot be read."""
