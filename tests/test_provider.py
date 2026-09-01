@@ -5,7 +5,7 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
-from music_assistant_models.errors import PlayerUnavailableError
+from music_assistant_models.errors import InvalidDataError, PlayerUnavailableError
 
 from music_assistant.providers.msx_bridge.provider import MSXBridgeProvider
 
@@ -87,7 +87,7 @@ async def test_get_ma_stream_url_returns_none_on_error(
     provider: MSXBridgeProvider, mass_mock: Mock
 ) -> None:
     """get_ma_stream_url must degrade to None (proxy fallback) when resolution fails."""
-    mass_mock.streams.resolve_stream_url = AsyncMock(side_effect=RuntimeError("no session"))
+    mass_mock.streams.resolve_stream_url = AsyncMock(side_effect=InvalidDataError("no session"))
 
     url = await provider.get_ma_stream_url("msx_test", Mock())
 

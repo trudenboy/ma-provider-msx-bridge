@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] - 2026-09-01
+
+### Changed
+
+- Shared group streams now require matching per-player output filters as well as matching playback sessions and codecs.
+- Queue, streaming, and Party integration boundaries now use stricter Music Assistant types and error contracts.
+
+### Fixed
+
+- Explicit-player queue routes no longer register duplicate IP-derived players.
+- Shared responses no longer advertise an invalid full-track content length to late or reconnecting subscribers.
+- Reconnecting shared-stream clients terminate superseded full queues without detaching the replacement.
+- Provider shutdown now cancels in-flight Party cover renders and clears stale WebSocket client addresses.
+- Playback control and WebSocket routes reject non-object JSON and invalid position values.
+- Album track ordering remains stable when disc number, track number, and title are identical.
+
+### Removed
+
+- Remaining test-only HTTP forwarding wrappers and mock-driven response fallbacks.
+
 ## [1.4.26] - 2026-09-01
 
 ### Fixed

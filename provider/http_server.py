@@ -5,10 +5,11 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 import secrets
 from html import escape as html_escape
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, TypeGuard, cast
 from urllib.parse import quote
 
 import aiohttp
@@ -118,6 +119,16 @@ def _strip_known_extension(value: str) -> str:
     return value
 
 
+def _is_finite_position(value: object) -> TypeGuard[int | float]:
+    """Return whether a WebSocket position is a finite non-negative number."""
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and math.isfinite(value)
+        and value >= 0
+    )
+
+
 class MSXHTTPServer:
     """HTTP server that serves MSX bootstrap, library API, and stream proxy."""
 
@@ -161,8 +172,10 @@ class MSXHTTPServer:
                 if not ws.closed:
                     await ws.close()
         self._ws_clients.clear()
+        self._client_prefixes.clear()
         for player_id in list(self._active_stream_tasks):
             self.cancel_streams_for_player(player_id)
+        await self.party.stop()
         if self._runner:
             await self._runner.cleanup()
             self._runner = None
@@ -1171,7 +1184,8 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
 
     async def _handle_queue_playlist(self, request: web.Request) -> web.Response:
         """Return the current MA queue as an MSX native playlist."""
-        _, device_param, _ = await self._ensure_player_for_request(request)
+        device_id = request.query.get("device_id")
+        device_param = f"device_id={quote(device_id, safe='')}" if device_id else ""
         prefix = self._get_prefix(request)
         player_id = request.match_info["player_id"]
         queue_id = request.query.get("queue_id", player_id)
@@ -1250,29 +1264,6 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
         """Serve this player's current media on this request."""
         return await self.audio.serve(request, player, media, duration)
 
-    async def _serve_independent_stream(
-        self,
-        request: web.Request,
-        player: MSXPlayer,
-        media: Any,
-        pcm_format: Any,
-        out_format: Any,
-        headers: dict[str, str],
-    ) -> web.StreamResponse:
-        """Serve audio via independent ffmpeg stream (fallback)."""
-        return await self.audio.serve_independent(
-            request, player, media, pcm_format, out_format, headers
-        )
-
-    async def _run_stream_task(
-        self,
-        player_id: str,
-        stream_task: asyncio.Task[None],
-        transport: Any,
-    ) -> None:
-        """Run a stream task with registration and error handling."""
-        await self.audio.run_stream_task(player_id, stream_task, transport)
-
     async def _handle_health(self, request: web.Request) -> web.Response:
         """Health check endpoint."""
         return web.json_response(
@@ -1295,6 +1286,7 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
         await ws.prepare(request)
 
         player_id, _, player = await self._ensure_player_for_request(request)
+        self._client_prefixes[player_id] = self._get_prefix(request)
         if player_id not in self._ws_clients:
             self._ws_clients[player_id] = set()
         self._ws_clients[player_id].add(ws)
@@ -1315,6 +1307,7 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
             self._ws_clients.get(player_id, set()).discard(ws)
             if not self._ws_clients.get(player_id):
                 self._ws_clients.pop(player_id, None)
+                self._client_prefixes.pop(player_id, None)
                 # Notify the player that its last WS client disconnected
                 offline_player = self.provider.mass.players.get_player(player_id)
                 if offline_player and isinstance(offline_player, MSXPlayer):
@@ -1322,14 +1315,6 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
             logger.debug("WebSocket client disconnected for player %s", player_id)
 
         return ws
-
-    def _register_stream(self, player_id: str, task: asyncio.Task[None], transport: Any) -> None:
-        """Register active stream task and transport for cancel on stop."""
-        self.audio.register_stream(player_id, task, transport)
-
-    def _unregister_stream(self, player_id: str, task: asyncio.Task[None], transport: Any) -> None:
-        """Unregister stream when done (from finally block)."""
-        self.audio.unregister_stream(player_id, task, transport)
 
     async def _ws_send(
         self, ws: web.WebSocketResponse, text: str, player_id: str | None = None
@@ -1365,11 +1350,14 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
         except json.JSONDecodeError, TypeError:
             logger.debug("Invalid WS message from %s: %s", player_id, data)
             return
+        if not isinstance(msg, dict):
+            logger.debug("Invalid WS message from %s: %s", player_id, data)
+            return
 
         msg_type = msg.get("type")
         if msg_type == "position":
             position = msg.get("position")
-            if position is not None and isinstance(position, (int, float)):
+            if _is_finite_position(position):
                 player = self.provider.mass.players.get_player(player_id)
                 if player and isinstance(player, MSXPlayer):
                     player.update_position(float(position))
@@ -1378,7 +1366,7 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
             player = self.provider.mass.players.get_player(player_id)
             if player and isinstance(player, MSXPlayer):
                 position = msg.get("position")
-                if position is not None and isinstance(position, (int, float)):
+                if _is_finite_position(position):
                     player.update_position(float(position))
                 self.provider.mass.create_task(self._cmd_pause_no_echo(player_id))
                 self.provider.on_player_activity(player_id)
@@ -1390,12 +1378,7 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
         elif msg_type == "seek":
             position = msg.get("position")
             player = self.provider.mass.players.get_player(player_id)
-            if (
-                player
-                and isinstance(player, MSXPlayer)
-                and position is not None
-                and isinstance(position, (int, float))
-            ):
+            if player and isinstance(player, MSXPlayer) and _is_finite_position(position):
                 player.note_tv_seek(float(position))
                 self.provider.on_player_activity(player_id)
         else:
@@ -1634,12 +1617,6 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
                 extra_bases.append(base_url)
         return await self.party.handle_qr_cover(request, extra_bases=extra_bases)
 
-    def _qr_cover_task(
-        self, cache_key: tuple[str, str], image_url: str, join_url: str
-    ) -> asyncio.Task[bytes]:
-        """Return the in-flight render task for this cover, starting one if needed."""
-        return self.party.qr_cover_task(cache_key, image_url, join_url)
-
     # --- Playback Control ---
 
     def _reject_invalid_stream_token(
@@ -1702,6 +1679,8 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
         try:
             body = await request.json()
         except json.JSONDecodeError, UnicodeDecodeError, LookupError:
+            return web.json_response({"error": "Invalid JSON body"}, status=400)
+        if not isinstance(body, dict):
             return web.json_response({"error": "Invalid JSON body"}, status=400)
 
         track_uri = body.get("track_uri")
@@ -1909,8 +1888,6 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
         Player may be None if registration failed.
         """
         player_id, device_param = self._get_player_id_and_device_param(request)
-        # Remember how this client reaches us — WS pushes have no request context
-        self._client_prefixes[player_id] = self._get_prefix(request)
         remote_ip = request.remote
         # Web player clients pass source=web to distinguish from MSX TV players
         prefix_label = "WEB TV" if request.query.get("source") == "web" else "MSX TV"
@@ -1935,22 +1912,3 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
             else None,
             "uri": track.uri,
         }
-
-    @property
-    def _party_cache(self) -> tuple[float, PartyInfo | None] | None:
-        """Test-facing alias for the party adapter cache."""
-        return self.party.cache
-
-    @_party_cache.setter
-    def _party_cache(self, value: tuple[float, PartyInfo | None] | None) -> None:
-        self.party.cache = value
-
-    @property
-    def _qr_cover_cache(self) -> dict[tuple[str, str], bytes]:
-        """Test-facing alias for the party QR-cover cache."""
-        return self.party.qr_cover_cache
-
-    @property
-    def _qr_cover_inflight(self) -> dict[tuple[str, str], asyncio.Task[bytes]]:
-        """Test-facing alias for in-flight QR-cover renders."""
-        return self.party.qr_cover_inflight

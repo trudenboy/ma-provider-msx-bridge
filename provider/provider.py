@@ -10,7 +10,7 @@ import logging
 import secrets
 import time
 from collections.abc import AsyncIterator
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from music_assistant_models.config_entries import ConfigEntry, ConfigValueOption
 from music_assistant_models.enums import ConfigEntryType, ContentType
@@ -41,6 +41,9 @@ from .constants import (
 )
 from .http_server import MSXHTTPServer
 from .player import MSXPlayer
+
+if TYPE_CHECKING:
+    from music_assistant.controllers.streams.audio_processing import AudioOutputPlan
 
 logger = logging.getLogger(__name__)
 
@@ -409,6 +412,7 @@ class MSXBridgeProvider(PlayerProvider):
         audio_chunks: AsyncIterator[bytes],
         session_id: str = "",
         content_type: ContentType | None = None,
+        output_plan: AudioOutputPlan | None = None,
     ) -> SharedGroupStream:
         """
         Get existing shared stream or create new one for the group.
@@ -418,6 +422,7 @@ class MSXBridgeProvider(PlayerProvider):
         :param audio_chunks: Async iterator yielding encoded audio chunks.
         :param session_id: Per-playback identity so restarts are not reused.
         :param content_type: Encoded codec of this producer, if known.
+        :param output_plan: Filters used to encode this producer.
         """
         # Serialize check-and-create: without the lock, two concurrent callers
         # replacing an old stream both pass the "existing" check while awaiting
@@ -435,6 +440,11 @@ class MSXBridgeProvider(PlayerProvider):
                     content_type is None
                     or existing.content_type is None
                     or existing.content_type == content_type
+                )
+                and (
+                    output_plan is None
+                    or (existing.output_plan is not None
+                    and existing.output_plan.filter_params == output_plan.filter_params)
                 )
             ):
                 logger.info(
@@ -462,6 +472,7 @@ class MSXBridgeProvider(PlayerProvider):
                 media_uri[:80] if media_uri else "N/A",
             )
             stream = SharedGroupStream(group_id, media_uri, session_id, content_type=content_type)
+            stream.output_plan = output_plan
             await stream.start(audio_chunks)
             self._shared_streams[group_id] = stream
 
@@ -500,7 +511,7 @@ class MSXBridgeProvider(PlayerProvider):
             return None
         try:
             stream_url: str = await self.mass.streams.resolve_stream_url(player_id, media)
-        except (MusicAssistantError, OSError, RuntimeError) as err:
+        except MusicAssistantError as err:
             logger.warning("[MARedirect] Failed to resolve MA stream URL: %s", err, exc_info=True)
             return None
         # MA returns a flow URL (continuous whole-queue stream) when e.g. crossfade

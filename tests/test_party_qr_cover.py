@@ -7,6 +7,7 @@ import io
 import json
 import threading
 import time
+from collections.abc import AsyncGenerator
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, Mock
 from urllib.parse import parse_qs, urlencode, urlsplit
@@ -61,9 +62,13 @@ def _qr_png() -> bytes:
 
 def _http_session_mock(body: bytes, status: int = 200) -> Mock:
     """Return a mock aiohttp session whose get() yields the given body."""
+
+    async def _chunks(_size: int) -> AsyncGenerator[bytes]:
+        yield body
+
     resp = AsyncMock()
     resp.status = status
-    resp.read = AsyncMock(return_value=body)
+    resp.content.iter_chunked = Mock(side_effect=_chunks)
     cm = MagicMock()
     cm.__aenter__ = AsyncMock(return_value=resp)
     cm.__aexit__ = AsyncMock(return_value=False)
@@ -75,13 +80,14 @@ def _http_session_mock(body: bytes, status: int = 200) -> Mock:
 def _failing_http_session_mock(release: asyncio.Event) -> Mock:
     """Return a mock session whose get() fails once released."""
 
-    async def _gated_read() -> bytes:
+    async def _gated_chunks(_size: int) -> AsyncGenerator[bytes]:
         await release.wait()
         raise ConnectionResetError("connection reset while fetching the cover")
+        yield b""  # pragma: no cover
 
     resp = AsyncMock()
     resp.status = 200
-    resp.read = _gated_read
+    resp.content.iter_chunked = Mock(side_effect=_gated_chunks)
     cm = MagicMock()
     cm.__aenter__ = AsyncMock(return_value=resp)
     cm.__aexit__ = AsyncMock(return_value=False)
@@ -93,13 +99,13 @@ def _failing_http_session_mock(release: asyncio.Event) -> Mock:
 def _slow_http_session_mock(body: bytes, release: asyncio.Event) -> Mock:
     """Return a mock session whose get() blocks reading the body until released."""
 
-    async def _gated_read() -> bytes:
+    async def _gated_chunks(_size: int) -> AsyncGenerator[bytes]:
         await release.wait()
-        return body
+        yield body
 
     resp = AsyncMock()
     resp.status = 200
-    resp.read = _gated_read
+    resp.content.iter_chunked = Mock(side_effect=_gated_chunks)
     cm = MagicMock()
     cm.__aenter__ = AsyncMock(return_value=resp)
     cm.__aexit__ = AsyncMock(return_value=False)
@@ -226,16 +232,16 @@ async def test_qr_cover_render_survives_requester_cancellation(
     server = MSXHTTPServer(provider, 0)
     cache_key = (COVER_URL, "v1")
 
-    task = server._qr_cover_task(cache_key, COVER_URL, JOIN_URL)
-    assert server._qr_cover_task(cache_key, COVER_URL, JOIN_URL) is task
+    task = server.party.qr_cover_task(cache_key, COVER_URL, JOIN_URL)
+    assert server.party.qr_cover_task(cache_key, COVER_URL, JOIN_URL) is task
     waiter = asyncio.ensure_future(join_task(task))
     await asyncio.sleep(0)
     waiter.cancel()
     release.set()
     rendered = await task
 
-    assert server._qr_cover_cache[cache_key] == rendered
-    assert cache_key not in server._qr_cover_inflight
+    assert server.party.qr_cover_cache[cache_key] == rendered
+    assert cache_key not in server.party.qr_cover_inflight
 
 
 async def test_qr_cover_render_failure_after_cancellation_logs_no_loop_error(
@@ -256,7 +262,7 @@ async def test_qr_cover_render_failure_after_cancellation_logs_no_loop_error(
         waiting = asyncio.create_task(
             server._handle_party_qr_cover(make_mocked_request("GET", path))
         )
-        while not server._qr_cover_inflight and not gave_up.done():
+        while not server.party.qr_cover_inflight and not gave_up.done():
             await asyncio.sleep(0)
         await asyncio.sleep(0)  # let the second TV join the same render
         gave_up.cancel()
@@ -332,7 +338,7 @@ async def test_qr_cover_rejects_oversized_body(
             "/api/party/qr-cover.png", params={"image": COVER_URL}, allow_redirects=False
         )
         assert result.status == 302
-        resp.read.assert_not_called()
+        resp.content.iter_chunked.assert_not_called()
     finally:
         await client.close()
 
@@ -533,7 +539,7 @@ async def test_broadcast_play_rewrites_image_when_party_cached(
 ) -> None:
     """broadcast_play stamps the QR into the play background while a party is active."""
     server = MSXHTTPServer(provider, 0)
-    server._party_cache = (
+    server.party.cache = (
         time.monotonic(),
         PartyInfo(join_url=JOIN_URL, name="My Party", qr_text=None, qr_version="abc123"),
     )

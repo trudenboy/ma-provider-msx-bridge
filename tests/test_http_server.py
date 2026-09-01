@@ -14,7 +14,7 @@ import pytest
 from aiohttp.test_utils import TestClient as AiohttpTestClient
 from aiohttp.test_utils import TestServer
 from music_assistant_models.enums import PlaybackState, RepeatMode
-from music_assistant_models.errors import MusicAssistantError
+from music_assistant_models.errors import InvalidDataError, MusicAssistantError
 from music_assistant_models.media_items import Track
 from music_assistant_models.player import PlayerMedia
 from music_assistant_models.player_queue import PlayerQueue
@@ -252,7 +252,7 @@ async def test_stream_success(provider: MSXBridgeProvider, mass_mock: Mock) -> N
     # Mock get_stream to return an async generator
     mass_mock.streams = Mock()
     mass_mock.streams.get_stream = Mock(return_value=_async_iter([b"pcm-data"]))
-    mass_mock.streams.resolve_stream_url = AsyncMock(side_effect=RuntimeError("no session"))
+    mass_mock.streams.resolve_stream_url = AsyncMock(side_effect=InvalidDataError("no session"))
 
     server = MSXHTTPServer(provider, 0)
     client = AiohttpTestClient(TestServer(server.app))
@@ -1051,7 +1051,7 @@ def test_cancel_streams_continues_after_transport_abort_error(
     healthy_transport.abort.assert_called_once_with()
 
 
-@pytest.mark.parametrize("error_type", [MusicAssistantError, OSError, RuntimeError])
+@pytest.mark.parametrize("error_type", [MusicAssistantError, OSError])
 async def test_run_stream_task_logs_expected_errors_and_unregisters(
     provider: MSXBridgeProvider,
     caplog: pytest.LogCaptureFixture,
@@ -1064,7 +1064,7 @@ async def test_run_stream_task_logs_expected_errors_and_unregisters(
         raise error_type("stream failed")
 
     stream_task = asyncio.create_task(_fail())
-    await server._run_stream_task("msx_test", stream_task, None)
+    await server.audio.run_stream_task("msx_test", stream_task, None)
 
     assert "Stream error for player msx_test" in caplog.text
     assert "msx_test" not in server._active_stream_tasks
@@ -1081,7 +1081,7 @@ async def test_run_stream_task_propagates_unexpected_error_and_unregisters(
 
     stream_task = asyncio.create_task(_fail())
     with pytest.raises(ValueError, match="bug"):
-        await server._run_stream_task("msx_test", stream_task, None)
+        await server.audio.run_stream_task("msx_test", stream_task, None)
 
     assert "msx_test" not in server._active_stream_tasks
 
@@ -1333,7 +1333,7 @@ async def test_msx_audio_preserves_two_queued_builtin_items(
         token = provider.get_stream_token("msx_test")
         mass_mock.streams = Mock()
         mass_mock.streams.get_stream = Mock(return_value=_async_iter([b"pcm"]))
-        mass_mock.streams.resolve_stream_url = AsyncMock(side_effect=RuntimeError("no session"))
+        mass_mock.streams.resolve_stream_url = AsyncMock(side_effect=InvalidDataError("no session"))
 
         for uri in (first_uri, second_uri):
             with patch(
@@ -1380,7 +1380,7 @@ async def test_msx_audio_preserves_queued_library_items(
         token = provider.get_stream_token("msx_test")
         mass_mock.streams = Mock()
         mass_mock.streams.get_stream = Mock(return_value=_async_iter([b"pcm"]))
-        mass_mock.streams.resolve_stream_url = AsyncMock(side_effect=RuntimeError("no session"))
+        mass_mock.streams.resolve_stream_url = AsyncMock(side_effect=InvalidDataError("no session"))
 
         for uri in (first_uri, second_uri, second_uri):
             with patch(
@@ -1452,7 +1452,7 @@ async def test_queue_playlist_builtin_item_stays_playable(
 
         mass_mock.streams = Mock()
         mass_mock.streams.get_stream = Mock(return_value=_async_iter([b"pcm"]))
-        mass_mock.streams.resolve_stream_url = AsyncMock(side_effect=RuntimeError("no session"))
+        mass_mock.streams.resolve_stream_url = AsyncMock(side_effect=InvalidDataError("no session"))
         with patch(
             "music_assistant.providers.msx_bridge.audio_stream.get_ffmpeg_stream",
             return_value=_async_iter([b"encoded"]),
@@ -1502,7 +1502,7 @@ async def test_queue_playlist_duplicate_uri_selects_exact_item(
         mass_mock.player_queues.get_item = Mock(return_value=queue_items[0])
         mass_mock.streams = Mock()
         mass_mock.streams.get_stream = Mock(return_value=_async_iter([b"pcm"]))
-        mass_mock.streams.resolve_stream_url = AsyncMock(side_effect=RuntimeError("no session"))
+        mass_mock.streams.resolve_stream_url = AsyncMock(side_effect=InvalidDataError("no session"))
 
         with patch(
             "music_assistant.providers.msx_bridge.audio_stream.get_ffmpeg_stream",
@@ -1629,7 +1629,7 @@ async def test_msx_audio_accepts_uri_from_the_group_leaders_queue(
         token = provider.get_stream_token("msx_test")
         mass_mock.streams = Mock()
         mass_mock.streams.get_stream = Mock(return_value=_async_iter([b"pcm"]))
-        mass_mock.streams.resolve_stream_url = AsyncMock(side_effect=RuntimeError("no session"))
+        mass_mock.streams.resolve_stream_url = AsyncMock(side_effect=InvalidDataError("no session"))
         with patch(
             "music_assistant.providers.msx_bridge.audio_stream.get_ffmpeg_stream",
             return_value=_async_iter([b"encoded"]),
@@ -1662,7 +1662,7 @@ async def test_msx_audio_finds_a_uri_at_the_end_of_a_long_queue(
         token = provider.get_stream_token("msx_test")
         mass_mock.streams = Mock()
         mass_mock.streams.get_stream = Mock(return_value=_async_iter([b"pcm"]))
-        mass_mock.streams.resolve_stream_url = AsyncMock(side_effect=RuntimeError("no session"))
+        mass_mock.streams.resolve_stream_url = AsyncMock(side_effect=InvalidDataError("no session"))
         with patch(
             "music_assistant.providers.msx_bridge.audio_stream.get_ffmpeg_stream",
             return_value=_async_iter([b"encoded"]),
@@ -1698,7 +1698,7 @@ async def test_msx_audio_accepts_queue_item_identity_without_media_item(
         token = provider.get_stream_token("msx_test")
         mass_mock.streams = Mock()
         mass_mock.streams.get_stream = Mock(return_value=_async_iter([b"pcm"]))
-        mass_mock.streams.resolve_stream_url = AsyncMock(side_effect=RuntimeError("no session"))
+        mass_mock.streams.resolve_stream_url = AsyncMock(side_effect=InvalidDataError("no session"))
         with patch(
             "music_assistant.providers.msx_bridge.audio_stream.get_ffmpeg_stream",
             return_value=_async_iter([b"encoded"]),
@@ -1735,7 +1735,7 @@ async def test_msx_audio_queue_scan_skips_items_without_a_media_item(
         token = provider.get_stream_token("msx_test")
         mass_mock.streams = Mock()
         mass_mock.streams.get_stream = Mock(return_value=_async_iter([b"pcm"]))
-        mass_mock.streams.resolve_stream_url = AsyncMock(side_effect=RuntimeError("no session"))
+        mass_mock.streams.resolve_stream_url = AsyncMock(side_effect=InvalidDataError("no session"))
         with patch(
             "music_assistant.providers.msx_bridge.audio_stream.get_ffmpeg_stream",
             return_value=_async_iter([b"encoded"]),
@@ -1786,7 +1786,7 @@ async def test_msx_audio_per_track_mode(provider: MSXBridgeProvider, mass_mock: 
 
         mass_mock.streams = Mock()
         mass_mock.streams.get_stream = Mock(return_value=_async_iter([b"pcm"]))
-        mass_mock.streams.resolve_stream_url = AsyncMock(side_effect=RuntimeError("no session"))
+        mass_mock.streams.resolve_stream_url = AsyncMock(side_effect=InvalidDataError("no session"))
 
         chunks = [b"encoded-chunk-1"]
         with patch(
@@ -1816,7 +1816,7 @@ async def test_msx_audio_plays_queued_library_item_without_play_media(
         token = provider.get_stream_token("msx_test")
         mass_mock.streams = Mock()
         mass_mock.streams.get_stream = Mock(return_value=_async_iter([b"pcm"]))
-        mass_mock.streams.resolve_stream_url = AsyncMock(side_effect=RuntimeError("no session"))
+        mass_mock.streams.resolve_stream_url = AsyncMock(side_effect=InvalidDataError("no session"))
 
         with patch(
             "music_assistant.providers.msx_bridge.audio_stream.get_ffmpeg_stream",
@@ -1842,7 +1842,7 @@ async def test_msx_audio_proxy_paces_output(provider: MSXBridgeProvider, mass_mo
         token = provider.get_stream_token("msx_test")
         mass_mock.streams = Mock()
         mass_mock.streams.get_stream = Mock(return_value=_async_iter([b"pcm"]))
-        mass_mock.streams.resolve_stream_url = AsyncMock(side_effect=RuntimeError("no session"))
+        mass_mock.streams.resolve_stream_url = AsyncMock(side_effect=InvalidDataError("no session"))
 
         with patch(
             "music_assistant.providers.msx_bridge.audio_stream.get_ffmpeg_stream",
@@ -1872,7 +1872,7 @@ async def test_msx_audio_from_playlist_skips_ws(
 
         mass_mock.streams = Mock()
         mass_mock.streams.get_stream = Mock(return_value=_async_iter([b"pcm"]))
-        mass_mock.streams.resolve_stream_url = AsyncMock(side_effect=RuntimeError("no session"))
+        mass_mock.streams.resolve_stream_url = AsyncMock(side_effect=InvalidDataError("no session"))
 
         notify_states: list[bool] = []
 
@@ -1913,7 +1913,7 @@ async def test_msx_audio_arms_wait_before_enqueue(
 
         mass_mock.streams = Mock()
         mass_mock.streams.get_stream = Mock(return_value=_async_iter([b"pcm"]))
-        mass_mock.streams.resolve_stream_url = AsyncMock(side_effect=RuntimeError("no session"))
+        mass_mock.streams.resolve_stream_url = AsyncMock(side_effect=InvalidDataError("no session"))
 
         call_order: list[str] = []
         cast("Any", player).expect_new_media = Mock(side_effect=lambda: call_order.append("arm"))
@@ -2109,6 +2109,36 @@ async def test_msx_queue_playlist_endpoint(provider: MSXBridgeProvider, mass_moc
         await client.close()
 
 
+async def test_queue_playlist_does_not_register_request_derived_player(
+    provider: MSXBridgeProvider, mass_mock: Mock
+) -> None:
+    """An explicit-player queue route must not create an IP-derived duplicate."""
+    mass_mock.player_queues.items = Mock(return_value=[])
+    provider.get_or_register_player = AsyncMock()  # type: ignore[method-assign]
+    server = MSXHTTPServer(provider, 0)
+    client = AiohttpTestClient(TestServer(server.app))
+    await client.start_server()
+    try:
+        response = await client.get("/msx/queue-playlist/msx_route.json?device_id=Living%20Room")
+        assert response.status == 200
+        provider.get_or_register_player.assert_not_awaited()
+    finally:
+        await client.close()
+
+
+@pytest.mark.parametrize("body", [[], None, "track", 1])
+async def test_api_play_rejects_non_object_json(provider: MSXBridgeProvider, body: object) -> None:
+    """Valid JSON primitives are invalid request bodies, not server errors."""
+    server = MSXHTTPServer(provider, 0)
+    client = AiohttpTestClient(TestServer(server.app))
+    await client.start_server()
+    try:
+        response = await client.post("/api/play", json=body)
+        assert response.status == 400
+    finally:
+        await client.close()
+
+
 async def test_msx_queue_playlist_with_start_index(
     provider: MSXBridgeProvider, mass_mock: Mock
 ) -> None:
@@ -2211,6 +2241,29 @@ async def test_ws_invalid_json(provider: MSXBridgeProvider) -> None:
     provider.http_server._handle_ws_message("msx_test", "not json")
 
 
+@pytest.mark.parametrize("message", ["[]", "null", '"text"', "1"])
+def test_ws_non_object_json_is_ignored(provider: MSXBridgeProvider, message: str) -> None:
+    """Valid non-object JSON must not terminate WebSocket processing."""
+    provider.http_server = MSXHTTPServer(provider, 0)
+    provider.http_server._handle_ws_message("msx_test", message)
+
+
+@pytest.mark.parametrize("position", ["NaN", "Infinity", "-1", "true"])
+def test_ws_invalid_position_is_ignored(
+    provider: MSXBridgeProvider, mass_mock: Mock, position: str
+) -> None:
+    """Non-finite, negative, and boolean positions must not mutate player state."""
+    player = MSXPlayer(provider, "msx_test", name="Test TV", output_format="mp3")
+    player._attr_playback_state = PlaybackState.PLAYING
+    player._attr_elapsed_time = 10.0
+    mass_mock.players.get_player.return_value = player
+    server = MSXHTTPServer(provider, 0)
+
+    server._handle_ws_message("msx_test", f'{{"type":"position","position":{position}}}')
+
+    assert player._attr_elapsed_time == 10.0
+
+
 async def test_ws_pause_message(provider: MSXBridgeProvider, mass_mock: Mock) -> None:
     """WS pause message should update position and call cmd_pause."""
     player = MSXPlayer(provider, "msx_test", name="Test TV", output_format="mp3")
@@ -2297,6 +2350,35 @@ async def test_server_stop_survives_ws_self_deregistration(
     await server.stop()
 
     assert server._ws_clients == {}
+
+
+async def test_server_stop_cancels_party_cover_tasks(provider: MSXBridgeProvider) -> None:
+    """HTTP shutdown must not leave Party cover work using the old provider."""
+    server = MSXHTTPServer(provider, 0)
+    started = asyncio.Event()
+
+    async def _render_forever(*_args: object) -> bytes:
+        started.set()
+        await asyncio.Event().wait()
+        return b"unreachable"
+
+    with patch.object(server.party, "_fetch_and_render_cover", _render_forever):
+        task = server.party.qr_cover_task(("cover", "v1"), "cover", "join")
+        await started.wait()
+        await server.stop()
+
+    assert task.cancelled()
+    assert server.party.qr_cover_inflight == {}
+
+
+async def test_server_stop_clears_client_prefixes(provider: MSXBridgeProvider) -> None:
+    """Shutdown must discard addresses learned from old WebSocket clients."""
+    server = MSXHTTPServer(provider, 0)
+    server._client_prefixes["msx_test"] = "http://old-host:8099"
+
+    await server.stop()
+
+    assert server._client_prefixes == {}
 
 
 # --- Redirect stream mode (MA streamserver) ---
@@ -2390,7 +2472,7 @@ async def test_msx_audio_redirect_mode_falls_back_to_proxy(
         token = provider.get_stream_token("msx_test")
 
         mass_mock.streams = Mock()
-        mass_mock.streams.resolve_stream_url = AsyncMock(side_effect=RuntimeError("boom"))
+        mass_mock.streams.resolve_stream_url = AsyncMock(side_effect=InvalidDataError("boom"))
         mass_mock.streams.get_stream = Mock(return_value=_async_iter([b"pcm"]))
         filter_params = ["volume=0.5"]
         mass_mock.streams.audio.get_player_output_plan.return_value = Mock(
