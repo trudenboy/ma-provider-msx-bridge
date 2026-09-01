@@ -224,6 +224,44 @@ async def test_qr_cover_concurrent_misses_coalesce(
         await client.close()
 
 
+async def test_qr_cover_rejects_excess_unique_renders(
+    provider: MSXBridgeProvider, mass_mock: Mock
+) -> None:
+    """A third unique render redirects while both bounded slots are occupied."""
+    mass_mock.get_provider = Mock(return_value=_party_mock())
+    mass_mock.webserver.base_url = "http://ma.local:8095"
+    release = asyncio.Event()
+    mass_mock.http_session = _slow_http_session_mock(_black_cover_png(), release)
+    server = MSXHTTPServer(provider, 0)
+    client = AiohttpTestClient(TestServer(server.app))
+    await client.start_server()
+    urls = [f"{COVER_URL}&id={index}" for index in range(3)]
+    try:
+        first = asyncio.create_task(
+            client.get("/api/party/qr-cover.png", params={"image": urls[0]}, allow_redirects=False)
+        )
+        second = asyncio.create_task(
+            client.get("/api/party/qr-cover.png", params={"image": urls[1]}, allow_redirects=False)
+        )
+        while len(server.party.qr_cover_inflight) < 2:
+            await asyncio.sleep(0)
+
+        excess = await client.get(
+            "/api/party/qr-cover.png", params={"image": urls[2]}, allow_redirects=False
+        )
+
+        assert excess.status == 302
+        assert excess.headers["Location"] == urls[2]
+        assert len(server.party.qr_cover_inflight) == 2
+        assert mass_mock.http_session.get.call_count == 2
+        release.set()
+        completed = await asyncio.gather(first, second)
+        assert all(response.status == 200 for response in completed)
+    finally:
+        release.set()
+        await client.close()
+
+
 async def test_qr_cover_render_survives_requester_cancellation(
     provider: MSXBridgeProvider, mass_mock: Mock
 ) -> None:
