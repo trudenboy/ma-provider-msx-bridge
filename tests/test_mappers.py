@@ -42,15 +42,15 @@ def test_map_track_to_msx() -> None:
         player_id="msx_123",
         provider=prov,
         device_param="device_id=abc",
+        context_uri=track.uri,
     )
 
     assert item.title_header == "{txt:msx-white:Test Track}"
     assert item.title_footer == "Test Artist · 2:05"
     assert item.image == "http://image.url"
     assert item.action is not None
-    assert "audio:http://localhost/msx/audio/msx_123" in item.action
+    assert item.action.startswith("execute:http://localhost/api/play-context/msx_123")
     assert "uri=library%3A%2F%2Ftrack%2F1" in item.action
-    assert "token=tok123" in item.action
     assert "device_id=abc" in item.action
     assert item.properties is not None
     assert item.properties["trigger:complete"] == "execute:http://localhost/api/next/msx_123"
@@ -82,6 +82,41 @@ def test_map_track_to_msx_play_context() -> None:
     assert "start=3" in item.action
     assert "track=library%3A%2F%2Ftrack%2F1" in item.action
     assert "device_id=abc" in item.action
+
+
+def test_map_track_to_msx_native_playlist() -> None:
+    """A native playlist track keeps its playlist action."""
+    prov = _mock_provider()
+    track = MagicMock(spec=Track)
+    track.name = "Test Track"
+    track.uri = "library://track/1"
+    track.duration = 125
+    track.artist_str = "Test Artist"
+    track.image = None
+
+    item = map_track_to_msx(
+        track,
+        "http://localhost",
+        "msx_123",
+        prov,
+        playlist_url="http://localhost/msx/playlist/album/9.json",
+    )
+
+    assert item.action == "playlist:http://localhost/msx/playlist/album/9.json"
+
+
+def test_map_track_to_msx_requires_playback_context() -> None:
+    """A menu track must identify how its queue will be prepared."""
+    prov = _mock_provider()
+    track = MagicMock(spec=Track)
+    track.name = "Test Track"
+    track.uri = "library://track/1"
+    track.duration = 125
+    track.artist_str = "Test Artist"
+    track.image = None
+
+    with pytest.raises(ValueError, match="context_uri or playlist_url"):
+        map_track_to_msx(track, "http://localhost", "msx_123", prov)
 
 
 @pytest.mark.asyncio

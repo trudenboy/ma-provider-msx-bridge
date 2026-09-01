@@ -14,9 +14,13 @@ from urllib.parse import quote
 import aiohttp
 from aiohttp import WSMsgType, web
 from music_assistant_models.enums import RepeatMode
-from music_assistant_models.errors import MusicAssistantError
+from music_assistant_models.errors import (
+    InvalidDataError,
+    MusicAssistantError,
+    ResourceTemporarilyUnavailable,
+)
 
-from .audio_stream import AudioPipeline, build_audio_params, resolve_served_duration
+from .audio_stream import AudioPipeline, resolve_served_duration
 from .constants import (
     CONF_SHOW_STOP_NOTIFICATION,
     DEFAULT_SHOW_STOP_NOTIFICATION,
@@ -40,7 +44,6 @@ from .models import MsxContent, MsxItem, MsxTemplate
 from .party import PartyAdapter, PartyInfo, render_qr, stamp_qr_on_cover
 from .player import MSXPlayer
 from .queue_handshake import (
-    PrepareFailure,
     find_uri_in_active_queue,
     is_media_item_uri,
     prepare_msx_audio,
@@ -1211,15 +1214,18 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
             return web.Response(status=404, text="Player not found")
         if rejected := self._reject_invalid_stream_token(request, player_id):
             return rejected
-        prepared = await prepare_msx_audio(
-            self.provider,
-            player,
-            uri,
-            from_playlist=from_playlist,
-            queue_item_id=requested_queue_item_id,
-        )
-        if isinstance(prepared, PrepareFailure):
-            return web.Response(status=prepared.status, text=prepared.text)
+        try:
+            prepared = await prepare_msx_audio(
+                self.provider,
+                player,
+                uri,
+                from_playlist=from_playlist,
+                queue_item_id=requested_queue_item_id,
+            )
+        except InvalidDataError as err:
+            return web.Response(status=400, text=str(err))
+        except ResourceTemporarilyUnavailable as err:
+            return web.Response(status=504, text=str(err))
 
         return await self._serve_audio_stream(
             request,
@@ -1234,13 +1240,6 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
         """Return the length in seconds of the audio served for the given media."""
         return resolve_served_duration(self.provider.mass, media)
 
-    @staticmethod
-    def _build_audio_params(
-        output_format_str: str, duration: int
-    ) -> tuple[Any, Any, dict[str, str]]:
-        """Build PCM input format, encoded output format, and HTTP headers."""
-        return build_audio_params(output_format_str, duration)
-
     async def _serve_audio_stream(
         self,
         request: web.Request,
@@ -1250,21 +1249,6 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
     ) -> web.StreamResponse:
         """Serve this player's current media on this request."""
         return await self.audio.serve(request, player, media, duration)
-
-    async def _serve_shared_stream(
-        self,
-        request: web.Request,
-        player: MSXPlayer,
-        media: Any,
-        group_id: str,
-        pcm_format: Any,
-        out_format: Any,
-        headers: dict[str, str],
-    ) -> web.StreamResponse:
-        """Serve audio from a shared group stream."""
-        return await self.audio.serve_shared(
-            request, player, media, group_id, pcm_format, out_format, headers
-        )
 
     async def _serve_independent_stream(
         self,

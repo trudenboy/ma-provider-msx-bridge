@@ -475,13 +475,10 @@ class MSXPlayer(Player):
         """Return the queue length, or fallback when the controller cannot be read."""
         try:
             queue = self.mass.player_queues.get(source_id)
-            limit = getattr(queue, "items", None)
-            return len(
-                self.mass.player_queues.items(
-                    source_id, limit=limit if isinstance(limit, int) and limit > 0 else 500
-                )
-            )
-        except TypeError, AttributeError, MusicAssistantError:
+            if queue is None:
+                return fallback
+            return len(self.mass.player_queues.items(source_id, limit=queue.items))
+        except MusicAssistantError:
             self.logger.debug("Failed to get queue size for %s", source_id, exc_info=True)
             return fallback
 

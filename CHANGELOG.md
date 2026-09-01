@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.25] - 2026-09-01
+
+### Changed
+
+- Queue playback now uses Music Assistant's concrete queue models and typed errors instead of test-double fallbacks and HTTP-shaped results.
+- Track menu actions now require an explicit queue context or native playlist URL.
+
+### Removed
+
+- Unused HTTP audio wrappers that duplicated the audio pipeline interface.
+
 ## [1.4.24] - 2026-08-28
 
 ### Fixed

@@ -11,8 +11,7 @@ import pytest
 from music_assistant_models.enums import ContentType
 from music_assistant_models.media_items import AudioFormat
 
-from music_assistant.providers.msx_bridge.audio_stream import AudioPipeline
-from music_assistant.providers.msx_bridge.http_server import MSXHTTPServer
+from music_assistant.providers.msx_bridge.audio_stream import READRATE_ARGS, AudioPipeline
 from music_assistant.providers.msx_bridge.player import MSXPlayer
 from music_assistant.providers.msx_bridge.provider import SharedGroupStream
 
@@ -192,7 +191,7 @@ async def test_resubscribe_same_player_ends_prior_without_detaching_new() -> Non
 
 async def test_shared_stream_paces_output(provider: MSXBridgeProvider, mass_mock: Mock) -> None:
     """The shared group encoder carries the same pacing ceiling as the per-player one."""
-    server = MSXHTTPServer(provider, 0)
+    pipeline = AudioPipeline(provider)
     player = MagicMock(spec=MSXPlayer)
     player.player_id = "msx_leader"
     media = Mock(source_id=None, queue_item_id=None)
@@ -215,11 +214,9 @@ async def test_shared_stream_paces_output(provider: MSXBridgeProvider, mass_mock
         pytest.raises(RuntimeError),
     ):
         # leader path: player_id == group_id
-        await server._serve_shared_stream(Mock(), player, media, "msx_leader", pcm, out, {})
+        await pipeline.serve_shared(Mock(), player, media, "msx_leader", pcm, out, {})
 
-    extra_args = ffmpeg_mock.call_args.kwargs["extra_input_args"]
-    assert "-readrate" in extra_args
-    assert "-readrate_initial_burst" in extra_args
+    assert ffmpeg_mock.call_args.kwargs["extra_input_args"] == READRATE_ARGS
 
 
 async def _boom_after(chunk: bytes) -> AsyncIterator[bytes]:

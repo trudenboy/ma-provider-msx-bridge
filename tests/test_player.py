@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 from music_assistant_models.enums import PlaybackState, PlayerFeature, PlayerType
 from music_assistant_models.player import PlayerMedia
+from music_assistant_models.player_queue import PlayerQueue
 
 from music_assistant.controllers.players.constants import PlayerLockPurpose
 from provider.player import MSXPlayer
@@ -511,8 +512,14 @@ async def test_play_media_queue_sends_playlist(player: MSXPlayer, mass_mock: Moc
     media.source_id = "msx_test"
     media.queue_item_id = "qi1"
 
-    queue = Mock()
-    queue.current_index = 2
+    queue = PlayerQueue(
+        queue_id="msx_test",
+        active=True,
+        display_name="Test queue",
+        available=True,
+        items=5,
+        current_index=2,
+    )
 
     mass_mock.player_queues.get.return_value = queue
     mass_mock.player_queues.get_item.return_value = None
@@ -535,6 +542,7 @@ async def test_play_media_queue_sends_playlist(player: MSXPlayer, mass_mock: Moc
     assert player._playing_from_queue is True
     assert player._playlist_offset == 2
     assert player._playlist_size == 5
+    mass_mock.player_queues.items.assert_called_once_with("msx_test", limit=5)
 
 
 async def test_play_media_reloads_playlist_when_playing_from_queue(
@@ -555,8 +563,14 @@ async def test_play_media_reloads_playlist_when_playing_from_queue(
     media.source_id = "msx_test"
     media.queue_item_id = "qi2"
 
-    queue = Mock()
-    queue.current_index = 3
+    queue = PlayerQueue(
+        queue_id="msx_test",
+        active=True,
+        display_name="Test queue",
+        available=True,
+        items=5,
+        current_index=3,
+    )
 
     mass_mock.player_queues.get.return_value = queue
     mass_mock.player_queues.get_item.return_value = None
@@ -572,6 +586,7 @@ async def test_play_media_reloads_playlist_when_playing_from_queue(
     mock_goto.assert_not_called()
     mock_playlist.assert_called_once_with("msx_test", 3, queue_id="msx_test")
     mock_play.assert_not_called()
+    mass_mock.player_queues.items.assert_called_once_with("msx_test", limit=5)
 
 
 async def test_play_media_skips_ws_when_skip_notify_set(player: MSXPlayer, mass_mock: Mock) -> None:
