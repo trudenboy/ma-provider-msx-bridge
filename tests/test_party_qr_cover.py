@@ -133,6 +133,27 @@ def test_stamp_qr_on_cover_composites() -> None:
     assert any(px == (255, 255, 255) for px in list(quadrant.getdata()))
 
 
+def test_stamp_qr_on_cover_resizes_large_cover() -> None:
+    """Large decoded covers are reduced before compositing and caching."""
+    stamped = _stamp_qr_on_cover(_black_cover_png(2048), _qr_png())
+
+    assert Image.open(io.BytesIO(stamped)).size == (1024, 1024)
+
+
+def test_qr_cover_cache_enforces_byte_budget(
+    provider: MSXBridgeProvider, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Rendered covers evict least-recently-used entries by total bytes."""
+    monkeypatch.setattr(party_module, "COVER_CACHE_MAX_BYTES", 10)
+    server = MSXHTTPServer(provider, 0)
+
+    server.party._cache_qr_cover(("first", "v1"), b"123456")
+    server.party._cache_qr_cover(("second", "v1"), b"abcdef")
+
+    assert list(server.party.qr_cover_cache) == [("second", "v1")]
+    assert server.party._qr_cover_cache_bytes == 6
+
+
 # --- /api/party/qr-cover.png endpoint ---
 
 

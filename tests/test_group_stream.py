@@ -73,6 +73,20 @@ async def test_late_joiner_with_empty_stream_does_not_hang() -> None:
     assert result == []
 
 
+async def test_stop_before_producer_runs_wakes_subscribers() -> None:
+    """Immediate stop must wake subscribers even if the producer never entered."""
+    stream = SharedGroupStream("g1", "uri://test")
+    await stream.start(_chunks(b"never"))
+    assert stream.producer_task is not None
+
+    await stream.stop()
+
+    assert stream.finished is True
+    assert stream.started.is_set()
+    result = await asyncio.wait_for(_collect(stream, "late"), timeout=0.5)
+    assert result == []
+
+
 async def test_concurrent_subscribers_receive_live_chunks() -> None:
     """Multiple subscribers joining before stream starts all receive all chunks."""
     stream = SharedGroupStream("g1", "uri://test")

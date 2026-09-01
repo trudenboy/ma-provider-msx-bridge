@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.4] - 2026-09-01
+
+### Fixed
+
+- Stopping a shared stream before its producer starts now wakes waiting subscribers immediately.
+- Queue and container playback no longer clamp valid start indexes above 10,000.
+
+### Security
+
+- Party covers are resized before compositing and retained in a byte-bounded LRU cache.
+
 ## [1.5.3] - 2026-09-01
 
 ### Security

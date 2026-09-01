@@ -8,6 +8,7 @@ import hashlib
 import io
 import logging
 import time
+from collections import OrderedDict
 from typing import TYPE_CHECKING, Any, NamedTuple, cast
 from urllib.parse import quote, urlsplit
 
@@ -26,6 +27,8 @@ PARTY_CACHE_TTL = 10.0
 PARTY_CALL_TIMEOUT = 5.0
 COVER_FETCH_MAX_BYTES = 2 * 1024 * 1024
 COVER_MAX_PIXELS = 4096 * 4096
+COVER_OUTPUT_MAX_SIZE = 1024
+COVER_CACHE_MAX_BYTES = 16 * 1024 * 1024
 MAX_CONCURRENT_COVER_RENDERS = 2
 
 
@@ -45,7 +48,8 @@ class PartyAdapter:
         """Initialize the adapter."""
         self.provider = provider
         self.cache: tuple[float, PartyInfo | None] | None = None
-        self.qr_cover_cache: dict[tuple[str, str], bytes] = {}
+        self.qr_cover_cache: OrderedDict[tuple[str, str], bytes] = OrderedDict()
+        self._qr_cover_cache_bytes = 0
         self.qr_cover_inflight: dict[tuple[str, str], asyncio.Task[bytes]] = {}
         self._cover_render_slots = asyncio.Semaphore(MAX_CONCURRENT_COVER_RENDERS)
 
@@ -143,7 +147,9 @@ class PartyAdapter:
         if party is None:
             raise web.HTTPFound(location=image_url)
         cache_key = (image_url, party.qr_version)
-        if (cached := self.qr_cover_cache.get(cache_key)) is None:
+        if (cached := self.qr_cover_cache.get(cache_key)) is not None:
+            self.qr_cover_cache.move_to_end(cache_key)
+        else:
             if (
                 cache_key not in self.qr_cover_inflight
                 and len(self.qr_cover_inflight) >= MAX_CONCURRENT_COVER_RENDERS
@@ -198,10 +204,22 @@ class PartyAdapter:
                         raise ValueError("cover exceeds size limit")
                 cover_bytes = await _read_capped(resp, COVER_FETCH_MAX_BYTES)
             rendered = await asyncio.to_thread(render_qr_cover, join_url, cover_bytes)
-        if len(self.qr_cover_cache) >= 32:
-            self.qr_cover_cache.clear()
-        self.qr_cover_cache[cache_key] = rendered
+        self._cache_qr_cover(cache_key, rendered)
         return rendered
+
+    def _cache_qr_cover(self, cache_key: tuple[str, str], rendered: bytes) -> None:
+        """Store a rendered cover while keeping the cache within its byte budget."""
+        if previous := self.qr_cover_cache.pop(cache_key, None):
+            self._qr_cover_cache_bytes -= len(previous)
+        while (
+            self.qr_cover_cache
+            and self._qr_cover_cache_bytes + len(rendered) > COVER_CACHE_MAX_BYTES
+        ):
+            _, evicted = self.qr_cover_cache.popitem(last=False)
+            self._qr_cover_cache_bytes -= len(evicted)
+        if len(rendered) <= COVER_CACHE_MAX_BYTES:
+            self.qr_cover_cache[cache_key] = rendered
+            self._qr_cover_cache_bytes += len(rendered)
 
 
 @functools.lru_cache(maxsize=4)
@@ -257,6 +275,10 @@ def stamp_qr_on_cover(cover_bytes: bytes, qr_bytes: bytes) -> bytes:
         qr = _open_rgb_image(qr_bytes)
     except (Image.DecompressionBombError, Image.DecompressionBombWarning) as err:
         raise ValueError("image exceeds Pillow decompression limit") from err
+    cover.thumbnail(
+        (COVER_OUTPUT_MAX_SIZE, COVER_OUTPUT_MAX_SIZE),
+        Image.Resampling.LANCZOS,
+    )
     side = max(48, min(cover.width, cover.height) * 28 // 100)
     qr = qr.resize((side, side), Image.Resampling.NEAREST)
     margin = side // 8

@@ -92,6 +92,14 @@ def _int_param(query: MultiMapping[str], name: str, default: int, max_val: int =
         return default
 
 
+def _non_negative_int_param(query: MultiMapping[str], name: str, default: int) -> int:
+    """Parse a non-negative integer query parameter without an arbitrary ceiling."""
+    try:
+        return max(0, int(query.get(name, str(default))))
+    except ValueError, TypeError:
+        return default
+
+
 def _is_audio_path(path: str) -> bool:
     """Check whether the path is one of the audio routes."""
     return path.startswith(("/stream/", "/msx/audio/"))
@@ -1191,7 +1199,7 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
         queue_id = request.query.get("queue_id", player_id)
         queue = self.provider.mass.player_queues.get(queue_id)
         if "start" in request.query:
-            start = _int_param(request.query, "start", 0)
+            start = _non_negative_int_param(request.query, "start", 0)
         else:
             start = int(getattr(queue, "current_index", 0) or 0)
 
@@ -1669,7 +1677,7 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
         uri = request.query.get("uri")
         if not isinstance(uri, str) or not uri or not await is_media_item_uri(uri):
             return _msx_execute_error(400, "Invalid uri")
-        start = _int_param(request.query, "start", 0)
+        start = _non_negative_int_param(request.query, "start", 0)
         track_uri = request.query.get("track")
         if track_uri and not await is_media_item_uri(track_uri):
             track_uri = None

@@ -505,6 +505,30 @@ async def test_play_context_enqueues_container_then_index(
         await client.close()
 
 
+async def test_play_context_preserves_index_above_ten_thousand(
+    provider: MSXBridgeProvider, mass_mock: Mock
+) -> None:
+    """Container playback must not clamp a valid long-queue index."""
+    player = _register_msx_player(mass_mock, provider, "msx_test")
+    items = [
+        _make_queue_item(f"library://track/{index}", queue_item_id=str(index))
+        for index in range(12002)
+    ]
+    _wire_queue(mass_mock, items)
+    server = MSXHTTPServer(provider, 0)
+    client = AiohttpTestClient(TestServer(server.app))
+    await client.start_server()
+    try:
+        with patch.object(player, "wait_for_media", AsyncMock(return_value=player.current_media)):
+            response = await client.get(
+                "/api/play-context/msx_test?uri=library://album/9&start=12001"
+            )
+        assert response.status == 200
+        mass_mock.player_queues.play_index.assert_awaited_once_with("msx_test", "12001")
+    finally:
+        await client.close()
+
+
 async def test_play_context_starts_at_track_uri(
     provider: MSXBridgeProvider, mass_mock: Mock
 ) -> None:
@@ -2202,6 +2226,27 @@ async def test_msx_queue_playlist_with_start_index(
         assert resp.status == 200
         data = await resp.json()
         assert data["action"] == "player:play"
+    finally:
+        await client.close()
+
+
+async def test_msx_queue_playlist_preserves_start_above_ten_thousand(
+    provider: MSXBridgeProvider, mass_mock: Mock
+) -> None:
+    """Queue playlist rotation must not clamp a valid long-queue index."""
+    items = [
+        _make_queue_item(f"library://track/{index}", queue_item_id=str(index))
+        for index in range(12002)
+    ]
+    _wire_queue(mass_mock, items)
+    server = MSXHTTPServer(provider, 0)
+    client = AiohttpTestClient(TestServer(server.app))
+    await client.start_server()
+    try:
+        response = await client.get("/msx/queue-playlist/msx_test.json?start=12001")
+        assert response.status == 200
+        data = await response.json()
+        assert "queue_item_id=12001" in data["items"][0]["action"]
     finally:
         await client.close()
 
