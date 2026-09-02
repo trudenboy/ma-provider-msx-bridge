@@ -14,13 +14,10 @@ from urllib.parse import urlsplit, urlunsplit
 from aiohttp import web
 from music_assistant_models.enums import ContentType
 from music_assistant_models.errors import MusicAssistantError
-from music_assistant_models.media_items import AudioFormat
+from music_assistant_models.media_items import AudioFormat, Track
 
 from music_assistant.controllers.streams.audio_processing import get_media_session_id
-from music_assistant.controllers.streams.constants import (
-    SINGLE_ITEM_READRATE,
-    SINGLE_ITEM_READRATE_INITIAL_BURST,
-)
+from music_assistant.controllers.streams.constants import output_pacing_args
 from music_assistant.helpers.ffmpeg import get_ffmpeg_stream
 
 from .constants import PRE_BUFFER_BYTES
@@ -30,18 +27,14 @@ if TYPE_CHECKING:
 
     from music_assistant.controllers.streams.audio_processing import AudioOutputPlan
     from music_assistant.helpers.dsp import ComplexFilter
+    from music_assistant.mass import MusicAssistant
 
     from .player import MSXPlayer
     from .provider import MSXBridgeProvider
 
 logger = logging.getLogger(__name__)
 
-READRATE_ARGS = [
-    "-readrate",
-    SINGLE_ITEM_READRATE,
-    "-readrate_initial_burst",
-    SINGLE_ITEM_READRATE_INITIAL_BURST,
-]
+READRATE_ARGS = output_pacing_args()
 
 
 class SharedGroupStream:
@@ -98,8 +91,7 @@ class SharedGroupStream:
         """
         Subscribe to stream, get buffered + live chunks.
 
-        Yields:
-            Audio chunks (bytes). First yields catch-up buffer, then live chunks.
+        :yield: Audio chunks, first from the catch-up buffer and then live output.
         """
         q: asyncio.Queue[bytes | None] = asyncio.Queue(maxsize=512)
 
@@ -328,7 +320,7 @@ class AudioPipeline:
         self,
         request: web.Request,
         player: MSXPlayer,
-        media: Any,
+        media: PlayerMedia,
         duration: int = 0,
     ) -> web.StreamResponse:
         """Serve this player's current media on this request."""
@@ -383,7 +375,7 @@ class AudioPipeline:
         self,
         request: web.Request,
         player: MSXPlayer,
-        media: Any,
+        media: PlayerMedia,
         group_id: str,
         pcm_format: AudioFormat,
         out_format: AudioFormat,
@@ -391,15 +383,15 @@ class AudioPipeline:
     ) -> web.StreamResponse:
         """Serve audio from a shared group stream."""
         player_id = player.player_id
-        media_uri = getattr(media, "uri", "") or str(media)
-        session_id = get_media_session_id(media) or getattr(media, "queue_item_id", None) or ""
+        media_uri = media.uri
+        session_id = get_media_session_id(media) or media.queue_item_id or ""
         output_plan = self.provider.mass.streams.audio.get_player_output_plan(
             player_id,
             pcm_format,
             out_format,
-            queue_id=getattr(media, "source_id", None),
+            queue_id=media.source_id,
             session_id=get_media_session_id(media),
-            queue_item_id=getattr(media, "queue_item_id", None),
+            queue_item_id=media.queue_item_id,
         )
 
         existing_stream = self.provider.get_shared_stream(group_id)
@@ -476,16 +468,16 @@ class AudioPipeline:
                     request, player, media, pcm_format, out_format, headers
                 )
 
-        queue_id = getattr(media, "source_id", None)
-        session_id = get_media_session_id(media)
+        queue_id = media.source_id
+        media_session_id = get_media_session_id(media)
         assert shared_stream is not None
-        if queue_id is not None and session_id is not None:
+        if queue_id is not None and media_session_id is not None:
             self.provider.mass.streams.audio_processing.update_output(
                 player_id,
                 output_plan,
                 queue_id=queue_id,
-                session_id=session_id,
-                queue_item_id=getattr(media, "queue_item_id", None),
+                session_id=media_session_id,
+                queue_item_id=media.queue_item_id,
             )
 
         return await self._write_shared_response(request, player_id, shared_stream, headers)
@@ -494,7 +486,7 @@ class AudioPipeline:
         self,
         request: web.Request,
         player: MSXPlayer,
-        media: Any,
+        media: PlayerMedia,
         pcm_format: AudioFormat,
         out_format: AudioFormat,
         headers: dict[str, str],
@@ -510,9 +502,9 @@ class AudioPipeline:
             player_id,
             pcm_format,
             out_format,
-            queue_id=getattr(media, "source_id", None),
+            queue_id=media.source_id,
             session_id=get_media_session_id(media),
-            queue_item_id=getattr(media, "queue_item_id", None),
+            queue_item_id=media.queue_item_id,
         )
 
         response = web.StreamResponse(status=200, headers=headers)
@@ -809,14 +801,14 @@ def build_audio_params(
     return pcm_format, out_format, headers
 
 
-def resolve_served_duration(mass: Any, media: PlayerMedia) -> int:
+def resolve_served_duration(mass: MusicAssistant, media: PlayerMedia) -> int:
     """Return the length in seconds of the audio served for the given media."""
     duration = media.stream_duration or media.duration or 0
     if not duration and media.source_id and media.queue_item_id:
         queue_item = mass.player_queues.get_item(media.source_id, media.queue_item_id)
         if queue_item:
-            if queue_item.media_item:
-                duration = getattr(queue_item.media_item, "duration", None) or duration
+            if isinstance(queue_item.media_item, Track):
+                duration = queue_item.media_item.duration or duration
             if not duration and queue_item.duration:
                 duration = queue_item.duration
     return int(duration)

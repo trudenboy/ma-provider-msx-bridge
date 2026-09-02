@@ -3,19 +3,65 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
 from music_assistant_models.errors import MusicAssistantError
+from music_assistant_models.media_items import (
+    Album,
+    Artist,
+    ItemMapping,
+    MediaItem,
+    Playlist,
+    Track,
+)
 
 from .models import MsxContent, MsxItem, MsxTemplate
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Iterable, Sequence
+
+    from music_assistant_models.media_items import (
+        MediaItemImage,
+        PlayableMediaItemType,
+    )
 
     from .provider import MSXBridgeProvider
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class PlaylistTrack:
+    """Playback metadata needed to render one MSX native playlist item."""
+
+    name: str
+    uri: str
+    duration: int
+    artist: str
+    image: MediaItemImage | None
+    queue_item_id: str | None = None
+
+
+def playlist_tracks_from_media_items(
+    items: Iterable[PlayableMediaItemType | ItemMapping],
+) -> list[PlaylistTrack]:
+    """Adapt playable MA media items for MSX native playlist rendering."""
+    tracks: list[PlaylistTrack] = []
+    for item in items:
+        if item.uri is None:
+            continue
+        tracks.append(
+            PlaylistTrack(
+                name=item.name,
+                uri=item.uri,
+                duration=0 if isinstance(item, ItemMapping) else item.duration or 0,
+                artist=item.artist_str if isinstance(item, Track) else "",
+                image=item.image,
+            )
+        )
+    return tracks
 
 
 def queue_nav_properties(player_id: str, prefix: str = "") -> dict[str, str]:
@@ -60,7 +106,7 @@ def play_context_action(
     return f"execute:{append_device_param(url, device_param)}"
 
 
-def sort_album_tracks(tracks: list[Any]) -> list[Any]:
+def sort_album_tracks(tracks: list[Track]) -> list[Track]:
     """
     Sort album tracks deterministically.
 
@@ -70,10 +116,10 @@ def sort_album_tracks(tracks: list[Any]) -> list[Any]:
     return sorted(
         tracks,
         key=lambda t: (
-            getattr(t, "disc_number", 0) or 0,
-            getattr(t, "track_number", 0) or 0,
-            getattr(t, "name", "") or "",
-            getattr(t, "uri", "") or getattr(t, "item_id", "") or "",
+            t.disc_number,
+            t.track_number,
+            t.name,
+            t.uri or t.item_id,
         ),
     )
 
@@ -108,7 +154,11 @@ def msx_list_page(
     )
 
 
-def get_image_url(item: Any, provider: MSXBridgeProvider, prefer_proxy: bool = False) -> str | None:
+def get_image_url(
+    item: MediaItem | ItemMapping | PlaylistTrack,
+    provider: MSXBridgeProvider,
+    prefer_proxy: bool = False,
+) -> str | None:
     """
     Get an image URL for a media item.
 
@@ -116,17 +166,17 @@ def get_image_url(item: Any, provider: MSXBridgeProvider, prefer_proxy: bool = F
         points at the MA server (rather than a remote CDN). Needed for the
         party QR-cover compositor, which only accepts MA-hosted sources.
     """
-    if hasattr(item, "image") and item.image:
+    if item.image:
         return provider.mass.metadata.get_image_url(item.image, prefer_proxy=prefer_proxy)
     return None
 
 
-async def get_album_image_fallback(album: Any, provider: MSXBridgeProvider) -> str | None:
+async def get_album_image_fallback(album: Album, provider: MSXBridgeProvider) -> str | None:
     """Get album image from its first track (albums often lack metadata images)."""
     try:
         tracks = await provider.mass.music.albums.tracks(album.item_id, album.provider)
         for track in tracks:
-            if hasattr(track, "image") and track.image:
+            if track.image:
                 return provider.mass.metadata.get_image_url(track.image)
     except MusicAssistantError, TimeoutError:
         logger.debug("Failed to fetch album image fallback for %s", album.item_id)
@@ -134,15 +184,15 @@ async def get_album_image_fallback(album: Any, provider: MSXBridgeProvider) -> s
 
 
 async def map_album_to_msx(
-    album: Any, prefix: str, provider: MSXBridgeProvider, device_param: str = ""
+    album: Album | ItemMapping, prefix: str, provider: MSXBridgeProvider, device_param: str = ""
 ) -> MsxItem:
     """Map a MA Album to an MSX Item."""
     image = get_image_url(album, provider)
-    if not image:
+    if not image and isinstance(album, Album):
         image = await get_album_image_fallback(album, provider)
 
-    artist = getattr(album, "artist_str", "")
-    year = getattr(album, "year", None)
+    artist = album.artist_str if isinstance(album, Album) else ""
+    year = album.year
     # Build footer: "Artist · 2024" or just one
     footer: str | None = (
         f"{artist} · {year}" if artist and year else (artist or (str(year) if year else None))
@@ -157,10 +207,13 @@ async def map_album_to_msx(
 
 
 def map_artist_to_msx(
-    artist: Any, prefix: str, provider: MSXBridgeProvider, device_param: str = ""
+    artist: Artist | ItemMapping, prefix: str, provider: MSXBridgeProvider, device_param: str = ""
 ) -> MsxItem:
     """Map a MA Artist to an MSX Item."""
-    url = f"{prefix}/msx/artists/{artist.item_id}/albums.json"
+    url = (
+        f"{prefix}/msx/artists/{artist.item_id}/albums.json?"
+        f"provider={quote(str(artist.provider), safe='')}"
+    )
     return MsxItem(
         title=artist.name,
         image=get_image_url(artist, provider),
@@ -169,11 +222,14 @@ def map_artist_to_msx(
 
 
 def map_playlist_to_msx(
-    playlist: Any, prefix: str, provider: MSXBridgeProvider, device_param: str = ""
+    playlist: Playlist | ItemMapping,
+    prefix: str,
+    provider: MSXBridgeProvider,
+    device_param: str = "",
 ) -> MsxItem:
     """Map a MA Playlist to an MSX Item."""
-    owner = getattr(playlist, "owner", None)
-    prov = getattr(playlist, "provider", None)
+    owner = playlist.owner if isinstance(playlist, Playlist) else ""
+    prov = playlist.provider
     footer: str | None = f"{owner} · {prov}" if owner and prov else (owner or prov or None)
     url = f"{prefix}/msx/playlists/{playlist.item_id}/tracks.json"
     return MsxItem(
@@ -205,19 +261,19 @@ def _build_audio_action(
 
 
 def map_track_to_msx(
-    track: Any,
+    track: PlayableMediaItemType | ItemMapping,
     prefix: str,
     player_id: str,
     provider: MSXBridgeProvider,
     device_param: str = "",
-    playlist_url: str | None = None,
-    context_uri: str | None = None,
+    *,
+    context_uri: str,
     context_start: int = 0,
 ) -> MsxItem:
     """Map a MA Track to an MSX Item."""
-    duration = getattr(track, "duration", 0) or 0
+    duration = track.duration if isinstance(track, Track) else 0
     duration_str = f"{duration // 60}:{duration % 60:02d}" if duration else ""
-    artist = getattr(track, "artist_str", "")
+    artist = track.artist_str if isinstance(track, Track) else ""
     image_url = get_image_url(track, provider)
 
     footer: str | None = (
@@ -227,19 +283,14 @@ def map_track_to_msx(
     )
 
     nav = queue_nav_properties(player_id, prefix)
-    if context_uri:
-        action = play_context_action(
-            prefix,
-            player_id,
-            context_uri,
-            context_start,
-            device_param,
-            track_uri=getattr(track, "uri", None),
-        )
-    elif playlist_url:
-        action = f"playlist:{playlist_url}"
-    else:
-        raise ValueError("context_uri or playlist_url is required")
+    action = play_context_action(
+        prefix,
+        player_id,
+        context_uri,
+        context_start,
+        device_param,
+        track_uri=track.uri,
+    )
 
     return MsxItem(
         title_header="{txt:msx-white:" + track.name + "}",
@@ -256,7 +307,7 @@ def map_track_to_msx(
 
 
 def map_tracks_to_msx_playlist(
-    tracks: list[Any],
+    tracks: Sequence[PlaylistTrack],
     start_index: int,
     prefix: str,
     player_id: str,
@@ -265,7 +316,7 @@ def map_tracks_to_msx_playlist(
     qr_cover_base: str | None = None,
 ) -> MsxContent:
     """
-    Map a list of MA Track objects to an MSX Content page for playlist playback.
+    Map tracks to an MSX Content page for playlist playback.
 
     MSX ``playlist:{URL}`` loads a standard Content Root Object.
     Each item uses ``action: "audio:{URL}"`` so MSX can play them sequentially.
@@ -277,9 +328,9 @@ def map_tracks_to_msx_playlist(
     token = provider.get_stream_token(player_id)
     msx_items = []
     for track in tracks:
-        duration = getattr(track, "duration", 0) or 0
+        duration = track.duration
         duration_str = f"{duration // 60}:{duration % 60:02d}" if duration else ""
-        artist = getattr(track, "artist_str", "")
+        artist = track.artist
         label = (
             f"{artist} · {duration_str}"
             if artist and duration_str
@@ -302,11 +353,7 @@ def map_tracks_to_msx_playlist(
             token=token,
             device_param=device_param,
             from_playlist=True,
-            queue_item_id=(
-                track.queue_item_id
-                if isinstance(getattr(track, "queue_item_id", None), str)
-                else None
-            ),
+            queue_item_id=track.queue_item_id,
         )
         nav = queue_nav_properties(player_id, prefix)
 
