@@ -9,6 +9,7 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, Mock
 
+
 async def empty_async_generator() -> AsyncIterator[object]:
     """Provide an empty async generator for playlist track responses."""
     if asyncio.current_task() is None:

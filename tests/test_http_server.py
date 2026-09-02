@@ -608,7 +608,7 @@ async def test_play_context_recovers_when_player_was_marked_unavailable(
 ) -> None:
     """A TV that still sends play-context is online even if its last WebSocket dropped."""
     player = _register_msx_player(mass_mock, provider, "msx_test")
-    player.update_state = Mock()  # type: ignore[method-assign]
+    player.update_state = Mock()  # type: ignore[misc,method-assign]
     player._attr_available = False
     player._attr_playback_state = PlaybackState.PLAYING
 
