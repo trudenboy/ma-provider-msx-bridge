@@ -61,6 +61,13 @@ for _ma_package_root in _ma_pkg.__path__:  # type: ignore[attr-defined]
     ):
         _tests_pkg.__path__.append(_shared_tests_root)  # type: ignore[attr-defined]
 
+# Standalone CI collects tests/ directly. Upstream mounts the same files at
+# tests/providers/msx_bridge/. Alias the two import paths.
+_providers_tests = types.ModuleType("tests.providers")
+_providers_tests.__path__ = []  # type: ignore[attr-defined]
+sys.modules.setdefault("tests.providers", _providers_tests)
+sys.modules.setdefault("tests.providers.msx_bridge", _tests_pkg)
+
 # Insert provider/ into sys.path so its modules are importable
 if str(_provider_path) not in sys.path:
     sys.path.insert(0, str(_provider_path))
