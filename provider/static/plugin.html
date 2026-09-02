@@ -259,21 +259,22 @@
         sendWsMessage({ type: "resume" });
     }
 
-    function onMediaSeeked() {
+    function reportTvSeek(pos) {
         var now = Date.now();
         if (pendingServerSeek != null && now <= pendingServerSeekUntil) {
-            var current = monitoredElement ? monitoredElement.currentTime : pendingServerSeek;
-            if (Math.abs(current - pendingServerSeek) <= 2) {
+            if (Math.abs(pos - pendingServerSeek) <= 2) {
                 clearPendingServerSeek();
                 return;
             }
         }
         clearPendingServerSeek();
-        if (monitoredElement) {
-            var pos = monitoredElement.currentTime;
-            startPositionTimer(pos);
-            sendWsMessage({ type: "seek", position: pos });
-        }
+        startPositionTimer(pos);
+        sendWsMessage({ type: "seek", position: pos });
+    }
+
+    function onMediaSeeked() {
+        if (!monitoredElement) return;
+        reportTvSeek(monitoredElement.currentTime);
     }
 
     function attachMediaListeners(el) {
@@ -517,6 +518,11 @@
             onMediaPause();
         } else if (data.event === "video:play") {
             onMediaPlay();
+        } else if (data.event === "video:seek") {
+            var pos = data.position;
+            if (typeof pos === "number" && isFinite(pos) && pos >= 0) {
+                reportTvSeek(pos);
+            }
         }
     };
 

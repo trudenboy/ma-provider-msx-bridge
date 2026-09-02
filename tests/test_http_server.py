@@ -114,6 +114,8 @@ async def test_plugin_html(http_client: TestClient[Any, Any]) -> None:
     assert "handleRequest" in body
     assert "MAHandler.prototype.handleEvent" in body
     assert 'data.event === "video:pause"' in body
+    assert 'data.event === "video:seek"' in body
+    assert "reportTvSeek" in body
     assert 'msg.type === "sendspin"' not in body
     assert "pendingServerSeek" in body
     assert "clearPendingServerSeek" in body
