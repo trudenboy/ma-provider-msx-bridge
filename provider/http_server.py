@@ -14,11 +14,32 @@ from urllib.parse import quote
 
 import aiohttp
 from aiohttp import WSMsgType, web
+<<<<<<< provider
 from music_assistant_models.enums import RepeatMode
 from music_assistant_models.errors import (
     InvalidDataError,
     MusicAssistantError,
     ResourceTemporarilyUnavailable,
+||||||| upstream-base
+from music_assistant_models.enums import ContentType
+from music_assistant_models.errors import InvalidProviderURI
+from music_assistant_models.media_items import AudioFormat, Track
+
+from music_assistant.constants import SENDSPIN_SERVER_PORT
+from music_assistant.controllers.streams.audio_processing import get_media_session_id
+from music_assistant.controllers.streams.constants import (
+    SINGLE_ITEM_READRATE,
+    SINGLE_ITEM_READRATE_INITIAL_BURST,
+=======
+from music_assistant_models.enums import ContentType
+from music_assistant_models.errors import InvalidProviderURI
+from music_assistant_models.media_items import AudioFormat, Track
+
+from music_assistant.constants import SENDSPIN_SERVER_PORT
+from music_assistant.controllers.streams.audio_processing import get_media_session_id
+from music_assistant.controllers.streams.constants import (
+    output_pacing_args,
+>>>>>>> upstream-head
 )
 
 from .audio_stream import AudioPipeline, resolve_served_duration
@@ -75,6 +96,31 @@ STATIC_DIR = Path(__file__).parent / "static"
 
 _KNOWN_EXTENSIONS = (".mp3", ".json", ".flac", ".aac")
 
+<<<<<<< provider
+||||||| upstream-base
+PARTY_CACHE_TTL = 10.0
+PARTY_CALL_TIMEOUT = 5.0
+
+# The local proxy modes encode audio themselves, so they carry the core streamserver's
+# pacing ceiling rather than handing a track over as fast as ffmpeg can produce it.
+# See the usage policy note on SINGLE_ITEM_READRATE.
+_READRATE_ARGS = [
+    "-readrate",
+    SINGLE_ITEM_READRATE,
+    "-readrate_initial_burst",
+    SINGLE_ITEM_READRATE_INITIAL_BURST,
+]
+
+=======
+PARTY_CACHE_TTL = 10.0
+PARTY_CALL_TIMEOUT = 5.0
+
+# The local proxy modes encode audio themselves, so they carry the core streamserver's
+# pacing ceiling rather than handing a track over as fast as ffmpeg can produce it.
+# See the usage policy note in the streams constants.
+_READRATE_ARGS = output_pacing_args("gapless_burst")
+
+>>>>>>> upstream-head
 
 def _queue_item_limit(queue: Any) -> int:
     """Return how many items to read from an in-memory MA queue."""
