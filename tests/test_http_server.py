@@ -612,7 +612,9 @@ async def test_play_context_recovers_when_player_was_marked_unavailable(
     player._attr_available = False
     player._attr_playback_state = PlaybackState.PLAYING
 
-    def get_player(pid: str, raise_unavailable: bool = False, **_kwargs: object) -> MSXPlayer | None:
+    def get_player(
+        pid: str, raise_unavailable: bool = False, **_kwargs: object
+    ) -> MSXPlayer | None:
         if pid != "msx_test":
             return None
         if raise_unavailable and not player.available:

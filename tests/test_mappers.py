@@ -168,8 +168,7 @@ def test_map_artist_to_msx_preserves_provider() -> None:
     )
 
     assert (
-        item.action
-        == "content:http://localhost/msx/artists/5531642/albums.json?"
+        item.action == "content:http://localhost/msx/artists/5531642/albums.json?"
         "provider=yandex_music--test&device_id=abc"
     )
 
