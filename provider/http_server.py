@@ -560,7 +560,7 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
                 MsxItem(
                     label="MSX Player",
                     icon="msx-white-soft:tv",
-                    action=f"menu:request:interaction:init@{prefix}/msx/plugin.html?v=20",
+                    action=f"menu:request:interaction:init@{prefix}/msx/plugin.html?v=21",
                 ),
             ],
         )
