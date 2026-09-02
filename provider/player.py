@@ -103,12 +103,16 @@ class MSXPlayer(Player):
         """Return per-player config entries — codec is configurable per TV."""
         return [CONF_ENTRY_OUTPUT_CODEC_DEFAULT_MP3]
 
-    def on_ws_connected(self) -> None:
-        """Mark player as available when a WebSocket client connects."""
-        self._ws_ever_connected = True
+    def mark_available(self) -> None:
+        """Mark the player available after proof of life from the TV."""
         if not self._attr_available:
             self._attr_available = True
             self.update_state()
+
+    def on_ws_connected(self) -> None:
+        """Mark player as available when a WebSocket client connects."""
+        self._ws_ever_connected = True
+        self.mark_available()
 
     def on_ws_disconnected(self) -> None:
         """

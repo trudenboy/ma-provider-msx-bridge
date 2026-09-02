@@ -14,7 +14,11 @@ import pytest
 from aiohttp.test_utils import TestClient as AiohttpTestClient
 from aiohttp.test_utils import TestServer
 from music_assistant_models.enums import PlaybackState, RepeatMode
-from music_assistant_models.errors import InvalidDataError, MusicAssistantError
+from music_assistant_models.errors import (
+    InvalidDataError,
+    MusicAssistantError,
+    PlayerUnavailableError,
+)
 from music_assistant_models.media_items import Album, Artist, Playlist, Track
 from music_assistant_models.player import PlayerMedia
 from music_assistant_models.player_queue import PlayerQueue
@@ -595,6 +599,42 @@ async def test_play_context_skips_index_when_already_current(
             )
         assert resp.status == 200
         mass_mock.player_queues.play_index.assert_not_awaited()
+    finally:
+        await client.close()
+
+
+async def test_play_context_recovers_when_player_was_marked_unavailable(
+    provider: MSXBridgeProvider, mass_mock: Mock
+) -> None:
+    """A TV that still sends play-context is online even if its last WebSocket dropped."""
+    player = _register_msx_player(mass_mock, provider, "msx_test")
+    player.update_state = Mock()  # type: ignore[method-assign]
+    player._attr_available = False
+    player._attr_playback_state = PlaybackState.PLAYING
+
+    def get_player(pid: str, raise_unavailable: bool = False, **_kwargs: object) -> MSXPlayer | None:
+        if pid != "msx_test":
+            return None
+        if raise_unavailable and not player.available:
+            raise PlayerUnavailableError("not available")
+        return player
+
+    async def play_media(pid: str, _uri: str) -> None:
+        mass_mock.players.get_player(pid, True)
+
+    mass_mock.players.get_player = Mock(side_effect=get_player)
+    mass_mock.player_queues.play_media = AsyncMock(side_effect=play_media)
+    _wire_queue(mass_mock, [_make_queue_item("library://track/11", queue_item_id="a")])
+    server = MSXHTTPServer(provider, 0)
+    client = AiohttpTestClient(TestServer(server.app))
+    await client.start_server()
+    try:
+        response = await client.get("/api/play-context/msx_test?uri=library://track/11")
+        assert response.status == 200
+        data = await response.json()
+        assert data["response"]["status"] == 200
+        assert player.available is True
+        mass_mock.player_queues.play_media.assert_awaited_once()
     finally:
         await client.close()
 

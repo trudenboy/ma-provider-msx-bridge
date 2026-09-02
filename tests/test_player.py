@@ -79,6 +79,16 @@ def test_ws_connect_marks_player_available(player: MSXPlayer) -> None:
     _update_state_mock(player).assert_called_once()
 
 
+def test_mark_available_restores_offline_player(player: MSXPlayer) -> None:
+    """HTTP activity can restore a player that was marked unavailable."""
+    player._attr_available = False
+
+    player.mark_available()
+
+    assert player.available is True
+    _update_state_mock(player).assert_called_once()
+
+
 def test_ws_disconnect_marks_playing_player_unavailable(player: MSXPlayer) -> None:
     """A playing TV that loses its only WebSocket must become unavailable."""
     player._attr_playback_state = PlaybackState.PLAYING

@@ -9,6 +9,7 @@ import pytest
 from music_assistant_models.errors import InvalidDataError, PlayerUnavailableError
 from music_assistant_models.player import PlayerMedia
 
+from music_assistant.providers.msx_bridge.player import MSXPlayer
 from music_assistant.providers.msx_bridge.provider import MSXBridgeProvider
 
 
@@ -120,6 +121,18 @@ def test_on_player_activity_uses_monotonic_clock(provider: MSXBridgeProvider) ->
         provider.on_player_activity("msx_x")
 
     assert provider._player_last_activity["msx_x"] == 1234.0
+
+
+def test_on_player_activity_restores_unavailable_player(
+    provider: MSXBridgeProvider, mass_mock: Mock, player: MSXPlayer
+) -> None:
+    """A later HTTP request from the TV must make the player available to MA again."""
+    player._attr_available = False
+    mass_mock.players.get_player = Mock(return_value=player)
+
+    provider.on_player_activity(player.player_id)
+
+    assert player.available is True
 
 
 async def test_loaded_in_mass_starts_timeout_task(provider: MSXBridgeProvider) -> None:

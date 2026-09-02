@@ -247,6 +247,9 @@ class MSXBridgeProvider(PlayerProvider):
         """Record activity for a player (extends idle timeout)."""
         # Monotonic: a wall-clock NTP step must not age players past the cutoff
         self._player_last_activity[player_id] = time.monotonic()
+        player = self.mass.players.get_player(player_id, raise_unavailable=False)
+        if isinstance(player, MSXPlayer):
+            player.mark_available()
 
     def on_player_disabled(self, player_id: str) -> None:
         """
