@@ -17,17 +17,15 @@ import segno
 from aiohttp import web
 from aiohttp.test_utils import TestClient as AiohttpTestClient
 from aiohttp.test_utils import TestServer, make_mocked_request
+from music_assistant_models.enums import ImageType
+from music_assistant_models.media_items import MediaItemImage
 from PIL import Image
 
 from music_assistant.helpers.util import join_task
 from music_assistant.providers.msx_bridge import party as party_module
-from music_assistant.providers.msx_bridge.http_server import (
-    MSXHTTPServer,
-    PartyInfo,
-    _stamp_qr_on_cover,
-)
-from music_assistant.providers.msx_bridge.mappers import map_tracks_to_msx_playlist
-from music_assistant.providers.msx_bridge.party import COVER_FETCH_MAX_BYTES
+from music_assistant.providers.msx_bridge.http_server import MSXHTTPServer, PartyInfo
+from music_assistant.providers.msx_bridge.mappers import PlaylistTrack, map_tracks_to_msx_playlist
+from music_assistant.providers.msx_bridge.party import COVER_FETCH_MAX_BYTES, stamp_qr_on_cover
 from music_assistant.providers.msx_bridge.provider import MSXBridgeProvider
 from tests.common import collect_loop_errors
 
@@ -121,7 +119,7 @@ def _slow_http_session_mock(body: bytes, release: asyncio.Event) -> Mock:
 def test_stamp_qr_on_cover_composites() -> None:
     """The QR lands bottom-right with a white quiet zone; dimensions are preserved."""
     cover = _black_cover_png(200)
-    stamped = _stamp_qr_on_cover(cover, _qr_png())
+    stamped = stamp_qr_on_cover(cover, _qr_png())
 
     assert stamped != cover
     img = Image.open(io.BytesIO(stamped))
@@ -135,7 +133,7 @@ def test_stamp_qr_on_cover_composites() -> None:
 
 def test_stamp_qr_on_cover_resizes_large_cover() -> None:
     """Large decoded covers are reduced before compositing and caching."""
-    stamped = _stamp_qr_on_cover(_black_cover_png(2048), _qr_png())
+    stamped = stamp_qr_on_cover(_black_cover_png(2048), _qr_png())
 
     assert Image.open(io.BytesIO(stamped)).size == (1024, 1024)
 
@@ -191,7 +189,7 @@ async def test_qr_cover_composite_runs_off_event_loop(
 
     def _tracking_stamp(cover_bytes: bytes, qr_bytes: bytes) -> bytes:
         stamp_threads.append(threading.get_ident())
-        return _stamp_qr_on_cover(cover_bytes, qr_bytes)
+        return stamp_qr_on_cover(cover_bytes, qr_bytes)
 
     monkeypatch.setattr(party_module, "stamp_qr_on_cover", _tracking_stamp)
     server = MSXHTTPServer(provider, 0)
@@ -220,7 +218,7 @@ async def test_qr_cover_concurrent_misses_coalesce(
 
     def _tracking_stamp(cover_bytes: bytes, qr_bytes: bytes) -> bytes:
         stamp_calls.append(1)
-        return _stamp_qr_on_cover(cover_bytes, qr_bytes)
+        return stamp_qr_on_cover(cover_bytes, qr_bytes)
 
     monkeypatch.setattr(party_module, "stamp_qr_on_cover", _tracking_stamp)
     server = MSXHTTPServer(provider, 0)
@@ -515,14 +513,14 @@ async def test_qr_cover_decompression_bomb_redirects(
 # --- Playlist background wiring ---
 
 
-def _track_mock() -> Mock:
-    track = Mock()
-    track.name = "Test Track"
-    track.uri = "library://track/1"
-    track.duration = 180
-    track.artist_str = "Artist"
-    track.image = Mock()
-    return track
+def _track_mock() -> PlaylistTrack:
+    return PlaylistTrack(
+        name="Test Track",
+        uri="library://track/1",
+        duration=180,
+        artist="Artist",
+        image=MediaItemImage(type=ImageType.THUMB, path="cover.jpg", provider="library"),
+    )
 
 
 def test_playlist_backgrounds_use_qr_cover_when_party_active(

@@ -12,8 +12,7 @@ import segno
 from PIL import Image
 
 from music_assistant.providers.msx_bridge import party as party_module
-from music_assistant.providers.msx_bridge.http_server import _render_qr
-from music_assistant.providers.msx_bridge.party import stamp_qr_on_cover
+from music_assistant.providers.msx_bridge.party import render_qr, stamp_qr_on_cover
 
 if TYPE_CHECKING:
     from aiohttp.test_utils import TestClient
@@ -182,9 +181,9 @@ def test_render_qr_is_memoized(monkeypatch: pytest.MonkeyPatch) -> None:
         return real_make(*args, **kwargs)
 
     monkeypatch.setattr(segno, "make", _tracking_make)
-    _render_qr.cache_clear()
-    first = _render_qr(JOIN_URL, "png")
-    second = _render_qr(JOIN_URL, "png")
+    render_qr.cache_clear()
+    first = render_qr(JOIN_URL, "png")
+    second = render_qr(JOIN_URL, "png")
     assert first == second
     assert len(calls) == 1
 
@@ -242,7 +241,7 @@ def test_stamp_qr_on_cover_rejects_oversized_cover_without_changing_pillow_limit
     original = Image.MAX_IMAGE_PIXELS
     cover_buf = io.BytesIO()
     Image.new("RGB", (64, 64), color="black").save(cover_buf, format="PNG")
-    qr = _render_qr(JOIN_URL, "png")
+    qr = render_qr(JOIN_URL, "png")
     monkeypatch.setattr(party_module, "COVER_MAX_PIXELS", 10)
     with pytest.raises(ValueError, match="size limit"):
         stamp_qr_on_cover(cover_buf.getvalue(), qr)
@@ -256,7 +255,7 @@ def test_stamp_qr_on_cover_does_not_change_pillow_limit_when_concurrent() -> Non
     cover_buf = io.BytesIO()
     Image.new("RGB", (64, 64), color="black").save(cover_buf, format="PNG")
     cover = cover_buf.getvalue()
-    qr = _render_qr(JOIN_URL, "png")
+    qr = render_qr(JOIN_URL, "png")
 
     def _stamp() -> None:
         try:

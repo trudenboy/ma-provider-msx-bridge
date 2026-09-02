@@ -9,7 +9,7 @@ import io
 import logging
 import time
 from collections import OrderedDict
-from typing import TYPE_CHECKING, Any, NamedTuple, cast
+from typing import TYPE_CHECKING, NamedTuple, Protocol, cast
 from urllib.parse import quote, urlsplit
 
 import aiohttp
@@ -19,6 +19,8 @@ from music_assistant_models.errors import MusicAssistantError
 from music_assistant.helpers.util import join_task
 
 if TYPE_CHECKING:
+    from PIL.Image import Image as PillowImage
+
     from .provider import MSXBridgeProvider
 
 logger = logging.getLogger(__name__)
@@ -39,6 +41,23 @@ class PartyInfo(NamedTuple):
     name: str | None
     qr_text: str | None
     qr_version: str
+
+
+class PartyConfig(Protocol):
+    """Party configuration fields used by the MSX presentation."""
+
+    party_name: str | None
+    qr_text: str | None
+
+
+class PartyProvider(Protocol):
+    """Party provider operations needed by the MSX presentation."""
+
+    async def get_party_url(self) -> str | None:
+        """Return the active guest join URL."""
+
+    async def get_party_config(self) -> PartyConfig:
+        """Return guest-facing Party configuration."""
 
 
 class PartyAdapter:
@@ -90,15 +109,15 @@ class PartyAdapter:
             return self.cache[1]
         info: PartyInfo | None = None
         try:
-            party = cast("Any", self.provider.mass.get_provider("party"))
+            party = cast("PartyProvider | None", self.provider.mass.get_provider("party"))
             if party is not None:
                 join_url = await asyncio.wait_for(party.get_party_url(), PARTY_CALL_TIMEOUT)
                 if join_url:
                     config = await asyncio.wait_for(party.get_party_config(), PARTY_CALL_TIMEOUT)
                     info = PartyInfo(
                         join_url=join_url,
-                        name=getattr(config, "party_name", None),
-                        qr_text=getattr(config, "qr_text", None),
+                        name=config.party_name,
+                        qr_text=config.qr_text,
                         qr_version=hashlib.sha256(join_url.encode()).hexdigest()[:12],
                     )
         except MusicAssistantError, RuntimeError, TimeoutError:
@@ -251,7 +270,7 @@ async def _read_capped(resp: aiohttp.ClientResponse, max_bytes: int) -> bytes:
     return bytes(buf)
 
 
-def _open_rgb_image(data: bytes) -> Any:
+def _open_rgb_image(data: bytes) -> PillowImage:
     """Open an image and reject it when the pixel count exceeds COVER_MAX_PIXELS."""
     import warnings  # noqa: PLC0415
 

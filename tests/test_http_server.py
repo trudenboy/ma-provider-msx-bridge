@@ -6,7 +6,7 @@ import asyncio
 import json
 from collections.abc import AsyncGenerator
 from typing import TYPE_CHECKING, Any, cast
-from unittest.mock import AsyncMock, MagicMock, Mock, call, patch
+from unittest.mock import AsyncMock, Mock, call, patch
 from urllib.parse import parse_qs, quote, urlsplit
 
 import aiohttp
@@ -14,8 +14,12 @@ import pytest
 from aiohttp.test_utils import TestClient as AiohttpTestClient
 from aiohttp.test_utils import TestServer
 from music_assistant_models.enums import PlaybackState, RepeatMode
-from music_assistant_models.errors import InvalidDataError, MusicAssistantError
-from music_assistant_models.media_items import Track
+from music_assistant_models.errors import (
+    InvalidDataError,
+    MusicAssistantError,
+    PlayerUnavailableError,
+)
+from music_assistant_models.media_items import Album, Artist, Playlist, Track
 from music_assistant_models.player import PlayerMedia
 from music_assistant_models.player_queue import PlayerQueue
 from music_assistant_models.queue_item import QueueItem
@@ -26,6 +30,10 @@ from music_assistant.providers.msx_bridge.http_server import MSXHTTPServer
 from music_assistant.providers.msx_bridge.mappers import map_track_to_msx
 from music_assistant.providers.msx_bridge.player import MSXPlayer
 from music_assistant.providers.msx_bridge.provider import MSXBridgeProvider
+from tests.providers.msx_bridge.factories import album as make_album
+from tests.providers.msx_bridge.factories import artist as make_artist
+from tests.providers.msx_bridge.factories import playlist as make_playlist
+from tests.providers.msx_bridge.factories import track as make_track
 
 if TYPE_CHECKING:
     from aiohttp.test_utils import TestClient
@@ -103,6 +111,8 @@ async def test_plugin_html(http_client: TestClient[Any, Any]) -> None:
     body = await resp.text()
     assert "tvx.InteractionPlugin" in body
     assert "handleRequest" in body
+    assert "MAHandler.prototype.handleEvent" in body
+    assert 'data.event === "video:pause"' in body
     assert 'msg.type === "sendspin"' not in body
     assert "pendingServerSeek" in body
     assert "clearPendingServerSeek" in body
@@ -203,7 +213,7 @@ async def test_audio_routes_send_no_cors_header(
 async def test_stream_rejects_missing_token(provider: MSXBridgeProvider, mass_mock: Mock) -> None:
     """GET /stream/{id} without the player's token should be refused."""
     mock_player = Mock(spec=MSXPlayer)
-    mock_player.current_media = Mock()
+    mock_player.current_media = PlayerMedia(uri="library://track/1")
     mass_mock.players.get.return_value = mass_mock.players.get_player.return_value = mock_player
 
     server = MSXHTTPServer(provider, 0)
@@ -240,10 +250,7 @@ async def test_stream_not_msx_player(provider: MSXBridgeProvider, mass_mock: Moc
 async def test_stream_success(provider: MSXBridgeProvider, mass_mock: Mock) -> None:
     """GET /stream/{id} should stream audio via internal API."""
     mock_player = Mock(spec=MSXPlayer)
-    mock_media = Mock()
-    mock_media.duration = 180
-    mock_media.source_id = None
-    mock_media.queue_item_id = None
+    mock_media = PlayerMedia(uri="library://track/1", duration=180)
     mock_player.current_media = mock_media
     mock_player.output_format = "mp3"
     token = provider.get_stream_token("msx_test")
@@ -287,16 +294,8 @@ async def test_albums(http_client: TestClient[Any, Any]) -> None:
 
 async def test_albums_with_data(provider: MSXBridgeProvider, mass_mock: Mock) -> None:
     """GET /api/albums should format album data correctly."""
-    album = Mock()
-    album.item_id = 1
-    album.name = "Test Album"
-    album.artist_str = "Test Artist"
-    album.uri = "library://album/1"
-    album.image = None
-    mock_result = Mock()
-    mock_result.__iter__ = Mock(return_value=iter([album]))
-    mock_result.total = 1
-    mass_mock.music.albums.library_items.return_value = mock_result
+    album = make_album("1", "Test Album", artists=[make_artist(name="Test Artist")])
+    mass_mock.music.albums.library_items.return_value = [album]
 
     server = MSXHTTPServer(provider, 0)
     client = AiohttpTestClient(TestServer(server.app))
@@ -604,6 +603,65 @@ async def test_play_context_skips_index_when_already_current(
         await client.close()
 
 
+async def test_play_context_recovers_when_player_was_marked_unavailable(
+    provider: MSXBridgeProvider, mass_mock: Mock
+) -> None:
+    """A TV that still sends play-context is online even if its last WebSocket dropped."""
+    player = _register_msx_player(mass_mock, provider, "msx_test")
+    player.update_state = Mock()  # type: ignore[misc,method-assign]
+    player._attr_available = False
+    player._attr_playback_state = PlaybackState.PLAYING
+
+    def get_player(
+        pid: str, raise_unavailable: bool = False, **_kwargs: object
+    ) -> MSXPlayer | None:
+        if pid != "msx_test":
+            return None
+        if raise_unavailable and not player.available:
+            raise PlayerUnavailableError("not available")
+        return player
+
+    async def play_media(pid: str, _uri: str) -> None:
+        mass_mock.players.get_player(pid, True)
+
+    mass_mock.players.get_player = Mock(side_effect=get_player)
+    mass_mock.player_queues.play_media = AsyncMock(side_effect=play_media)
+    _wire_queue(mass_mock, [_make_queue_item("library://track/11", queue_item_id="a")])
+    server = MSXHTTPServer(provider, 0)
+    client = AiohttpTestClient(TestServer(server.app))
+    await client.start_server()
+    try:
+        response = await client.get("/api/play-context/msx_test?uri=library://track/11")
+        assert response.status == 200
+        data = await response.json()
+        assert data["response"]["status"] == 200
+        assert player.available is True
+        mass_mock.player_queues.play_media.assert_awaited_once()
+    finally:
+        await client.close()
+
+
+async def test_play_context_returns_msx_error_when_queue_loading_fails(
+    provider: MSXBridgeProvider, mass_mock: Mock
+) -> None:
+    """Queue-loading errors must not make MSX receive an HTTP 500."""
+    _register_msx_player(mass_mock, provider, "msx_test")
+    mass_mock.player_queues.play_media = AsyncMock(
+        side_effect=MusicAssistantError("source authentication expired")
+    )
+    server = MSXHTTPServer(provider, 0)
+    client = AiohttpTestClient(TestServer(server.app))
+    await client.start_server()
+    try:
+        response = await client.get("/api/play-context/msx_test?uri=library://track/11")
+        assert response.status == 200
+        data = await response.json()
+        assert data["response"]["status"] == 503
+        assert data["response"]["message"] == "Unable to start playback"
+    finally:
+        await client.close()
+
+
 async def test_play_unknown_player(provider: MSXBridgeProvider) -> None:
     """POST /api/play with unknown player_id should return 404."""
     server = MSXHTTPServer(provider, 0)
@@ -840,50 +898,29 @@ async def test_control_endpoints_reject_unexpected_methods(
 # --- MSX content page actions ---
 
 
-def _make_album_mock(item_id: int = 1, name: str = "Test Album") -> Mock:
-    """Create a mock album object."""
-    album = Mock()
-    album.item_id = item_id
-    album.name = name
-    album.artist_str = "Test Artist"
-    album.uri = f"library://album/{item_id}"
-    album.image = None
-    return album
+def _make_album(item_id: int = 1, name: str = "Test Album") -> Album:
+    """Create an album returned by the MA library API."""
+    return make_album(str(item_id), name, artists=[make_artist(name="Test Artist")])
 
 
-def _make_track_mock(item_id: int = 1, name: str = "Test Track") -> Mock:
-    """Create a mock track object."""
-    track = Mock()
-    track.item_id = item_id
-    track.name = name
-    track.artist_str = "Test Artist"
-    track.uri = f"library://track/{item_id}"
-    track.image = None
-    track.album = Mock(name="Test Album")
-    track.duration = 180
-    return track
+def _make_track(
+    item_id: int = 1, name: str = "Test Track", artist_name: str = "Test Artist"
+) -> Track:
+    """Create a track returned by the MA library API."""
+    artists = [make_artist(name=artist_name)] if artist_name else []
+    return make_track(
+        str(item_id), name, artists=artists, album=make_album(name="Test Album"), duration=180
+    )
 
 
-def _make_artist_mock(item_id: int = 1, name: str = "Test Artist") -> Mock:
-    """Create a mock artist object."""
-    artist = Mock()
-    artist.item_id = item_id
-    artist.name = name
-    artist.uri = f"library://artist/{item_id}"
-    artist.image = None
-    return artist
+def _make_artist(item_id: int = 1, name: str = "Test Artist") -> Artist:
+    """Create an artist returned by the MA library API."""
+    return make_artist(str(item_id), name)
 
 
-def _make_playlist_mock(item_id: int = 1, name: str = "Test Playlist") -> Mock:
-    """Create a mock playlist object."""
-    playlist = Mock()
-    playlist.item_id = item_id
-    playlist.name = name
-    playlist.uri = f"library://playlist/{item_id}"
-    playlist.image = None
-    playlist.owner = "test_user"
-    playlist.provider = "library"
-    return playlist
+def _make_playlist(item_id: int = 1, name: str = "Test Playlist") -> Playlist:
+    """Create a playlist returned by the MA library API."""
+    return make_playlist(str(item_id), name)
 
 
 def _make_audio_player(mass_mock: Mock) -> tuple[MSXPlayer, PlayerMedia]:
@@ -907,7 +944,7 @@ def _make_audio_player(mass_mock: Mock) -> tuple[MSXPlayer, PlayerMedia]:
 
 async def test_msx_albums_have_action(provider: MSXBridgeProvider, mass_mock: Mock) -> None:
     """GET /msx/albums.json items should have content: action for drill-down."""
-    album = _make_album_mock()
+    album = _make_album()
     mock_result = Mock()
     mock_result.__iter__ = Mock(return_value=iter([album]))
     mass_mock.music.albums.library_items.return_value = mock_result
@@ -929,7 +966,7 @@ async def test_msx_albums_have_action(provider: MSXBridgeProvider, mass_mock: Mo
 
 async def test_msx_artists_have_action(provider: MSXBridgeProvider, mass_mock: Mock) -> None:
     """GET /msx/artists.json items should have content: action for drill-down."""
-    artist = _make_artist_mock()
+    artist = _make_artist()
     mock_result = Mock()
     mock_result.__iter__ = Mock(return_value=iter([artist]))
     mass_mock.music.artists.library_items.return_value = mock_result
@@ -951,7 +988,7 @@ async def test_msx_artists_have_action(provider: MSXBridgeProvider, mass_mock: M
 
 async def test_msx_playlists_have_action(provider: MSXBridgeProvider, mass_mock: Mock) -> None:
     """GET /msx/playlists.json items should have content: action for drill-down."""
-    playlist = _make_playlist_mock()
+    playlist = _make_playlist()
     mock_result = Mock()
     mock_result.__iter__ = Mock(return_value=iter([playlist]))
     mass_mock.music.playlists.library_items.return_value = mock_result
@@ -973,7 +1010,7 @@ async def test_msx_playlists_have_action(provider: MSXBridgeProvider, mass_mock:
 
 async def test_msx_tracks_have_action(provider: MSXBridgeProvider, mass_mock: Mock) -> None:
     """GET /msx/tracks.json items should enqueue the track into the MA queue."""
-    track = _make_track_mock()
+    track = _make_track()
     mock_result = Mock()
     mock_result.__iter__ = Mock(return_value=iter([track]))
     mass_mock.music.tracks.library_items.return_value = mock_result
@@ -1002,7 +1039,7 @@ async def test_msx_tracks_have_action(provider: MSXBridgeProvider, mass_mock: Mo
 
 async def test_msx_album_tracks(provider: MSXBridgeProvider, mass_mock: Mock) -> None:
     """GET /msx/albums/{id}/tracks.json should return tracks with audio actions."""
-    track = _make_track_mock()
+    track = _make_track()
     mass_mock.music.albums.tracks.return_value = [track]
 
     server = MSXHTTPServer(provider, 0)
@@ -1024,16 +1061,17 @@ async def test_msx_album_tracks(provider: MSXBridgeProvider, mass_mock: Mock) ->
 
 
 async def test_msx_artist_albums(provider: MSXBridgeProvider, mass_mock: Mock) -> None:
-    """GET /msx/artists/{id}/albums.json should return albums with content actions."""
-    album = _make_album_mock()
+    """Artist detail requests must retain the source provider."""
+    album = _make_album()
     mass_mock.music.artists.albums.return_value = [album]
 
     server = MSXHTTPServer(provider, 0)
     client = AiohttpTestClient(TestServer(server.app))
     await client.start_server()
     try:
-        resp = await client.get("/msx/artists/1/albums.json")
+        resp = await client.get("/msx/artists/5531642/albums.json?provider=yandex_music--test")
         assert resp.status == 200
+        mass_mock.music.artists.albums.assert_awaited_once_with("5531642", "yandex_music--test")
         data = await resp.json()
         assert data["headline"] == "Artist Albums"
         assert len(data["items"]) == 1
@@ -1047,7 +1085,7 @@ async def test_msx_artist_albums(provider: MSXBridgeProvider, mass_mock: Mock) -
 
 async def test_msx_playlist_tracks(provider: MSXBridgeProvider, mass_mock: Mock) -> None:
     """GET /msx/playlists/{id}/tracks.json should return tracks with audio actions."""
-    track = _make_track_mock()
+    track = _make_track()
 
     async def _mock_playlist_tracks(*_args: object, **_kwargs: object) -> AsyncGenerator[Any]:
         yield track
@@ -1259,6 +1297,29 @@ async def test_msx_audio_returns_gateway_timeout_when_media_is_not_prepared(
 
         assert response.status == 504
         assert await response.text() == "Playback setup timeout"
+    finally:
+        await client.close()
+
+
+async def test_msx_audio_returns_service_error_when_queue_loading_fails(
+    provider: MSXBridgeProvider, mass_mock: Mock
+) -> None:
+    """Provider failures while loading queued audio must not become HTTP 500s."""
+    server = MSXHTTPServer(provider, 0)
+    client = AiohttpTestClient(TestServer(server.app))
+    await client.start_server()
+    try:
+        _make_audio_player(mass_mock)
+        _wire_queue(mass_mock, [_make_queue_item("library://track/1")])
+        mass_mock.player_queues.play_index = AsyncMock(
+            side_effect=MusicAssistantError("source authentication expired")
+        )
+        token = provider.get_stream_token("msx_test")
+
+        response = await client.get(f"/msx/audio/msx_test?uri=library://track/1&token={token}")
+
+        assert response.status == 503
+        assert await response.text() == "Unable to prepare audio"
     finally:
         await client.close()
 
@@ -2027,9 +2088,12 @@ def test_served_duration_falls_back_to_queue_item(
 ) -> None:
     """A media item of unknown length is resolved through its queue item."""
     server = MSXHTTPServer(provider, 0)
-    queue_item = MagicMock()
-    queue_item.media_item = None
-    queue_item.duration = 240
+    queue_item = QueueItem(
+        queue_id="q1",
+        queue_item_id="item1",
+        name="Unknown duration track",
+        duration=240,
+    )
     mass_mock.player_queues.get_item.return_value = queue_item
     media = PlayerMedia(uri="library://track/1", source_id="q1", queue_item_id="item1")
 
@@ -2041,7 +2105,7 @@ def test_served_duration_falls_back_to_queue_item(
 
 async def test_msx_album_playlist_endpoint(provider: MSXBridgeProvider, mass_mock: Mock) -> None:
     """GET /msx/playlist/album/{id}.json should return playlist JSON."""
-    track = _make_track_mock()
+    track = _make_track()
     mass_mock.music.albums.tracks.return_value = [track]
 
     server = MSXHTTPServer(provider, 0)
@@ -2064,7 +2128,7 @@ async def test_msx_album_playlist_endpoint(provider: MSXBridgeProvider, mass_moc
 
 async def test_msx_playlist_playlist_endpoint(provider: MSXBridgeProvider, mass_mock: Mock) -> None:
     """GET /msx/playlist/playlist/{id}.json should return playlist JSON."""
-    track = _make_track_mock()
+    track = _make_track()
 
     async def _mock_playlist_tracks(*_args: object, **_kwargs: object) -> AsyncGenerator[Any]:
         yield track
@@ -2087,10 +2151,8 @@ async def test_msx_playlist_playlist_endpoint(provider: MSXBridgeProvider, mass_
 
 async def test_msx_tracks_playlist_endpoint(provider: MSXBridgeProvider, mass_mock: Mock) -> None:
     """GET /msx/playlist/tracks.json should return playlist JSON."""
-    track = _make_track_mock()
-    mock_result = Mock()
-    mock_result.__iter__ = Mock(return_value=iter([track]))
-    mass_mock.music.tracks.library_items.return_value = mock_result
+    track = _make_track()
+    mass_mock.music.tracks.library_items.return_value = [track]
 
     server = MSXHTTPServer(provider, 0)
     client = AiohttpTestClient(TestServer(server.app))
@@ -2110,7 +2172,8 @@ async def test_msx_tracks_playlist_endpoint(provider: MSXBridgeProvider, mass_mo
 
 def test_format_msx_track_includes_duration(provider: MSXBridgeProvider) -> None:
     """map_track_to_msx should include artist and duration in titleFooter."""
-    track = _make_track_mock()  # duration=180
+    track = _make_track()  # duration=180
+    assert track.uri is not None
     item = map_track_to_msx(track, "http://localhost", "msx_test", provider, context_uri=track.uri)
     assert item.title_header == "{txt:msx-white:Test Track}"
     assert item.title_footer == "Test Artist · 3:00"
@@ -2119,8 +2182,9 @@ def test_format_msx_track_includes_duration(provider: MSXBridgeProvider) -> None
 
 def test_format_msx_track_no_duration(provider: MSXBridgeProvider) -> None:
     """map_track_to_msx should handle zero/missing duration gracefully."""
-    track = _make_track_mock()
+    track = _make_track()
     track.duration = 0
+    assert track.uri is not None
     item = map_track_to_msx(track, "http://localhost", "msx_test", provider, context_uri=track.uri)
     assert item.title_header == "{txt:msx-white:Test Track}"
     assert item.title_footer == "Test Artist"
@@ -2128,8 +2192,8 @@ def test_format_msx_track_no_duration(provider: MSXBridgeProvider) -> None:
 
 def test_format_msx_track_duration_only(provider: MSXBridgeProvider) -> None:
     """map_track_to_msx should show only duration when no artist."""
-    track = _make_track_mock()
-    track.artist_str = ""
+    track = _make_track(artist_name="")
+    assert track.uri is not None
     item = map_track_to_msx(track, "http://localhost", "msx_test", provider, context_uri=track.uri)
     assert item.title_header == "{txt:msx-white:Test Track}"
     assert item.title_footer == "3:00"
@@ -2158,7 +2222,7 @@ async def test_msx_queue_playlist_endpoint(provider: MSXBridgeProvider, mass_moc
     assert qi2.media_item is not None
     qi2.media_item.duration = 200
 
-    mass_mock.player_queues.items = Mock(return_value=[qi1, qi2])
+    _wire_queue(mass_mock, [qi1, qi2])
 
     server = MSXHTTPServer(provider, 0)
     client = AiohttpTestClient(TestServer(server.app))

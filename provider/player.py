@@ -6,7 +6,7 @@ import asyncio
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Literal, cast
 
 from music_assistant_models.enums import PlaybackState, PlayerFeature, PlayerType
 from music_assistant_models.errors import MusicAssistantError, PlayerUnavailableError
@@ -103,12 +103,16 @@ class MSXPlayer(Player):
         """Return per-player config entries — codec is configurable per TV."""
         return [CONF_ENTRY_OUTPUT_CODEC_DEFAULT_MP3]
 
-    def on_ws_connected(self) -> None:
-        """Mark player as available when a WebSocket client connects."""
-        self._ws_ever_connected = True
+    def mark_available(self) -> None:
+        """Mark the player available after proof of life from the TV."""
         if not self._attr_available:
             self._attr_available = True
             self.update_state()
+
+    def on_ws_connected(self) -> None:
+        """Mark player as available when a WebSocket client connects."""
+        self._ws_ever_connected = True
+        self.mark_available()
 
     def on_ws_disconnected(self) -> None:
         """
@@ -138,7 +142,7 @@ class MSXPlayer(Player):
         if not self._skip_ws_notify:
             self._notify_msx_playback(media)
 
-        await self._propagate_to_group_members("play_media", media=media)
+        await self._propagate_play_media(media)
 
     async def set_members(
         self,
@@ -174,7 +178,7 @@ class MSXPlayer(Player):
         self._attr_playback_state = PlaybackState.PLAYING
         self._attr_elapsed_time_last_updated = time.time()
         self.update_state()
-        await self._propagate_to_group_members("play")
+        await self._propagate_transport("play")
 
     async def pause(self) -> None:
         """Handle PAUSE command — pause playback on MSX, keep stream alive for resume."""
@@ -187,7 +191,7 @@ class MSXPlayer(Player):
         self.update_state()
         if not self._skip_ws_notify:
             cast("MSXBridgeProvider", self.provider).notify_play_paused(self.player_id)
-        await self._propagate_to_group_members("pause")
+        await self._propagate_transport("pause")
 
     async def stop(self) -> None:
         """Handle STOP command."""
@@ -205,7 +209,7 @@ class MSXPlayer(Player):
         self.update_state()
         provider = cast("MSXBridgeProvider", self.provider)
         provider.notify_play_stopped(self.player_id)
-        await self._propagate_to_group_members("stop")
+        await self._propagate_transport("stop")
 
     async def volume_set(self, volume_level: int) -> None:
         """Handle VOLUME_SET command."""
@@ -375,7 +379,7 @@ class MSXPlayer(Player):
     def _notify_same_queue(self, provider: MSXBridgeProvider, source_id: str) -> None:
         """Handle same-queue playback: goto index or re-send if queue changed."""
         queue = self.mass.player_queues.get(source_id)
-        ma_index = getattr(queue, "current_index", 0) if queue else 0
+        ma_index = queue.current_index if queue and queue.current_index is not None else 0
         self._playlist_size = self._queue_length(source_id, fallback=self._playlist_size)
         self._playlist_offset = ma_index
         provider.notify_play_playlist(self.player_id, ma_index, queue_id=source_id)
@@ -383,7 +387,7 @@ class MSXPlayer(Player):
     def _notify_new_queue(self, provider: MSXBridgeProvider, source_id: str) -> None:
         """Send full MSX native playlist for a new queue."""
         queue = self.mass.player_queues.get(source_id)
-        start_index = getattr(queue, "current_index", 0) if queue else 0
+        start_index = queue.current_index if queue and queue.current_index is not None else 0
         self._playlist_size = self._queue_length(source_id, fallback=0)
         self._playlist_offset = start_index
         self._queue_source_id = source_id
@@ -416,8 +420,20 @@ class MSXPlayer(Player):
             return []
         return [x for x in self.group_members if x != self.player_id]
 
-    async def _propagate_to_group_members(self, command: str, **kwargs: Any) -> None:
-        """Propagate command to group members in parallel when we are the leader."""
+    async def _propagate_play_media(self, media: PlayerMedia) -> None:
+        """Propagate playback to available group members when this player is the leader."""
+        await self._propagate_to_group_members("play_media", media)
+
+    async def _propagate_transport(self, command: Literal["play", "pause", "stop"]) -> None:
+        """Propagate a transport command to available group members when this player leads."""
+        await self._propagate_to_group_members(command)
+
+    async def _propagate_to_group_members(
+        self,
+        command: Literal["play_media", "play", "pause", "stop"],
+        media: PlayerMedia | None = None,
+    ) -> None:
+        """Propagate a typed command to available group members in parallel."""
         # Skip if grouping is disabled at provider level
         provider = cast("MSXBridgeProvider", self.provider)
         if not provider.grouping_enabled:
@@ -432,7 +448,7 @@ class MSXPlayer(Player):
                 member = self.mass.players.get_player(member_id)
                 if not member or not isinstance(member, MSXPlayer) or not member.available:
                     continue
-                tasks.append(asyncio.create_task(self._propagate_single(member, command, **kwargs)))
+                tasks.append(asyncio.create_task(self._propagate_single(member, command, media)))
             if tasks:
                 results = await asyncio.gather(*tasks, return_exceptions=True)
                 for result in results:
@@ -445,11 +461,15 @@ class MSXPlayer(Player):
         finally:
             self._propagating = False
 
-    async def _propagate_single(self, member: MSXPlayer, command: str, **kwargs: Any) -> None:
+    async def _propagate_single(
+        self,
+        member: MSXPlayer,
+        command: Literal["play_media", "play", "pause", "stop"],
+        media: PlayerMedia | None,
+    ) -> None:
         """Propagate a single command to one group member."""
         async with self.mass.players.get_player_lock(member.player_id, PlayerLockPurpose.PLAYBACK):
             if command == "play_media":
-                media = kwargs.get("media")
                 if media:
                     # Avoid the public redirect back to the leader while releasing
                     # the member's active source session through MA's handler.
@@ -488,4 +508,4 @@ class MSXPlayer(Player):
         self.update_state()
         if not self._skip_ws_notify:
             cast("MSXBridgeProvider", self.provider).notify_play_resumed(self.player_id)
-        await self._propagate_to_group_members("play")
+        await self._propagate_transport("play")

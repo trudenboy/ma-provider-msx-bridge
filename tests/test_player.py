@@ -11,7 +11,8 @@ from music_assistant_models.player import PlayerMedia
 from music_assistant_models.player_queue import PlayerQueue
 
 from music_assistant.controllers.players.constants import PlayerLockPurpose
-from provider.player import MSXPlayer
+from music_assistant.providers.msx_bridge.player import MSXPlayer
+from tests.providers.msx_bridge.factories import queue_item as make_queue_item
 
 # --- Initialization and properties ---
 
@@ -19,6 +20,11 @@ from provider.player import MSXPlayer
 def _update_state_mock(player: MSXPlayer) -> Mock:
     """Return the update-state mock installed by the player fixture."""
     return cast("Mock", player.update_state)
+
+
+def _player_media(uri: str, **kwargs: Any) -> PlayerMedia:
+    """Create a concrete media record with only the test-relevant fields."""
+    return PlayerMedia(uri=uri, **kwargs)
 
 
 def test_init_defaults(player: MSXPlayer) -> None:
@@ -63,13 +69,42 @@ def test_poll_interval_not_playing(player: MSXPlayer) -> None:
     assert player.poll_interval == 30
 
 
+def test_ws_connect_marks_player_available(player: MSXPlayer) -> None:
+    """A reconnect makes a previously unavailable TV available to MA again."""
+    player._attr_available = False
+
+    player.on_ws_connected()
+
+    assert player.available is True
+    _update_state_mock(player).assert_called_once()
+
+
+def test_mark_available_restores_offline_player(player: MSXPlayer) -> None:
+    """HTTP activity can restore a player that was marked unavailable."""
+    player._attr_available = False
+
+    player.mark_available()
+
+    assert player.available is True
+    _update_state_mock(player).assert_called_once()
+
+
+def test_ws_disconnect_marks_playing_player_unavailable(player: MSXPlayer) -> None:
+    """A playing TV that loses its only WebSocket must become unavailable."""
+    player._attr_playback_state = PlaybackState.PLAYING
+
+    player.on_ws_disconnected()
+
+    assert player.available is False
+    _update_state_mock(player).assert_called_once()
+
+
 # --- Playback ---
 
 
 async def test_play_media(player: MSXPlayer) -> None:
     """play_media should store stream URL, set state to PLAYING, and reset elapsed."""
-    media = Mock(spec=PlayerMedia)
-    media.uri = "http://ma-server/stream/12345"
+    media = _player_media("http://ma-server/stream/12345")
 
     await player.play_media(media)
 
@@ -83,8 +118,7 @@ async def test_play_media(player: MSXPlayer) -> None:
 
 async def test_play_media_sets_media_ready_event(player: MSXPlayer) -> None:
     """play_media should set _media_ready event so wait_for_media returns immediately."""
-    media = Mock(spec=PlayerMedia)
-    media.uri = "http://ma-server/stream/12345"
+    media = _player_media("http://ma-server/stream/12345")
 
     assert not player._media_ready.is_set()
     await player.play_media(media)
@@ -93,8 +127,7 @@ async def test_play_media_sets_media_ready_event(player: MSXPlayer) -> None:
 
 async def test_wait_for_media_returns_on_play(player: MSXPlayer) -> None:
     """wait_for_media should return the media once play_media sets the event."""
-    media = Mock(spec=PlayerMedia)
-    media.uri = "http://ma-server/stream/12345"
+    media = _player_media("http://ma-server/stream/12345")
 
     async def delayed_play() -> None:
         await asyncio.sleep(0.05)
@@ -108,8 +141,7 @@ async def test_wait_for_media_returns_on_play(player: MSXPlayer) -> None:
 
 async def test_wait_for_media_fast_path(player: MSXPlayer) -> None:
     """wait_for_media should return immediately if play_media already ran."""
-    media = Mock(spec=PlayerMedia)
-    media.uri = "http://ma-server/stream/12345"
+    media = _player_media("http://ma-server/stream/12345")
 
     # Simulate: queue.play_media already called player.play_media
     await player.play_media(media)
@@ -151,12 +183,10 @@ async def test_expect_new_media_arms_wait_for_media(player: MSXPlayer) -> None:
     wait_for_media return the stale current_media immediately — serving the
     previous track's stream to the TV.
     """
-    old_media = Mock(spec=PlayerMedia)
-    old_media.uri = "library://track/1"
+    old_media = _player_media("library://track/1")
     await player.play_media(old_media)
 
-    new_media = Mock(spec=PlayerMedia)
-    new_media.uri = "library://track/2"
+    new_media = _player_media("library://track/2")
     player.expect_new_media()
 
     async def delayed_play() -> None:
@@ -171,8 +201,7 @@ async def test_expect_new_media_arms_wait_for_media(player: MSXPlayer) -> None:
 
 async def test_expect_new_media_timeout_returns_none(player: MSXPlayer) -> None:
     """After expect_new_media(), wait_for_media times out with None if no play_media arrives."""
-    old_media = Mock(spec=PlayerMedia)
-    old_media.uri = "library://track/1"
+    old_media = _player_media("library://track/1")
     await player.play_media(old_media)
 
     player.expect_new_media()
@@ -236,7 +265,7 @@ async def test_pause_notifies_pause_on_msx(player: MSXPlayer) -> None:
 async def test_stop_clears_all(player: MSXPlayer) -> None:
     """stop() should reset state, media, elapsed, and stream URL."""
     player._attr_playback_state = PlaybackState.PLAYING
-    cast("Any", player)._attr_current_media = Mock()
+    player._attr_current_media = _player_media("library://track/1")
     cast("Any", player)._attr_elapsed_time = 42.0
     cast("Any", player).current_stream_url = "http://something"
 
@@ -352,14 +381,7 @@ async def test_play_media_propagates_to_group_members(provider: Any, mass_mock: 
     cast("Any", member).play_media = member_play_media
     mass_mock.players.get = mass_mock.players.get_player = Mock(return_value=member)
 
-    media = Mock(spec=PlayerMedia)
-    media.uri = "library://track/123"
-    media.title = None
-    media.artist = None
-    media.image_url = None
-    media.duration = None
-    media.source_id = None
-    media.queue_item_id = None
+    media = _player_media("library://track/123")
 
     with patch.object(leader.provider, "notify_play_started", Mock()):
         await leader.play_media(media)
@@ -377,14 +399,7 @@ async def test_play_media_no_propagation_when_empty_group(provider: Any, mass_mo
     cast("Any", leader).update_state = Mock()
     leader._attr_group_members = []
 
-    media = Mock(spec=PlayerMedia)
-    media.uri = "library://track/123"
-    media.title = None
-    media.artist = None
-    media.image_url = None
-    media.duration = None
-    media.source_id = None
-    media.queue_item_id = None
+    media = _player_media("library://track/123")
 
     with patch.object(leader.provider, "notify_play_started", Mock()):
         await leader.play_media(media)
@@ -433,14 +448,7 @@ async def test_propagation_skipped_when_grouping_disabled(provider: Any, mass_mo
     )
     mass_mock.players.get = mass_mock.players.get_player = Mock(return_value=member)
 
-    media = Mock(spec=PlayerMedia)
-    media.uri = "library://track/123"
-    media.title = None
-    media.artist = None
-    media.image_url = None
-    media.duration = None
-    media.source_id = None
-    media.queue_item_id = None
+    media = _player_media("library://track/123")
 
     with patch.object(leader.provider, "notify_play_started", Mock()):
         await leader.play_media(media)
@@ -487,14 +495,7 @@ async def test_propagation_recursion_guard(provider: Any, mass_mock: Mock) -> No
 
     mass_mock.players._handle_play_media.side_effect = play_member
 
-    media = Mock(spec=PlayerMedia)
-    media.uri = "library://track/123"
-    media.title = None
-    media.artist = None
-    media.image_url = None
-    media.duration = None
-    media.source_id = None
-    media.queue_item_id = None
+    media = _player_media("library://track/123")
 
     with patch.object(leader.provider, "notify_play_started", Mock()):
         # This should NOT infinitely recurse
@@ -510,14 +511,14 @@ async def test_propagation_recursion_guard(provider: Any, mass_mock: Mock) -> No
 
 async def test_play_media_queue_sends_playlist(player: MSXPlayer, mass_mock: Mock) -> None:
     """play_media with queue context should send playlist via WS instead of stream."""
-    media = Mock(spec=PlayerMedia)
-    media.uri = "http://ma-server/stream/12345"
-    media.title = "Track 1"
-    media.artist = "Artist 1"
-    media.image_url = None
-    media.duration = 180
-    media.source_id = "msx_test"
-    media.queue_item_id = "qi1"
+    media = _player_media(
+        "http://ma-server/stream/12345",
+        title="Track 1",
+        artist="Artist 1",
+        duration=180,
+        source_id="msx_test",
+        queue_item_id="qi1",
+    )
 
     queue = PlayerQueue(
         queue_id="msx_test",
@@ -531,11 +532,7 @@ async def test_play_media_queue_sends_playlist(player: MSXPlayer, mass_mock: Moc
     mass_mock.player_queues.get.return_value = queue
     mass_mock.player_queues.get_item.return_value = None
     mass_mock.player_queues.items.return_value = [
-        Mock(),
-        Mock(),
-        Mock(),
-        Mock(),
-        Mock(),
+        make_queue_item(queue_item_id=f"qi{index}") for index in range(5)
     ]
 
     with (
@@ -561,14 +558,9 @@ async def test_play_media_reloads_playlist_when_playing_from_queue(
     player._playlist_offset = 2
     player._playlist_size = 5
 
-    media = Mock(spec=PlayerMedia)
-    media.uri = "http://ma-server/stream/12345"
-    media.title = None
-    media.artist = None
-    media.image_url = None
-    media.duration = None
-    media.source_id = "msx_test"
-    media.queue_item_id = "qi2"
+    media = _player_media(
+        "http://ma-server/stream/12345", source_id="msx_test", queue_item_id="qi2"
+    )
 
     queue = PlayerQueue(
         queue_id="msx_test",
@@ -581,7 +573,9 @@ async def test_play_media_reloads_playlist_when_playing_from_queue(
 
     mass_mock.player_queues.get.return_value = queue
     mass_mock.player_queues.get_item.return_value = None
-    mass_mock.player_queues.items.return_value = [Mock()] * 5
+    mass_mock.player_queues.items.return_value = [
+        make_queue_item(queue_item_id=f"qi{index}") for index in range(5)
+    ]
 
     with (
         patch.object(player.provider, "notify_goto_index") as mock_goto,
@@ -601,14 +595,9 @@ async def test_play_media_skips_ws_when_skip_notify_set(player: MSXPlayer, mass_
     player._playing_from_queue = True
     player._skip_ws_notify = True
 
-    media = Mock(spec=PlayerMedia)
-    media.uri = "http://ma-server/stream/12345"
-    media.title = None
-    media.artist = None
-    media.image_url = None
-    media.duration = None
-    media.source_id = "msx_test"
-    media.queue_item_id = "qi2"
+    media = _player_media(
+        "http://ma-server/stream/12345", source_id="msx_test", queue_item_id="qi2"
+    )
 
     mass_mock.player_queues.get_item.return_value = None
 
@@ -631,15 +620,13 @@ async def test_play_media_non_queue_sends_broadcast_play(
     player: MSXPlayer,
 ) -> None:
     """play_media without queue context should push the media metadata via broadcast_play."""
-    media = Mock(spec=PlayerMedia)
-    media.uri = "http://ma-server/stream/12345"
-    media.title = "Track 1"
-    media.artist = "Artist 1"
-    media.image_url = "http://ma-server/image.png"
-    media.duration = 180
-    media.stream_duration = None
-    media.source_id = None
-    media.queue_item_id = None
+    media = _player_media(
+        "http://ma-server/stream/12345",
+        title="Track 1",
+        artist="Artist 1",
+        image_url="http://ma-server/image.png",
+        duration=180,
+    )
 
     with (
         patch.object(player.provider, "notify_play_playlist") as mock_playlist,
@@ -673,15 +660,7 @@ async def test_update_position_ignores_stale_report_after_track_change(
     player: MSXPlayer,
 ) -> None:
     """A leftover TV clock must not keep MA progress on the previous track."""
-    media = Mock(spec=PlayerMedia)
-    media.uri = "library://track/1"
-    media.title = None
-    media.artist = None
-    media.image_url = None
-    media.duration = 180
-    media.stream_duration = None
-    media.source_id = None
-    media.queue_item_id = None
+    media = _player_media("library://track/1", duration=180)
     with patch.object(player.provider, "notify_play_started"):
         await player.play_media(media)
     player.update_position(95.0)
@@ -692,15 +671,7 @@ async def test_update_position_ignores_stale_report_after_track_change(
 
 async def test_update_position_accepts_report_after_seek(player: MSXPlayer) -> None:
     """Seek must rebase the stale-position baseline so later reports stay valid."""
-    media = Mock(spec=PlayerMedia)
-    media.uri = "library://track/1"
-    media.title = None
-    media.artist = None
-    media.image_url = None
-    media.duration = 180
-    media.stream_duration = None
-    media.source_id = None
-    media.queue_item_id = None
+    media = _player_media("library://track/1", duration=180)
     with (
         patch.object(player.provider, "notify_play_started"),
         patch.object(player.provider, "notify_seek"),
@@ -713,15 +684,7 @@ async def test_update_position_accepts_report_after_seek(player: MSXPlayer) -> N
 
 async def test_note_tv_seek_trusts_jump_before_first_report(player: MSXPlayer) -> None:
     """A TV seek before any position report must not be treated as stale."""
-    media = Mock(spec=PlayerMedia)
-    media.uri = "library://track/1"
-    media.title = None
-    media.artist = None
-    media.image_url = None
-    media.duration = 180
-    media.stream_duration = None
-    media.source_id = None
-    media.queue_item_id = None
+    media = _player_media("library://track/1", duration=180)
     with patch.object(player.provider, "notify_play_started"):
         await player.play_media(media)
     player.note_tv_seek(80.0)
@@ -732,15 +695,7 @@ async def test_note_tv_seek_trusts_jump_before_first_report(player: MSXPlayer) -
 
 async def test_update_position_rebases_after_tv_seek(player: MSXPlayer) -> None:
     """A forward jump after a fresh report is a TV seek, not a stale clock."""
-    media = Mock(spec=PlayerMedia)
-    media.uri = "library://track/1"
-    media.title = None
-    media.artist = None
-    media.image_url = None
-    media.duration = 180
-    media.stream_duration = None
-    media.source_id = None
-    media.queue_item_id = None
+    media = _player_media("library://track/1", duration=180)
     with patch.object(player.provider, "notify_play_started"):
         await player.play_media(media)
     player.update_position(1.0)
@@ -770,9 +725,7 @@ def test_update_position(player: MSXPlayer) -> None:
 
 def test_update_position_clamps_to_served_stream_duration(player: MSXPlayer) -> None:
     """Position reports must not exceed the shortened stream served after a seek."""
-    media = Mock(spec=PlayerMedia)
-    media.duration = 300
-    media.stream_duration = 120
+    media = _player_media("library://track/1", duration=300, stream_duration=120)
     player._attr_current_media = media
     player._attr_playback_state = PlaybackState.PLAYING
 
@@ -830,9 +783,7 @@ async def test_poll_uses_wall_clock_when_ws_stale(player: MSXPlayer) -> None:
 
 async def test_poll_clamps_to_served_stream_duration(player: MSXPlayer) -> None:
     """Wall-clock progress must stop at the shortened stream served after a seek."""
-    media = Mock(spec=PlayerMedia)
-    media.duration = 300
-    media.stream_duration = 120
+    media = _player_media("library://track/1", duration=300, stream_duration=120)
     player._attr_current_media = media
     player._attr_playback_state = PlaybackState.PLAYING
     player._attr_elapsed_time = 115.0

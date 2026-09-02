@@ -20,6 +20,7 @@ from music_assistant_models.errors import (
     MusicAssistantError,
     ResourceTemporarilyUnavailable,
 )
+from music_assistant_models.media_items import Album, Track
 
 from .audio_stream import AudioPipeline, resolve_served_duration
 from .constants import (
@@ -39,10 +40,11 @@ from .mappers import (
     map_track_to_msx,
     map_tracks_to_msx_playlist,
     msx_list_page,
+    playlist_tracks_from_media_items,
     sort_album_tracks,
 )
 from .models import MsxContent, MsxItem, MsxTemplate
-from .party import PartyAdapter, PartyInfo, render_qr, stamp_qr_on_cover
+from .party import PartyAdapter, PartyInfo
 from .player import MSXPlayer
 from .queue_handshake import (
     find_uri_in_active_queue,
@@ -53,20 +55,15 @@ from .queue_handshake import (
 
 if TYPE_CHECKING:
     from multidict import MultiMapping
+    from music_assistant_models.media_items import ItemMapping, PlayableMediaItemType
     from music_assistant_models.player import PlayerMedia
 
     from .provider import MSXBridgeProvider
-
-# Test-facing aliases for the party adapter's render helpers.
-_render_qr = render_qr
-_stamp_qr_on_cover = stamp_qr_on_cover
 
 __all__ = [
     "STATIC_DIR",
     "MSXHTTPServer",
     "PartyInfo",
-    "_render_qr",
-    "_stamp_qr_on_cover",
 ]
 
 logger = logging.getLogger(__name__)
@@ -74,14 +71,6 @@ logger = logging.getLogger(__name__)
 STATIC_DIR = Path(__file__).parent / "static"
 
 _KNOWN_EXTENSIONS = (".mp3", ".json", ".flac", ".aac")
-
-
-def _queue_item_limit(queue: Any) -> int:
-    """Return how many items to read from an in-memory MA queue."""
-    count = getattr(queue, "items", None)
-    if isinstance(count, int) and count > 0:
-        return count
-    return 500
 
 
 def _int_param(query: MultiMapping[str], name: str, default: int, max_val: int = 10000) -> int:
@@ -571,7 +560,7 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
                 MsxItem(
                     label="MSX Player",
                     icon="msx-white-soft:tv",
-                    action=f"menu:request:interaction:init@{prefix}/msx/plugin.html?v=19",
+                    action=f"menu:request:interaction:init@{prefix}/msx/plugin.html?v=20",
                 ),
             ],
         )
@@ -758,6 +747,7 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
                 context_uri=t.uri,
             )
             for t in tracks
+            if t.uri
         ]
         content = MsxContent(
             headline="Tracks",
@@ -795,6 +785,7 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
                 context_uri=t.uri,
             )
             for t in tracks
+            if t.uri
         ]
         content = MsxContent(
             headline="Recently played",
@@ -956,10 +947,12 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
             items.append(item)
         for album in results.albums:
             item = await map_album_to_msx(album, prefix, self.provider, device_param)
-            item.label = f"Album — {getattr(album, 'artist_str', '')}"
+            item.label = f"Album — {album.artist_str if isinstance(album, Album) else ''}"
             item.icon = "msx-white-soft:album"
             items.append(item)
         for track in results.tracks:
+            if track.uri is None:
+                continue
             item = map_track_to_msx(
                 track,
                 prefix,
@@ -968,7 +961,7 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
                 device_param,
                 context_uri=track.uri,
             )
-            item.label = f"Track — {getattr(track, 'artist_str', '')}"
+            item.label = f"Track — {track.artist_str if isinstance(track, Track) else ''}"
             item.icon = "msx-white-soft:audiotrack"
             items.append(item)
         return items
@@ -1018,8 +1011,9 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
         _, device_param, _ = await self._ensure_player_for_request(request)
         prefix = self._get_prefix(request)
         item_id = request.match_info["item_id"]
+        provider = request.query.get("provider", "library")
         try:
-            albums = await self.provider.mass.music.artists.albums(item_id, "library")
+            albums = await self.provider.mass.music.artists.albums(item_id, provider)
         except MusicAssistantError, TimeoutError:
             logger.exception("Failed to fetch albums for artist %s", item_id)
             albums = []
@@ -1093,7 +1087,7 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
             logger.exception("Failed to fetch tracks for album playlist %s", item_id)
             tracks = []
         playlist = map_tracks_to_msx_playlist(
-            tracks,
+            playlist_tracks_from_media_items(tracks),
             start,
             prefix,
             player_id,
@@ -1117,7 +1111,7 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
             logger.exception("Failed to fetch tracks for playlist playlist %s", item_id)
             tracks = []
         playlist = map_tracks_to_msx_playlist(
-            tracks,
+            playlist_tracks_from_media_items(tracks),
             start,
             prefix,
             player_id,
@@ -1138,7 +1132,7 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
             limit=limit, offset=offset, summary=False
         )
         playlist = map_tracks_to_msx_playlist(
-            list(tracks),
+            playlist_tracks_from_media_items(tracks),
             start,
             prefix,
             player_id,
@@ -1157,7 +1151,7 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
             limit=50, order_by="last_played", summary=False
         )
         playlist = map_tracks_to_msx_playlist(
-            list(tracks),
+            playlist_tracks_from_media_items(tracks),
             start,
             prefix,
             player_id,
@@ -1178,7 +1172,7 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
         limit = _int_param(request.query, "limit", 20)
         results = await self.provider.mass.music.search(query, limit=limit)
         playlist = map_tracks_to_msx_playlist(
-            list(results.tracks),
+            playlist_tracks_from_media_items(results.tracks),
             start,
             prefix,
             player_id,
@@ -1201,11 +1195,12 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
         if "start" in request.query:
             start = _non_negative_int_param(request.query, "start", 0)
         else:
-            start = int(getattr(queue, "current_index", 0) or 0)
+            start = queue.current_index or 0 if queue else 0
 
-        tracks = queue_items_to_tracks(
-            self.provider.mass.player_queues.items(queue_id, limit=_queue_item_limit(queue))
+        queue_items = (
+            self.provider.mass.player_queues.items(queue_id, limit=queue.items) if queue else []
         )
+        tracks = queue_items_to_tracks(queue_items)
 
         playlist = map_tracks_to_msx_playlist(
             tracks,
@@ -1248,6 +1243,10 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
             return web.Response(status=400, text=str(err))
         except ResourceTemporarilyUnavailable as err:
             return web.Response(status=504, text=str(err))
+        except Exception:
+            # Some media providers expose their own auth/network exception types.
+            logger.exception("Unable to prepare audio for MSX player %s", player_id)
+            return web.Response(status=503, text="Unable to prepare audio")
 
         return await self._serve_audio_stream(
             request,
@@ -1266,7 +1265,7 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
         self,
         request: web.Request,
         player: MSXPlayer,
-        media: Any,
+        media: PlayerMedia,
         duration: int = 0,
     ) -> web.StreamResponse:
         """Serve this player's current media on this request."""
@@ -1438,13 +1437,13 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
                     {
                         "item_id": str(album.item_id),
                         "name": album.name,
-                        "artist": getattr(album, "artist_str", ""),
+                        "artist": album.artist_str,
                         "image": get_image_url(album, self.provider),
                         "uri": album.uri,
                     }
                     for album in albums
                 ],
-                "total": albums.total if hasattr(albums, "total") else len(albums),
+                "total": len(albums),
             }
         )
 
@@ -1476,7 +1475,7 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
                     }
                     for artist in artists
                 ],
-                "total": artists.total if hasattr(artists, "total") else len(artists),
+                "total": len(artists),
             }
         )
 
@@ -1490,7 +1489,7 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
                     {
                         "item_id": str(album.item_id),
                         "name": album.name,
-                        "artist": getattr(album, "artist_str", ""),
+                        "artist": album.artist_str,
                         "image": get_image_url(album, self.provider),
                         "uri": album.uri,
                     }
@@ -1517,7 +1516,7 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
                     }
                     for playlist in playlists
                 ],
-                "total": playlists.total if hasattr(playlists, "total") else len(playlists),
+                "total": len(playlists),
             }
         )
 
@@ -1541,7 +1540,7 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
         return web.json_response(
             {
                 "items": [self._format_track(track) for track in tracks],
-                "total": tracks.total if hasattr(tracks, "total") else len(tracks),
+                "total": len(tracks),
             }
         )
 
@@ -1567,7 +1566,7 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
                     {
                         "item_id": str(a.item_id),
                         "name": a.name,
-                        "artist": getattr(a, "artist_str", ""),
+                        "artist": a.artist_str if isinstance(a, Album) else "",
                         "image": get_image_url(a, self.provider),
                         "uri": a.uri,
                     }
@@ -1622,15 +1621,13 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
 
     async def _handle_party_qr_cover(self, request: web.Request) -> web.Response:
         """Serve a cover image with the party QR stamped into its corner (PNG)."""
-        extra_bases: list[str] = []
-        for source in (
-            getattr(self.provider.mass, "webserver", None),
-            getattr(self.provider.mass, "streams", None),
-        ):
-            base_url = getattr(source, "base_url", None)
-            if isinstance(base_url, str) and base_url.startswith("http"):
-                extra_bases.append(base_url)
-        return await self.party.handle_qr_cover(request, extra_bases=extra_bases)
+        return await self.party.handle_qr_cover(
+            request,
+            extra_bases=[
+                self.provider.mass.webserver.base_url,
+                self.provider.mass.streams.base_url,
+            ],
+        )
 
     # --- Playback Control ---
 
@@ -1682,10 +1679,15 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
         if track_uri and not await is_media_item_uri(track_uri):
             track_uri = None
         self.provider.on_player_activity(player_id)
-        with player.suppress_ws_notify():
-            player.expect_new_media()
-            await self.provider.mass.player_queues.play_media(player_id, uri)
-            await self._start_play_context(player_id, player, track_uri=track_uri, start=start)
+        try:
+            with player.suppress_ws_notify():
+                player.expect_new_media()
+                await self.provider.mass.player_queues.play_media(player_id, uri)
+                await self._start_play_context(player_id, player, track_uri=track_uri, start=start)
+        except Exception:
+            # Third-party media providers can raise their own auth/network errors.
+            logger.exception("Unable to start playback for MSX player %s", player_id)
+            return _msx_execute_error(503, "Unable to start playback")
         return _msx_execute_ok(self._queue_playlist_action(request, player_id))
 
     async def _handle_play(self, request: web.Request) -> web.Response:
@@ -1810,7 +1812,7 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
                 target_id = found[1]
         if target_id is None and start > 0 and start < len(items):
             target_id = items[start].queue_item_id
-        current_id = getattr(player.current_media, "queue_item_id", None)
+        current_id = player.current_media.queue_item_id if player.current_media else None
         if target_id is not None and target_id != current_id:
             await self.provider.mass.player_queues.play_index(queue.queue_id, target_id)
 
@@ -1819,22 +1821,22 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
         queue = self.provider.mass.player_queues.get_active_queue(player_id)
         if queue is None:
             return None
-        return getattr(queue, "current_index", None)
+        return queue.current_index
 
     def _queue_advanced(self, player_id: str, before: int | None) -> bool:
         """Return whether next/previous changed the item, or repeat-one restarted it."""
         queue = self.provider.mass.player_queues.get_active_queue(player_id)
-        after = getattr(queue, "current_index", None) if queue is not None else None
+        after = queue.current_index if queue is not None else None
         if before != after:
             return True
-        return getattr(queue, "repeat_mode", None) == RepeatMode.ONE
+        return queue is not None and queue.repeat_mode == RepeatMode.ONE
 
     def _queue_playlist_action(self, request: web.Request, player_id: str) -> str:
         """Build a playlist: action rotated so the current MA item is index 0."""
         prefix = self._get_prefix(request)
         queue = self.provider.mass.player_queues.get_active_queue(player_id)
         queue_id = queue.queue_id if queue is not None else player_id
-        start = int(getattr(queue, "current_index", 0) or 0) if queue is not None else 0
+        start = queue.current_index or 0 if queue is not None else 0
         url = f"{prefix}/msx/queue-playlist/{player_id}.json?start={start}&queue_id={queue_id}"
         device_id = request.query.get("device_id")
         if device_id:
@@ -1915,16 +1917,16 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
         )
         return player_id, device_param, player
 
-    def _format_track(self, track: Any) -> dict[str, Any]:
+    def _format_track(self, track: PlayableMediaItemType | ItemMapping) -> dict[str, Any]:
         """Format a track object for the API response."""
         return {
             "item_id": str(track.item_id),
             "name": track.name,
-            "artist": getattr(track, "artist_str", ""),
-            "album": getattr(getattr(track, "album", None), "name", ""),
-            "duration": getattr(track, "duration", 0),
+            "artist": track.artist_str if isinstance(track, Track) else "",
+            "album": track.album.name if isinstance(track, Track) and track.album else "",
+            "duration": track.duration if isinstance(track, Track) else 0,
             "image": self.provider.mass.metadata.get_image_url(track.image)
-            if hasattr(track, "image") and track.image
+            if track.image
             else None,
             "uri": track.uri,
         }

@@ -509,6 +509,17 @@
         }
     };
 
+    MAHandler.prototype.handleEvent = function(data) {
+        // Native MSX playback lives outside this plugin's DOM, so its media
+        // events arrive here rather than on a local audio/video element.
+        if (!data || typeof data.event !== "string") return;
+        if (data.event === "video:pause") {
+            onMediaPause();
+        } else if (data.event === "video:play") {
+            onMediaPlay();
+        }
+    };
+
     tvx.PluginTools.onReady(function() {
         tvx.InteractionPlugin.setupHandler(new MAHandler());
         tvx.InteractionPlugin.init();

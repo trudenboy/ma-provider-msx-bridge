@@ -4,16 +4,18 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
-from types import SimpleNamespace
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from music_assistant_models.errors import (
     InvalidDataError,
     InvalidProviderURI,
     ResourceTemporarilyUnavailable,
 )
+from music_assistant_models.media_items import Track
 
 from music_assistant.helpers.uri import parse_uri
+
+from .mappers import PlaylistTrack
 
 if TYPE_CHECKING:
     from music_assistant_models.player import PlayerMedia
@@ -71,17 +73,17 @@ def current_media_matches_uri(
     return queue_item is not None and queue_item.uri == track_uri
 
 
-def queue_items_to_tracks(queue_items: Sequence[QueueItem]) -> list[Any]:
-    """Adapt MA queue items into track-like objects for the playlist mapper."""
-    tracks: list[Any] = []
+def queue_items_to_tracks(queue_items: Sequence[QueueItem]) -> list[PlaylistTrack]:
+    """Adapt MA queue items into native-playlist rendering metadata."""
+    tracks: list[PlaylistTrack] = []
     for qi in queue_items:
         mi = qi.media_item
         tracks.append(
-            SimpleNamespace(
+            PlaylistTrack(
                 name=mi.name if mi else qi.name,
                 uri=qi.uri,
                 duration=(mi.duration if mi else qi.duration) or 0,
-                artist_str=getattr(mi, "artist_str", "") if mi else "",
+                artist=mi.artist_str if isinstance(mi, Track) else "",
                 image=qi.image,
                 queue_item_id=qi.queue_item_id,
             )

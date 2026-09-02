@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, Mock, patch
 import pytest
 from music_assistant_models.enums import ContentType
 from music_assistant_models.media_items import AudioFormat
+from music_assistant_models.player import PlayerMedia
 
 from music_assistant.providers.msx_bridge.audio_stream import READRATE_ARGS, AudioPipeline
 from music_assistant.providers.msx_bridge.player import MSXPlayer
@@ -262,7 +263,7 @@ async def test_shared_stream_paces_output(provider: MSXBridgeProvider, mass_mock
     pipeline = AudioPipeline(provider)
     player = MagicMock(spec=MSXPlayer)
     player.player_id = "msx_leader"
-    media = Mock(source_id=None, queue_item_id=None)
+    media = PlayerMedia(uri="library://track/1")
 
     mass_mock.streams = Mock()
     mass_mock.streams.get_stream = Mock(return_value=_chunks(b"pcm"))
@@ -325,7 +326,7 @@ async def test_serve_shared_registers_stream_so_stop_can_cancel(
     pipeline = AudioPipeline(provider)
     player = MagicMock(spec=MSXPlayer)
     player.player_id = "msx_tv"
-    media = Mock(uri="library://track/1", source_id=None, queue_item_id="")
+    media = PlayerMedia(uri="library://track/1", queue_item_id="")
     hanging = asyncio.Event()
     subscribed = asyncio.Event()
 
@@ -376,7 +377,7 @@ async def test_serve_shared_falls_back_when_member_codec_differs(
     pipeline = AudioPipeline(provider)
     member = MagicMock(spec=MSXPlayer)
     member.player_id = "msx_member"
-    media = Mock(uri="library://track/1", source_id=None, queue_item_id=None)
+    media = PlayerMedia(uri="library://track/1")
     pcm = AudioFormat(content_type=ContentType.PCM_S16LE)
     flac = AudioFormat(content_type=ContentType.FLAC)
     headers = {"Content-Type": "audio/flac"}
@@ -410,7 +411,7 @@ async def test_serve_shared_falls_back_when_member_filters_differ(
     pipeline = AudioPipeline(provider)
     member = MagicMock(spec=MSXPlayer)
     member.player_id = "msx_member"
-    media = Mock(uri="library://track/1", source_id=None, queue_item_id=None)
+    media = PlayerMedia(uri="library://track/1")
     pcm = AudioFormat(content_type=ContentType.PCM_S16LE)
     mp3 = AudioFormat(content_type=ContentType.MP3)
     independent = AsyncMock(return_value=Mock())
@@ -446,7 +447,7 @@ async def test_serve_shared_reuses_stream_when_member_codec_matches(
     pipeline = AudioPipeline(provider)
     member = MagicMock(spec=MSXPlayer)
     member.player_id = "msx_member"
-    media = Mock(uri="library://track/1", source_id=None, queue_item_id=None)
+    media = PlayerMedia(uri="library://track/1")
     pcm = AudioFormat(content_type=ContentType.PCM_S16LE)
     mp3 = AudioFormat(content_type=ContentType.MP3)
     headers = {"Content-Type": "audio/mpeg"}

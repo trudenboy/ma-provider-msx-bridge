@@ -1,0 +1,37 @@
+name: Upstream Compatibility
+
+on:
+  push:
+    branches: [dev]
+  pull_request:
+    branches: [main, dev]
+  schedule:
+    - cron: "0 7 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: upstream-compat-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  upstream-compat:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          python-version: "3.14"
+      - name: Install audio test dependency
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - name: Run against official Music Assistant dev
+        env:
+          MA_MOUNT_MODE: copy
+        run: ./scripts/test-upstream.sh all
+      - name: Record Music Assistant revision
+        if: always()
+        run: |
+          if [ -d .cache/ma-upstream/server/.git ]; then
+            echo "Music Assistant SHA: $(git -C .cache/ma-upstream/server rev-parse HEAD)" >> "$GITHUB_STEP_SUMMARY"
+          fi

@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from typing import cast
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from music_assistant_models.errors import InvalidDataError, PlayerUnavailableError
+from music_assistant_models.player import PlayerMedia
 
+from music_assistant.providers.msx_bridge.player import MSXPlayer
 from music_assistant.providers.msx_bridge.provider import MSXBridgeProvider
 
 
@@ -53,7 +56,7 @@ async def test_get_ma_stream_url_uses_streamserver(
     provider: MSXBridgeProvider, mass_mock: Mock
 ) -> None:
     """get_ma_stream_url must resolve the URL via the MA streamserver API."""
-    media = Mock()
+    media = PlayerMedia(uri="library://track/1")
     mass_mock.streams.resolve_stream_url = AsyncMock(
         return_value="http://ma:8097/single/s1/q1/i1/msx_test.mp3"
     )
@@ -78,7 +81,7 @@ async def test_get_ma_stream_url_rejects_flow_urls(
         return_value="http://ma:8097/flow/s1/q1/i1/msx_test.mp3"
     )
 
-    url = await provider.get_ma_stream_url("msx_test", Mock())
+    url = await provider.get_ma_stream_url("msx_test", PlayerMedia(uri="library://track/1"))
 
     assert url is None
 
@@ -89,7 +92,7 @@ async def test_get_ma_stream_url_returns_none_on_error(
     """get_ma_stream_url must degrade to None (proxy fallback) when resolution fails."""
     mass_mock.streams.resolve_stream_url = AsyncMock(side_effect=InvalidDataError("no session"))
 
-    url = await provider.get_ma_stream_url("msx_test", Mock())
+    url = await provider.get_ma_stream_url("msx_test", PlayerMedia(uri="library://track/1"))
 
     assert url is None
     mass_mock.streams.resolve_stream_url.assert_awaited_once()
@@ -102,7 +105,7 @@ async def test_get_ma_stream_url_does_not_swallow_unexpected_error(
     mass_mock.streams.resolve_stream_url = AsyncMock(side_effect=ValueError("bug"))
 
     with pytest.raises(ValueError, match="bug"):
-        await provider.get_ma_stream_url("msx_test", Mock())
+        await provider.get_ma_stream_url("msx_test", PlayerMedia(uri="library://track/1"))
 
 
 def test_on_player_activity_uses_monotonic_clock(provider: MSXBridgeProvider) -> None:
@@ -118,6 +121,18 @@ def test_on_player_activity_uses_monotonic_clock(provider: MSXBridgeProvider) ->
         provider.on_player_activity("msx_x")
 
     assert provider._player_last_activity["msx_x"] == 1234.0
+
+
+def test_on_player_activity_restores_unavailable_player(
+    provider: MSXBridgeProvider, mass_mock: Mock, player: MSXPlayer
+) -> None:
+    """A later HTTP request from the TV must make the player available to MA again."""
+    player._attr_available = False
+    mass_mock.players.get_player = Mock(return_value=player)
+
+    provider.on_player_activity(player.player_id)
+
+    assert player.available is True
 
 
 async def test_loaded_in_mass_starts_timeout_task(provider: MSXBridgeProvider) -> None:
@@ -147,6 +162,11 @@ async def test_unload_stops_server_first(provider: MSXBridgeProvider) -> None:
     await provider.unload()
 
     mock_server.stop.assert_awaited_once()
+    cast("Mock", provider.mass.players.iter_players).assert_called_once_with(
+        return_disabled=True,
+        provider_filter=provider.instance_id,
+        return_protocol_players=True,
+    )
     provider.mass.players.unregister.assert_awaited_once_with("msx_test")  # type: ignore[attr-defined]
 
 

@@ -19,8 +19,6 @@ from music_assistant_models.errors import MusicAssistantError
 from music_assistant.models.player_provider import PlayerProvider
 
 from .audio_stream import SharedGroupStream
-
-__all__ = ["MSXBridgeProvider", "SharedGroupStream"]
 from .constants import (
     CONF_ENABLE_GROUPING,
     CONF_GROUP_STREAM_MODE,
@@ -42,7 +40,11 @@ from .constants import (
 from .http_server import MSXHTTPServer
 from .player import MSXPlayer
 
+__all__ = ["MSXBridgeProvider", "SharedGroupStream"]
+
 if TYPE_CHECKING:
+    from music_assistant_models.player import PlayerMedia
+
     from music_assistant.controllers.streams.audio_processing import AudioOutputPlan
 
 logger = logging.getLogger(__name__)
@@ -172,7 +174,12 @@ class MSXBridgeProvider(PlayerProvider):
 
         if self.http_server:
             await self.http_server.stop()
-        for player in list(self.players):
+        players = self.mass.players.iter_players(
+            return_disabled=True,
+            provider_filter=self.instance_id,
+            return_protocol_players=True,
+        )
+        for player in players:
             try:
                 self.logger.debug("Unloading player %s", player.display_name)
                 await self.mass.players.unregister(player.player_id)
@@ -240,6 +247,9 @@ class MSXBridgeProvider(PlayerProvider):
         """Record activity for a player (extends idle timeout)."""
         # Monotonic: a wall-clock NTP step must not age players past the cutoff
         self._player_last_activity[player_id] = time.monotonic()
+        player = self.mass.players.get_player(player_id, raise_unavailable=False)
+        if isinstance(player, MSXPlayer):
+            player.mark_available()
 
     def on_player_disabled(self, player_id: str) -> None:
         """
@@ -378,12 +388,7 @@ class MSXBridgeProvider(PlayerProvider):
         return digest.hexdigest()[:32]
 
     def get_group_id_for_player(self, player: MSXPlayer) -> str | None:
-        """
-        Get group ID if player is in a group (as leader or member).
-
-        Returns:
-            group_id if player is grouped, None if solo player.
-        """
+        """Return a group ID when player is a leader or member, else None."""
         # If player is synced to another (member), use leader's ID as group
         if player.synced_to:
             logger.debug(
@@ -495,7 +500,7 @@ class MSXBridgeProvider(PlayerProvider):
             self._background_tasks.add(task)
             task.add_done_callback(self._background_tasks.discard)
 
-    async def get_ma_stream_url(self, player_id: str, media: Any) -> str | None:
+    async def get_ma_stream_url(self, player_id: str, media: PlayerMedia) -> str | None:
         """
         Resolve the direct MA Streamserver URL for the given media.
 
