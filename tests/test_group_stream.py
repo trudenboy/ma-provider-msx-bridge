@@ -12,6 +12,7 @@ from music_assistant_models.enums import ContentType
 from music_assistant_models.media_items import AudioFormat
 from music_assistant_models.player import PlayerMedia
 
+from music_assistant.controllers.streams.constants import output_pacing_args
 from music_assistant.providers.msx_bridge.audio_stream import READRATE_ARGS, AudioPipeline
 from music_assistant.providers.msx_bridge.player import MSXPlayer
 from music_assistant.providers.msx_bridge.provider import SharedGroupStream
@@ -285,6 +286,7 @@ async def test_shared_stream_paces_output(provider: MSXBridgeProvider, mass_mock
         # leader path: player_id == group_id
         await pipeline.serve_shared(Mock(), player, media, "msx_leader", pcm, out, {})
 
+    assert output_pacing_args("gapless_burst") == READRATE_ARGS
     assert ffmpeg_mock.call_args.kwargs["extra_input_args"] == READRATE_ARGS
 
 

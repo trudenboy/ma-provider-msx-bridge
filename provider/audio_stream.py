@@ -34,7 +34,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-READRATE_ARGS = output_pacing_args()
+READRATE_ARGS = output_pacing_args("gapless_burst")
 
 
 class SharedGroupStream:
