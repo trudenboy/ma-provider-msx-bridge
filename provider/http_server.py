@@ -22,6 +22,8 @@ from music_assistant_models.errors import (
 )
 from music_assistant_models.media_items import Album, Track
 
+from music_assistant.controllers.webserver.helpers.auth_middleware import ImpersonatedUser
+
 from .audio_stream import AudioPipeline, resolve_served_duration
 from .constants import (
     CONF_SHOW_STOP_NOTIFICATION,
@@ -1186,6 +1188,8 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
 
     async def _handle_queue_playlist(self, request: web.Request) -> web.Response:
         """Return the current MA queue as an MSX native playlist."""
+        if rejected := self._reject_cross_site(request):
+            return rejected
         device_id = request.query.get("device_id")
         device_param = f"device_id={quote(device_id, safe='')}" if device_id else ""
         prefix = self._get_prefix(request)
@@ -1243,8 +1247,7 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
             return web.Response(status=400, text=str(err))
         except ResourceTemporarilyUnavailable as err:
             return web.Response(status=504, text=str(err))
-        except Exception:
-            # Some media providers expose their own auth/network exception types.
+        except MusicAssistantError, OSError, TimeoutError:
             logger.exception("Unable to prepare audio for MSX player %s", player_id)
             return web.Response(status=503, text="Unable to prepare audio")
 
@@ -1680,12 +1683,16 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
             track_uri = None
         self.provider.on_player_activity(player_id)
         try:
-            with player.suppress_ws_notify():
-                player.expect_new_media()
-                await self.provider.mass.player_queues.play_media(player_id, uri)
-                await self._start_play_context(player_id, player, track_uri=track_uri, start=start)
-        except Exception:
-            # Third-party media providers can raise their own auth/network errors.
+            async with ImpersonatedUser(
+                self.provider.mass, await self.provider.get_owner_username()
+            ):
+                with player.suppress_ws_notify():
+                    player.expect_new_media()
+                    await self.provider.mass.player_queues.play_media(player_id, uri)
+                    await self._start_play_context(
+                        player_id, player, track_uri=track_uri, start=start
+                    )
+        except MusicAssistantError, OSError, TimeoutError:
             logger.exception("Unable to start playback for MSX player %s", player_id)
             return _msx_execute_error(503, "Unable to start playback")
         return _msx_execute_ok(self._queue_playlist_action(request, player_id))
@@ -1714,7 +1721,8 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
         if self._get_msx_player(player_id) is None:
             return web.json_response({"error": "Unknown MSX player"}, status=404)
 
-        await self.provider.mass.player_queues.play_media(player_id, track_uri)
+        async with ImpersonatedUser(self.provider.mass, await self.provider.get_owner_username()):
+            await self.provider.mass.player_queues.play_media(player_id, track_uri)
         return web.json_response({"status": "ok"})
 
     async def _handle_pause(self, request: web.Request) -> web.Response:

@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.9] - 2026-09-03
+
+### Fixed
+
+- MSX playback requests retain owner attribution in Music Assistant's play log.
+- Audio preparation and context playback only convert expected operational failures into MSX-safe errors.
+
+### Security
+
+- Queue playlist routes reject cross-site browser requests before returning token-bearing stream actions.
+
 ## [1.5.8] - 2026-09-03
 
 ### Fixed
