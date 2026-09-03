@@ -60,7 +60,6 @@ class MSXBridgeProvider(PlayerProvider):
     _pending_unregisters: dict[str, asyncio.Event]
     _stream_token_secret: bytes
     _timeout_task: asyncio.Task[None] | None = None
-    _owner_username: str | None = None
     _shared_streams: dict[str, SharedGroupStream]  # group_id -> SharedGroupStream
     _shared_stream_lock: asyncio.Lock
     _background_tasks: set[asyncio.Task[None]]  # fire-and-forget tasks (unregister, stream stop)
@@ -187,20 +186,6 @@ class MSXBridgeProvider(PlayerProvider):
                 self.logger.exception("Error unregistering player %s", player.player_id)
         self._player_last_activity.clear()
         self.logger.info("MSX Bridge provider unloaded")
-
-    async def get_owner_username(self) -> str | None:
-        """Resolve and cache the first enabled user's username for playlog attribution."""
-        if self._owner_username is None:
-            try:
-                users = await self.mass.webserver.auth.list_users()
-                for user in users:
-                    if user.enabled and user.username:
-                        self._owner_username = user.username
-                        self.logger.debug("Resolved owner username: %s", self._owner_username)
-                        break
-            except MusicAssistantError as err:
-                self.logger.warning("Could not resolve owner username: %s", err)
-        return self._owner_username
 
     async def discover_players(self) -> None:
         """Discover players — MSX players are registered on demand when TVs connect."""

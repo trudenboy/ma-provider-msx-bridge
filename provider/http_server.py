@@ -478,7 +478,12 @@ class MSXHTTPServer:
                     "Access-Control-Allow-Headers": "*",
                 }
             )
-        response: web.StreamResponse = await handler(request)
+        if request.path.startswith(("/msx/playlist/", "/msx/queue-playlist/")) and (
+            rejected := self._reject_cross_site(request)
+        ):
+            response: web.StreamResponse = rejected
+        else:
+            response = await handler(request)
         if not _is_audio_path(request.path):
             response.headers["Access-Control-Allow-Origin"] = "*"
         return response
@@ -1188,8 +1193,6 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
 
     async def _handle_queue_playlist(self, request: web.Request) -> web.Response:
         """Return the current MA queue as an MSX native playlist."""
-        if rejected := self._reject_cross_site(request):
-            return rejected
         device_id = request.query.get("device_id")
         device_param = f"device_id={quote(device_id, safe='')}" if device_id else ""
         prefix = self._get_prefix(request)
@@ -1683,9 +1686,7 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
             track_uri = None
         self.provider.on_player_activity(player_id)
         try:
-            async with ImpersonatedUser(
-                self.provider.mass, await self.provider.get_owner_username()
-            ):
+            async with ImpersonatedUser(self.provider.mass, None):
                 with player.suppress_ws_notify():
                     player.expect_new_media()
                     await self.provider.mass.player_queues.play_media(player_id, uri)
@@ -1721,7 +1722,7 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
         if self._get_msx_player(player_id) is None:
             return web.json_response({"error": "Unknown MSX player"}, status=404)
 
-        async with ImpersonatedUser(self.provider.mass, await self.provider.get_owner_username()):
+        async with ImpersonatedUser(self.provider.mass, None):
             await self.provider.mass.player_queues.play_media(player_id, track_uri)
         return web.json_response({"status": "ok"})
 

@@ -478,10 +478,11 @@ async def test_play_track(provider: MSXBridgeProvider, mass_mock: Mock) -> None:
         await client.close()
 
 
-async def test_play_track_impersonates_owner(provider: MSXBridgeProvider, mass_mock: Mock) -> None:
-    """Dashboard playback should retain owner attribution in the MA play log."""
+async def test_play_track_uses_external_hardware_context(
+    provider: MSXBridgeProvider, mass_mock: Mock
+) -> None:
+    """Unauthenticated MSX playback should use the external hardware context."""
     _register_msx_player(mass_mock, provider, "msx_test")
-    provider.get_owner_username = AsyncMock(return_value="owner")  # type: ignore[method-assign]
     context = MagicMock()
     context.__aenter__ = AsyncMock()
     context.__aexit__ = AsyncMock()
@@ -495,17 +496,19 @@ async def test_play_track_impersonates_owner(provider: MSXBridgeProvider, mass_m
     client = AiohttpTestClient(TestServer(server.app))
     await client.start_server()
     try:
-        with patch(
-            "music_assistant.providers.msx_bridge.http_server.ImpersonatedUser",
-            return_value=context,
-        ) as impersonated:
+        with (
+            patch(
+                "music_assistant.providers.msx_bridge.http_server.ImpersonatedUser",
+                return_value=context,
+            ) as impersonated,
+        ):
             response = await client.post(
                 "/api/play",
                 json={"track_uri": "library://track/1", "player_id": "msx_test"},
             )
 
         assert response.status == 200
-        impersonated.assert_called_once_with(mass_mock, "owner")
+        impersonated.assert_called_once_with(mass_mock, None)
         context.__aexit__.assert_awaited_once()
     finally:
         await client.close()
@@ -541,12 +544,11 @@ async def test_play_context_enqueues_container_then_index(
         await client.close()
 
 
-async def test_play_context_impersonates_owner(
+async def test_play_context_uses_external_hardware_context(
     provider: MSXBridgeProvider, mass_mock: Mock
 ) -> None:
-    """MSX menu playback should retain owner attribution in the MA play log."""
+    """Unauthenticated MSX menu playback should use the external hardware context."""
     player = _register_msx_player(mass_mock, provider, "msx_test")
-    provider.get_owner_username = AsyncMock(return_value="owner")  # type: ignore[method-assign]
     context = MagicMock()
     context.__aenter__ = AsyncMock()
     context.__aexit__ = AsyncMock()
@@ -570,7 +572,7 @@ async def test_play_context_impersonates_owner(
             response = await client.get("/api/play-context/msx_test?uri=library://album/9&start=0")
 
         assert response.status == 200
-        impersonated.assert_called_once_with(mass_mock, "owner")
+        impersonated.assert_called_once_with(mass_mock, None)
         context.__aexit__.assert_awaited_once()
     finally:
         await client.close()
@@ -2350,23 +2352,29 @@ async def test_msx_queue_playlist_endpoint(provider: MSXBridgeProvider, mass_moc
         await client.close()
 
 
-async def test_queue_playlist_rejects_cross_site_before_exposing_stream_token(
-    provider: MSXBridgeProvider, mass_mock: Mock
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/msx/playlist/album/42.json",
+        "/msx/playlist/playlist/5.json",
+        "/msx/playlist/tracks.json",
+        "/msx/playlist/recently-played.json",
+        "/msx/playlist/search.json?q=test",
+        "/msx/queue-playlist/msx_test.json",
+    ],
+)
+async def test_token_bearing_playlists_reject_cross_site_requests(
+    provider: MSXBridgeProvider, path: str
 ) -> None:
-    """Cross-site callers must not receive token-bearing queue actions."""
+    """Cross-site callers must not receive token-bearing playlist actions."""
     server = MSXHTTPServer(provider, 0)
     client = AiohttpTestClient(TestServer(server.app))
     await client.start_server()
     try:
-        response = await client.get(
-            "/msx/queue-playlist/msx_test.json",
-            headers={"Sec-Fetch-Site": "cross-site"},
-        )
+        response = await client.get(path, headers={"Sec-Fetch-Site": "cross-site"})
 
         assert response.status == 403
         assert provider.get_stream_token("msx_test") not in await response.text()
-        mass_mock.player_queues.get.assert_not_called()
-        mass_mock.player_queues.items.assert_not_called()
     finally:
         await client.close()
 
