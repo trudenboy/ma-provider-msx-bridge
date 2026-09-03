@@ -260,6 +260,7 @@
     }
 
     function reportTvSeek(pos) {
+        pausedAtPosition = pos;
         var now = Date.now();
         if (pendingServerSeek != null && now <= pendingServerSeekUntil) {
             if (Math.abs(pos - pendingServerSeek) <= 2) {

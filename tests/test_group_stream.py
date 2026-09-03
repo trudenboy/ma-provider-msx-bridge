@@ -13,7 +13,13 @@ from music_assistant_models.media_items import AudioFormat
 from music_assistant_models.player import PlayerMedia
 
 from music_assistant.controllers.streams.constants import output_pacing_args
-from music_assistant.providers.msx_bridge.audio_stream import READRATE_ARGS, AudioPipeline
+from music_assistant.providers.msx_bridge.audio_stream import (
+    READRATE_ARGS,
+    SHARED_BUFFER_CHUNKS,
+    SHARED_BUFFER_MAX_BYTES,
+    SHARED_STREAM_CHUNK_SIZE,
+    AudioPipeline,
+)
 from music_assistant.providers.msx_bridge.player import MSXPlayer
 from music_assistant.providers.msx_bridge.provider import SharedGroupStream
 
@@ -60,6 +66,18 @@ async def test_late_joiner_after_finish_does_not_hang() -> None:
     # Late subscriber: must get catch-up data and exit cleanly (no hang).
     result = await asyncio.wait_for(_collect(stream, "late"), timeout=5.0)
     assert result == [b"x", b"y"]
+
+
+async def test_catch_up_buffer_is_bounded_by_encoded_bytes() -> None:
+    """Catch-up storage must remain near 15 seconds of 320 kbps audio."""
+    stream = SharedGroupStream("g1", "uri://test")
+    chunks = [b"x" * SHARED_STREAM_CHUNK_SIZE] * (SHARED_BUFFER_CHUNKS + 5)
+    await stream.start(_chunks(*chunks))
+    assert stream.producer_task is not None
+    await stream.producer_task
+
+    assert len(stream.buffer) == SHARED_BUFFER_CHUNKS
+    assert sum(map(len, stream.buffer)) <= SHARED_BUFFER_MAX_BYTES
 
 
 async def test_late_joiner_with_empty_stream_does_not_hang() -> None:
@@ -287,6 +305,7 @@ async def test_shared_stream_paces_output(provider: MSXBridgeProvider, mass_mock
         await pipeline.serve_shared(Mock(), player, media, "msx_leader", pcm, out, {})
 
     assert output_pacing_args("gapless_burst") == READRATE_ARGS
+    assert ffmpeg_mock.call_args.kwargs["chunk_size"] == SHARED_STREAM_CHUNK_SIZE
     assert ffmpeg_mock.call_args.kwargs["extra_input_args"] == READRATE_ARGS
 
 

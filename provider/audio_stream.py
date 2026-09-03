@@ -35,6 +35,10 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 READRATE_ARGS = output_pacing_args("gapless_burst")
+# Roughly 15 seconds at the highest supported MP3 bitrate, bounded per reader.
+SHARED_STREAM_CHUNK_SIZE = 16_000
+SHARED_BUFFER_MAX_BYTES = 600_000
+SHARED_BUFFER_CHUNKS = SHARED_BUFFER_MAX_BYTES // SHARED_STREAM_CHUNK_SIZE
 
 
 class SharedGroupStream:
@@ -57,7 +61,7 @@ class SharedGroupStream:
         self.media_uri = media_uri
         self.session_id = session_id
         self.content_type = content_type
-        self.buffer: deque[bytes] = deque(maxlen=512)  # ~15s @ 40KB/s MP3
+        self.buffer: deque[bytes] = deque(maxlen=SHARED_BUFFER_CHUNKS)
         self.subscribers: dict[str, asyncio.Queue[bytes | None]] = {}
         self.producer_task: asyncio.Task[None] | None = None
         self.started = asyncio.Event()
@@ -93,7 +97,7 @@ class SharedGroupStream:
 
         :yield: Audio chunks, first from the catch-up buffer and then live output.
         """
-        q: asyncio.Queue[bytes | None] = asyncio.Queue(maxsize=512)
+        q: asyncio.Queue[bytes | None] = asyncio.Queue(maxsize=SHARED_BUFFER_CHUNKS)
 
         bytes_sent = 0
         chunks_sent = 0
@@ -431,6 +435,7 @@ class AudioPipeline:
                 input_format=pcm_format,
                 output_format=out_format,
                 filter_params=output_plan.filter_params,
+                chunk_size=SHARED_STREAM_CHUNK_SIZE,
                 extra_input_args=READRATE_ARGS,
             )
             shared_stream = await self.provider.get_or_create_shared_stream(
