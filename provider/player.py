@@ -257,12 +257,19 @@ class MSXPlayer(Player):
 
     def note_tv_seek(self, position: float) -> None:
         """Trust a TV-initiated seek even before the first position report."""
-        if self._attr_playback_state != PlaybackState.PLAYING:
+        if self._attr_playback_state not in (PlaybackState.PLAYING, PlaybackState.PAUSED):
             return
+        normalized = max(0.0, float(position))
         self._accepted_position = True
         if self._track_started_at > 0:
-            self._track_started_at = time.monotonic() - max(0.0, float(position))
-        self.update_position(position)
+            self._track_started_at = time.monotonic() - normalized
+        duration = self._served_duration()
+        if duration is not None:
+            normalized = min(normalized, duration)
+        self._attr_elapsed_time = normalized
+        self._attr_elapsed_time_last_updated = time.time()
+        self._last_ws_position = time.monotonic()
+        self.update_state()
 
     async def poll(self) -> None:
         """

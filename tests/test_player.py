@@ -693,6 +693,19 @@ async def test_note_tv_seek_trusts_jump_before_first_report(player: MSXPlayer) -
     assert player._attr_elapsed_time == 81.0
 
 
+async def test_note_tv_seek_updates_position_while_paused(player: MSXPlayer) -> None:
+    """A native seek while paused must update MA without trusting later position reports."""
+    media = _player_media("library://track/1", duration=180)
+    with patch.object(player.provider, "notify_play_started"):
+        await player.play_media(media)
+    player._attr_playback_state = PlaybackState.PAUSED
+
+    player.note_tv_seek(80.0)
+    player.update_position(90.0)
+
+    assert player._attr_elapsed_time == 80.0
+
+
 async def test_update_position_rebases_after_tv_seek(player: MSXPlayer) -> None:
     """A forward jump after a fresh report is a TV seek, not a stale clock."""
     media = _player_media("library://track/1", duration=180)

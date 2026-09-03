@@ -116,6 +116,7 @@ async def test_plugin_html(http_client: TestClient[Any, Any]) -> None:
     assert 'data.event === "video:pause"' in body
     assert 'data.event === "video:seek"' in body
     assert "reportTvSeek" in body
+    assert "reportTvSeek(pos) {\n        pausedAtPosition = pos;" in body
     assert 'msg.type === "sendspin"' not in body
     assert "pendingServerSeek" in body
     assert "clearPendingServerSeek" in body
