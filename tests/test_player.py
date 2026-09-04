@@ -4,13 +4,12 @@ from __future__ import annotations
 
 import asyncio
 from typing import Any, cast
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import Mock, patch
 
 from music_assistant_models.enums import PlaybackState, PlayerFeature, PlayerType
 from music_assistant_models.player import PlayerMedia
 from music_assistant_models.player_queue import PlayerQueue
 
-from music_assistant.controllers.players.constants import PlayerLockPurpose
 from music_assistant.providers.msx_bridge.player import MSXPlayer
 from tests.providers.msx_bridge.factories import queue_item as make_queue_item
 
@@ -33,7 +32,7 @@ def test_init_defaults(player: MSXPlayer) -> None:
     assert player._attr_type == PlayerType.PLAYER
     assert isinstance(player._prepare_lock, asyncio.Lock)
     assert PlayerFeature.PAUSE in player._attr_supported_features
-    assert PlayerFeature.SET_MEMBERS in player._attr_supported_features
+    assert PlayerFeature.SET_MEMBERS not in player._attr_supported_features
     assert PlayerFeature.VOLUME_SET in player._attr_supported_features
     assert player._attr_available is True
     assert player._attr_powered is True
@@ -332,178 +331,6 @@ async def test_poll_noop_when_idle(player: MSXPlayer) -> None:
     await player.poll()
 
     _update_state_mock(player).assert_not_called()
-
-
-# --- Grouping ---
-
-
-async def test_set_members_add_and_remove(provider: Any, mass_mock: Mock) -> None:
-    """set_members should add and remove group members."""
-    leader = MSXPlayer(provider, "msx_leader", name="Leader TV", output_format="mp3")
-    cast("Any", leader).update_state = Mock()
-    member = MSXPlayer(provider, "msx_member", name="Member TV", output_format="mp3")
-    cast("Any", member).update_state = Mock()
-    mass_mock.players.get = mass_mock.players.get_player = Mock(
-        side_effect=lambda pid: member if pid == "msx_member" else None
-    )
-
-    await leader.set_members(player_ids_to_add=["msx_member"])
-
-    # Leader must be first, member second
-    assert leader._attr_group_members == ["msx_leader", "msx_member"]
-    _update_state_mock(leader).assert_called()
-
-    await leader.set_members(player_ids_to_remove=["msx_member"])
-
-    # No other members: list must be empty (solo player)
-    assert leader._attr_group_members == []
-
-
-async def test_set_members_ignores_self_and_non_msx(provider: Any, mass_mock: Mock) -> None:
-    """set_members should not add self or non-MSX players."""
-    leader = MSXPlayer(provider, "msx_leader", name="Leader TV", output_format="mp3")
-    cast("Any", leader).update_state = Mock()
-    mass_mock.players.get = mass_mock.players.get_player = Mock(return_value=None)
-
-    await leader.set_members(player_ids_to_add=["msx_leader", "msx_other", "sendspin_123"])
-
-    assert leader._attr_group_members == []
-
-
-async def test_play_media_propagates_to_group_members(provider: Any, mass_mock: Mock) -> None:
-    """play_media should propagate to group members through the internal handler."""
-    leader = MSXPlayer(provider, "msx_leader", name="Leader TV", output_format="mp3")
-    cast("Any", leader).update_state = Mock()
-    leader._attr_group_members = ["msx_leader", "msx_member"]
-    member = MSXPlayer(provider, "msx_member", name="Member TV", output_format="mp3")
-    cast("Any", member).update_state = Mock()
-    member_play_media = AsyncMock()
-    cast("Any", member).play_media = member_play_media
-    mass_mock.players.get = mass_mock.players.get_player = Mock(return_value=member)
-
-    media = _player_media("library://track/123")
-
-    with patch.object(leader.provider, "notify_play_started", Mock()):
-        await leader.play_media(media)
-
-    mass_mock.players._handle_play_media.assert_awaited_once_with("msx_member", media)
-    member_play_media.assert_not_called()
-    mass_mock.players.get_player_lock.assert_called_once_with(
-        "msx_member", PlayerLockPurpose.PLAYBACK
-    )
-
-
-async def test_play_media_no_propagation_when_empty_group(provider: Any, mass_mock: Mock) -> None:
-    """play_media with empty group_members should not call mass.players.play_media."""
-    leader = MSXPlayer(provider, "msx_leader", name="Leader TV", output_format="mp3")
-    cast("Any", leader).update_state = Mock()
-    leader._attr_group_members = []
-
-    media = _player_media("library://track/123")
-
-    with patch.object(leader.provider, "notify_play_started", Mock()):
-        await leader.play_media(media)
-
-    mass_mock.players._handle_play_media.assert_not_awaited()
-
-
-async def test_stop_propagates_to_group_members(provider: Any, mass_mock: Mock) -> None:
-    """stop() should propagate to group members when leader."""
-    leader = MSXPlayer(provider, "msx_leader", name="Leader TV", output_format="mp3")
-    cast("Any", leader).update_state = Mock()
-    leader._attr_group_members = ["msx_leader", "msx_member"]
-    member = MSXPlayer(provider, "msx_member", name="Member TV", output_format="mp3")
-    member_stop = AsyncMock()
-    cast("Any", member).stop = member_stop
-    mass_mock.players.get = mass_mock.players.get_player = Mock(return_value=member)
-
-    with patch.object(leader.provider, "notify_play_stopped", Mock()):
-        await leader.stop()
-
-    mass_mock.players._handle_cmd_stop.assert_awaited_once_with("msx_member")
-    member_stop.assert_not_called()
-
-
-# --- Grouping: disable and recursion guard ---
-
-
-async def test_propagation_skipped_when_grouping_disabled(provider: Any, mass_mock: Mock) -> None:
-    """play_media should NOT propagate to members when grouping is disabled."""
-    provider.grouping_enabled = False
-    leader = MSXPlayer(
-        provider,
-        "msx_leader",
-        name="Leader TV",
-        output_format="mp3",
-        grouping_enabled=False,
-    )
-    cast("Any", leader).update_state = Mock()
-    leader._attr_group_members = ["msx_leader", "msx_member"]
-    member = MSXPlayer(
-        provider,
-        "msx_member",
-        name="Member TV",
-        output_format="mp3",
-        grouping_enabled=False,
-    )
-    mass_mock.players.get = mass_mock.players.get_player = Mock(return_value=member)
-
-    media = _player_media("library://track/123")
-
-    with patch.object(leader.provider, "notify_play_started", Mock()):
-        await leader.play_media(media)
-
-    mass_mock.players._handle_play_media.assert_not_awaited()
-
-
-def test_no_set_members_feature_when_grouping_disabled(provider: Any) -> None:
-    """MSXPlayer should not declare SET_MEMBERS when grouping is disabled."""
-    p = MSXPlayer(
-        provider,
-        "msx_nogrouping",
-        name="Solo TV",
-        output_format="mp3",
-        grouping_enabled=False,
-    )
-    cast("Any", p).update_state = Mock()
-    assert PlayerFeature.SET_MEMBERS not in p._attr_supported_features
-    assert p._attr_can_group_with == set()
-
-
-async def test_propagation_recursion_guard(provider: Any, mass_mock: Mock) -> None:
-    """Propagation should not recurse when member.play_media triggers propagation."""
-    leader = MSXPlayer(provider, "msx_leader", name="Leader TV", output_format="mp3")
-    cast("Any", leader).update_state = Mock()
-    leader._attr_group_members = ["msx_leader", "msx_member"]
-
-    # Create a member whose play_media calls back into leader's propagation
-    member = MSXPlayer(provider, "msx_member", name="Member TV", output_format="mp3")
-    cast("Any", member).update_state = Mock()
-    member._attr_group_members = [
-        "msx_member",
-        "msx_leader",
-    ]  # would cause recursion without guard
-
-    mass_mock.players.get = mass_mock.players.get_player = Mock(
-        side_effect=lambda pid: (
-            member if pid == "msx_member" else leader if pid == "msx_leader" else None
-        )
-    )
-
-    async def play_member(player_id: str, propagated_media: PlayerMedia) -> None:
-        await mass_mock.players.get_player(player_id).play_media(propagated_media)
-
-    mass_mock.players._handle_play_media.side_effect = play_member
-
-    media = _player_media("library://track/123")
-
-    with patch.object(leader.provider, "notify_play_started", Mock()):
-        # This should NOT infinitely recurse
-        await leader.play_media(media)
-
-    # Leader played successfully (no exception from recursion)
-    assert leader._attr_playback_state == PlaybackState.PLAYING
-    assert mass_mock.players._handle_play_media.await_count == 2
 
 
 # --- Queue-backed playlist playback ---

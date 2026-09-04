@@ -10,14 +10,15 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-MA_SERVER="${MA_SERVER:-/tmp/ma-server}"
+MA_SERVER="${MA_SERVER:-$PROJECT_ROOT/ma-server}"
+VENV_DIR="${VENV_DIR:-$PROJECT_ROOT/.venv}"
 DATA_DIR="${MA_DATA_DIR:-$HOME/.musicassistant}"
 PID_FILE="$PROJECT_ROOT/.test-server.pid"
 LOG_FILE="$PROJECT_ROOT/.test-server.log"
 
 _require_venv() {
-    if [ ! -d "$MA_SERVER/.venv" ]; then
-        echo "Error: MA venv not found. Run ./scripts/link-to-ma.sh first."
+    if [ ! -d "$VENV_DIR" ]; then
+        echo "Error: MA venv not found. Run ./scripts/setup.sh first."
         exit 1
     fi
 }
@@ -35,7 +36,7 @@ cmd_start() {
 
     echo "Starting MA server..."
     # shellcheck disable=SC1091
-    source "$MA_SERVER/.venv/bin/activate"
+    source "$VENV_DIR/bin/activate"
     cd "$MA_SERVER"
     python -m music_assistant --log-level debug \
         > "$LOG_FILE" 2>&1 &

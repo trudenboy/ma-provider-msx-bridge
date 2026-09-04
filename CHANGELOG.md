@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.11] - 2026-09-04
+
+### Added
+
+- Local MP3/AAC proxy responses can omit the estimated `Content-Length` header through an advanced compatibility setting.
+
+### Changed
+
+- Multi-TV playback now uses Music Assistant Universal Groups and accepts their member-specific flow stream URLs.
+- Direct Music Assistant Streamserver delivery is the recommended default; the independent local proxy remains an advanced fallback.
+- Legacy `shared` stream mode configurations migrate to `independent`, and the retired native grouping setting is removed.
+
+### Removed
+
+- Provider-managed player grouping, command fan-out, and shared buffered group streams.
+
 ## [1.5.10] - 2026-09-03
 
 ### Fixed

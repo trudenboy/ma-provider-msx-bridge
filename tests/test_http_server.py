@@ -25,7 +25,7 @@ from music_assistant_models.player_queue import PlayerQueue
 from music_assistant_models.queue_item import QueueItem
 
 from music_assistant.controllers.streams.constants import output_pacing_args
-from music_assistant.providers.msx_bridge.audio_stream import _collect_prebuffer
+from music_assistant.providers.msx_bridge.audio_stream import _collect_prebuffer, build_audio_params
 from music_assistant.providers.msx_bridge.constants import PRE_BUFFER_BYTES
 from music_assistant.providers.msx_bridge.http_server import MSXHTTPServer
 from music_assistant.providers.msx_bridge.mappers import map_track_to_msx
@@ -2176,6 +2176,20 @@ async def test_msx_audio_arms_wait_before_enqueue(
 
 
 # --- Served audio length (Content-Length) ---
+
+
+def test_audio_params_include_content_length_by_default() -> None:
+    """The compatibility header remains enabled by default."""
+    _pcm, _out, headers = build_audio_params("mp3", 180)
+
+    assert headers["Content-Length"] == str(180 * 40_000)
+
+
+def test_audio_params_can_omit_content_length() -> None:
+    """TVs that reject estimated lengths can use chunked local delivery."""
+    _pcm, _out, headers = build_audio_params("mp3", 180, include_content_length=False)
+
+    assert "Content-Length" not in headers
 
 
 def test_served_duration_uses_media_duration(provider: MSXBridgeProvider) -> None:

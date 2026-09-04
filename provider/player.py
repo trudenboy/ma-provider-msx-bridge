@@ -6,14 +6,13 @@ import asyncio
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, Literal, cast
+from typing import TYPE_CHECKING, cast
 
 from music_assistant_models.enums import PlaybackState, PlayerFeature, PlayerType
 from music_assistant_models.errors import MusicAssistantError, PlayerUnavailableError
 from music_assistant_models.player import DeviceInfo
 
 from music_assistant.constants import CONF_ENTRY_OUTPUT_CODEC_DEFAULT_MP3
-from music_assistant.controllers.players.constants import PlayerLockPurpose
 from music_assistant.models.player import Player, PlayerMedia
 
 if TYPE_CHECKING:
@@ -29,7 +28,6 @@ class MSXPlayer(Player):
     output_format: str = "mp3"
     _skip_ws_depth: int = 0
     _accepted_position: bool = False
-    _propagating: bool = False
     _playing_from_queue: bool = False
     _queue_source_id: str | None = None
     _playlist_offset: int = 0
@@ -48,7 +46,6 @@ class MSXPlayer(Player):
         name: str = "MSX TV",
         output_format: str = "mp3",
         *,
-        grouping_enabled: bool = True,
         ip_address: str | None = None,
     ) -> None:
         """Initialize the MSX Player."""
@@ -61,9 +58,6 @@ class MSXPlayer(Player):
             PlayerFeature.SEEK,
             PlayerFeature.VOLUME_SET,
         }
-        if grouping_enabled:
-            self._attr_supported_features.add(PlayerFeature.SET_MEMBERS)
-            self._attr_can_group_with = {provider.instance_id}
         self._attr_device_info = DeviceInfo(
             model="Smart TV (MSX)",
             manufacturer="MSX Bridge",
@@ -142,33 +136,6 @@ class MSXPlayer(Player):
         if not self._skip_ws_notify:
             self._notify_msx_playback(media)
 
-        await self._propagate_play_media(media)
-
-    async def set_members(
-        self,
-        player_ids_to_add: list[str] | None = None,
-        player_ids_to_remove: list[str] | None = None,
-    ) -> None:
-        """Handle SET_MEMBERS — update group membership."""
-        for pid in player_ids_to_remove or []:
-            if pid in self._attr_group_members:
-                self._attr_group_members.remove(pid)
-        for pid in player_ids_to_add or []:
-            if pid != self.player_id and pid not in self._attr_group_members:
-                other = self.mass.players.get_player(pid)
-                if other and isinstance(other, MSXPlayer):
-                    self._attr_group_members.append(pid)
-
-        # Normalize group membership: leader must be first when grouped,
-        # and the list must be empty when no other members exist.
-        members_except_self = [pid for pid in self._attr_group_members if pid != self.player_id]
-        if not members_except_self:
-            self._attr_group_members = []
-        else:
-            self._attr_group_members = [self.player_id, *members_except_self]
-
-        self.update_state()
-
     async def play(self) -> None:
         """Handle PLAY (resume) command."""
         self.logger.info("play (resume) on %s", self.display_name)
@@ -178,7 +145,6 @@ class MSXPlayer(Player):
         self._attr_playback_state = PlaybackState.PLAYING
         self._attr_elapsed_time_last_updated = time.time()
         self.update_state()
-        await self._propagate_transport("play")
 
     async def pause(self) -> None:
         """Handle PAUSE command — pause playback on MSX, keep stream alive for resume."""
@@ -191,7 +157,6 @@ class MSXPlayer(Player):
         self.update_state()
         if not self._skip_ws_notify:
             cast("MSXBridgeProvider", self.provider).notify_play_paused(self.player_id)
-        await self._propagate_transport("pause")
 
     async def stop(self) -> None:
         """Handle STOP command."""
@@ -209,7 +174,6 @@ class MSXPlayer(Player):
         self.update_state()
         provider = cast("MSXBridgeProvider", self.provider)
         provider.notify_play_stopped(self.player_id)
-        await self._propagate_transport("stop")
 
     async def volume_set(self, volume_level: int) -> None:
         """Handle VOLUME_SET command."""
@@ -415,79 +379,6 @@ class MSXPlayer(Player):
             return None
         return float(duration)
 
-    def _get_group_member_ids(self) -> list[str]:
-        """
-        Get IDs of group members (excluding self).
-
-        Only returns members when this player is the sync leader.
-        MA's SyncGroupPlayer forwards play_media to the sync leader,
-        whose group_members already contains all SyncGroup members.
-        """
-        if self.synced_to is not None:
-            return []
-        return [x for x in self.group_members if x != self.player_id]
-
-    async def _propagate_play_media(self, media: PlayerMedia) -> None:
-        """Propagate playback to available group members when this player is the leader."""
-        await self._propagate_to_group_members("play_media", media)
-
-    async def _propagate_transport(self, command: Literal["play", "pause", "stop"]) -> None:
-        """Propagate a transport command to available group members when this player leads."""
-        await self._propagate_to_group_members(command)
-
-    async def _propagate_to_group_members(
-        self,
-        command: Literal["play_media", "play", "pause", "stop"],
-        media: PlayerMedia | None = None,
-    ) -> None:
-        """Propagate a typed command to available group members in parallel."""
-        # Skip if grouping is disabled at provider level
-        provider = cast("MSXBridgeProvider", self.provider)
-        if not provider.grouping_enabled:
-            return
-        # Prevent infinite recursion if member.play_media triggers propagation back
-        if self._propagating:
-            return
-        self._propagating = True
-        try:
-            tasks: list[asyncio.Task[None]] = []
-            for member_id in self._get_group_member_ids():
-                member = self.mass.players.get_player(member_id)
-                if not member or not isinstance(member, MSXPlayer) or not member.available:
-                    continue
-                tasks.append(asyncio.create_task(self._propagate_single(member, command, media)))
-            if tasks:
-                results = await asyncio.gather(*tasks, return_exceptions=True)
-                for result in results:
-                    if isinstance(result, BaseException):
-                        self.logger.warning(
-                            "Failed to propagate %s to a group member",
-                            command,
-                            exc_info=(type(result), result, result.__traceback__),
-                        )
-        finally:
-            self._propagating = False
-
-    async def _propagate_single(
-        self,
-        member: MSXPlayer,
-        command: Literal["play_media", "play", "pause", "stop"],
-        media: PlayerMedia | None,
-    ) -> None:
-        """Propagate a single command to one group member."""
-        async with self.mass.players.get_player_lock(member.player_id, PlayerLockPurpose.PLAYBACK):
-            if command == "play_media":
-                if media:
-                    # Avoid the public redirect back to the leader while releasing
-                    # the member's active source session through MA's handler.
-                    await self.mass.players._handle_play_media(member.player_id, media)
-            elif command == "stop":
-                await self.mass.players._handle_cmd_stop(member.player_id)
-            elif command == "pause":
-                await self.mass.players._handle_cmd_pause(member.player_id)
-            elif command == "play":
-                await self.mass.players._handle_cmd_play(member.player_id)
-
     def _queue_length(self, source_id: str, fallback: int) -> int:
         """Return the queue length, or fallback when the controller cannot be read."""
         try:
@@ -515,4 +406,3 @@ class MSXPlayer(Player):
         self.update_state()
         if not self._skip_ws_notify:
             cast("MSXBridgeProvider", self.provider).notify_play_resumed(self.player_id)
-        await self._propagate_transport("play")

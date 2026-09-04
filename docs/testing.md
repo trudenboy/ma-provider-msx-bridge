@@ -6,13 +6,13 @@
 ## Quick Start
 
 ```bash
-uv run pytest provider/tests/ -v
+./scripts/test-upstream.sh test
 ```
 
 With coverage report:
 
 ```bash
-uv run pytest provider/tests/ -v --cov=provider/ --cov-report=term-missing
+./scripts/test-upstream.sh test
 ```
 
 ## CI Pipeline
@@ -25,7 +25,7 @@ Every push and pull request triggers two parallel jobs via `test.yml`:
 | `lint-*` | Runs ruff, mypy, codespell, pre-commit |
 
 
-Tests run against `trudenboy/ma-server@dev` (plugin-enabled fork — full CI with ruff + mypy).
+Local compatibility checks mount this provider into an official Music Assistant `dev` checkout. CI uses the repository's generated provider workflow.
 
 
 ## Tools
@@ -33,7 +33,7 @@ Tests run against `trudenboy/ma-server@dev` (plugin-enabled fork — full CI wit
 | Tool | Purpose |
 |------|---------|
 | `uv` | Virtual environment and dependency management |
-| `Python 3.12` | Target Python version |
+| `Python 3.14` | Target Python version |
 | `pytest` | Test framework |
 | `pytest-cov` | Coverage collection |
 | `Codecov` | Coverage report upload (automatic in CI) |
@@ -47,20 +47,19 @@ Tests run against `trudenboy/ma-server@dev` (plugin-enabled fork — full CI wit
 Run all pre-commit hooks (recommended before opening a PR):
 
 ```bash
-uv run pre-commit run --all-files
+./scripts/test-upstream.sh lint
 ```
 
 Type checking only:
 
 ```bash
-uv run mypy provider/
+./scripts/test-upstream.sh type
 ```
 
 Linting only:
 
 ```bash
-uv run ruff check provider/
-uv run ruff format --check provider/
+./scripts/test-upstream.sh lint
 ```
 
 ## Coverage
@@ -69,8 +68,7 @@ Coverage reports are automatically uploaded to Codecov on every CI push.
 To view coverage locally:
 
 ```bash
-uv run pytest provider/tests/ --cov=provider/ --cov-report=html
-open htmlcov/index.html
+./scripts/test-upstream.sh test
 ```
 
 ## When CI Fails

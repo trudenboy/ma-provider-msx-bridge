@@ -10,8 +10,8 @@
 - **MSX Native UI** — просмотр альбомов, исполнителей, плейлистов с управлением пультом TV
 - **Браузинг библиотеки** — навигация по трекам альбомов, альбомам исполнителей, трекам плейлистов и результатам поиска
 - **Аудио воспроизведение** — стриминг через очередь MA с PCM→ffmpeg кодированием
-- **Группировка плееров** — синхронное управление воспроизведением на нескольких TV (экспериментально; настраиваемые режимы стриминга)
-- **Режимы стриминга для групп** — Independent (каждый TV получает свой ffmpeg) или Shared Buffer (один ffmpeg, меньше CPU)
+- **Universal Groups** — воспроизведение на нескольких TV через группы Music Assistant
+- **Режимы доставки** — прямой MA Streamserver по умолчанию или локальный proxy для совместимости
 - **Удаление плееров** — возможность удалить MSX плеер из MA UI
 - **Нативные плейлисты MSX** — бесшовное воспроизведение альбомов/плейлистов с интеграцией очереди и навигацией пультом
 - **Динамическая регистрация** — TV регистрируются как MA плееры автоматически по device ID или IP
@@ -45,10 +45,10 @@
 │ - Plugin    │         │  └───────────┬──────────────────────┘  │
 └─────────────┘         │              │ internal API             │
                         │              │                          │
-┌─────────────┐         │  ┌───────────▼──────────────────────┐  │
-│   Браузер   │  HTTP   │  │        MA Core                    │  │
-│ (Web Player)│ ◄─────► │  │  music, players, player_queues    │  │
-└─────────────┘         │  └───────────────────────────────────┘  │
+                        │  ┌───────────▼──────────────────────┐  │
+                        │  │        MA Core                    │  │
+                        │  │  music, players, player_queues    │  │
+                        │  └───────────────────────────────────┘  │
                         └───────────────────────────────────────┘
 ```
 
@@ -64,25 +64,23 @@
 
 ### Требования
 
-- [Music Assistant](https://music-assistant.io/) сервер (или форк [MA server repo](https://github.com/trudenboy/ma-server))
+- [Music Assistant](https://music-assistant.io/) сервер
 - [Media Station X](https://msx.benzac.de/) приложение на Smart TV
-- Python 3.12+
+- Python 3.14+
 
 ### Установка
 
 ```bash
-# 1. Клонировать репозиторий рядом с MA сервером
-cd ~/Projects
+# 1. Клонировать провайдер
 git clone https://github.com/trudenboy/msx-music-assistant.git
-git clone https://github.com/trudenboy/ma-server.git  # если ещё не клонирован
 
-# 2. Настроить venv, установить зависимости, создать симлинк провайдера
+# 2. Создать venv, checkout MA, зависимости и симлинк провайдера
 cd msx-music-assistant
-./scripts/link-to-ma.sh
+./scripts/setup.sh
 
 # 3. Запустить MA сервер (провайдер загрузится автоматически)
-source ../ma-server/.venv/bin/activate
-cd ../ma-server && python -m music_assistant --log-level debug
+source .venv/bin/activate
+cd ma-server && python -m music_assistant --log-level debug
 ```
 
 ### Настройка TV
@@ -96,7 +94,7 @@ cd ../ma-server && python -m music_assistant --log-level debug
 
 ## Конфигурация
 
-Провайдер предоставляет семь настроек в MA UI:
+Провайдер предоставляет настройки в MA UI:
 
 | Параметр | По умолчанию | Описание |
 |----------|--------------|----------|
@@ -104,9 +102,8 @@ cd ../ma-server && python -m music_assistant --log-level debug
 | `output_format` | `mp3` | Формат аудио для стриминга (`mp3`, `aac`, `flac`) |
 | `player_idle_timeout` | `30` | Таймаут неактивности плеера (минуты) |
 | `show_stop_notification` | `false` | Показывать уведомление при остановке из MA |
-| `abort_stream_first` | `false` | Сначала прервать поток, потом отправить stop (может помочь на некоторых TV) |
-| `enable_player_grouping` | `true` | Разрешить группировку TV для синхронного воспроизведения (экспериментально) |
-| `group_stream_mode` | `independent` | Режим стриминга для групп: `independent` (каждый TV получает свой ffmpeg) или `shared` (один ffmpeg, меньше CPU) |
+| `group_stream_mode` | `redirect` | Расширенная настройка: MA Streamserver или локальный `independent` proxy |
+| `include_content_length` | `true` | Добавлять расчётный Content-Length в локальные MP3/AAC потоки |
 
 ### Stop, Pause и Resume
 
@@ -176,8 +173,8 @@ cd ../ma-server && python -m music_assistant --log-level debug
 ## Структура проекта
 
 ```
-provider/msx_bridge/
-├── __init__.py        # setup(), get_config_entries() — точка входа провайдера
+provider/
+├── __init__.py        # setup() — точка входа провайдера
 ├── provider.py        # MSXBridgeProvider — жизненный цикл, регистрация плееров
 ├── player.py          # MSXPlayer — Smart TV как MA плеер
 ├── http_server.py     # MSXHTTPServer — aiohttp маршруты
@@ -193,15 +190,13 @@ provider/msx_bridge/
     └── tvx-plugin.min.js       # TVX plugin
 
 tests/
-├── test_http_server.py  # HTTP маршруты (53)
-├── test_player.py       # MSXPlayer (42)
-├── test_group_stream.py # SharedGroupStream (20)
-├── test_provider.py     # MSXBridgeProvider (9)
-├── test_playlist.py     # Плейлисты (5)
-├── test_init.py         # Инициализация провайдера (6)
-├── test_models.py       # Pydantic модели (4)
-├── test_mappers.py      # Маппер-функции (2)
-└── integration/         # Интеграционные тесты — требуют запущенный MA (30)
+├── test_http_server.py  # HTTP маршруты
+├── test_player.py       # MSXPlayer
+├── test_provider.py     # MSXBridgeProvider и миграции
+├── test_playlist.py     # Плейлисты
+├── test_init.py         # Инициализация провайдера
+├── test_models.py       # Pydantic модели
+└── test_mappers.py      # Маппер-функции
 scripts/               # Setup и dev скрипты
 ```
 
@@ -211,21 +206,18 @@ scripts/               # Setup и dev скрипты
 
 ```bash
 # Установка одной командой
-./scripts/link-to-ma.sh
-
-# Активация venv
-source ../ma-server/.venv/bin/activate
+./scripts/setup.sh
 
 # Запуск тестов
-pytest tests/ -v --ignore=tests/integration
+./scripts/test-upstream.sh test
 
 # Линтинг
-cd ../ma-server && pre-commit run --all-files
+./scripts/test-upstream.sh lint
 ```
 
 ## Вклад в проект
 
-См. [CONTRIBUTING.md](CONTRIBUTING.md).
+См. [docs/contributing.md](docs/contributing.md).
 
 ## Лицензия
 

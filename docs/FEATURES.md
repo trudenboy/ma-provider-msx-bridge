@@ -9,93 +9,13 @@ Use the standalone Web Kiosk provider for always-on displays.
 
 ---
 
-## Player Grouping (Experimental)
+## Multi-TV Playback
 
-Synchronized playback control across multiple TVs. Note: this feature synchronizes play/pause/stop/next/prev commands, but does not sync the audio streams themselves — each TV fetches its own independent stream, so there may be slight timing differences between devices.
+Create a Music Assistant Universal Group and select the MSX TVs as members. Universal Group owns playback fan-out and serves one continuous flow timeline; MSX Bridge has no separate native grouping model.
 
-### Use Cases
+The default `redirect` delivery mode passes each member's Universal Group URL directly to the TV. The advanced `independent` mode uses a local ffmpeg proxy and is intended only as a compatibility fallback.
 
-- **Smart Home** — Same music in living room and kitchen simultaneously
-- **Restaurant/Cafe** — Background music on all screens in sync
-- **Retail Store** — Synchronized audio across store displays
-- **Party** — Music playing in multiple rooms at once
-
-### Setup
-
-1. Enable `enable_player_grouping` in MA settings (default: enabled)
-2. Open MA web interface
-3. Go to Players section
-4. Select multiple MSX players
-5. Create a group
-6. Play music — all grouped TVs play in sync
-
-### How It Works
-
-```
-MA Group Command
-      │
-      ▼
-┌─────────────┐
-│ Group Leader│ (first TV in group)
-│   msx_tv1   │
-└──────┬──────┘
-       │ propagate command
-       ├─────────────────┐
-       ▼                 ▼
-┌─────────────┐   ┌─────────────┐
-│   Member    │   │   Member    │
-│   msx_tv2   │   │   msx_tv3   │
-└─────────────┘   └─────────────┘
-```
-
-### Stream Delivery Modes
-
-The `group_stream_mode` config option controls how audio is delivered to TVs:
-
-| Mode | Description | Use Case |
-|------|-------------|----------|
-| `independent` (default) | Each TV gets its own proxied ffmpeg process | Maximum compatibility, slightly higher CPU |
-| `shared` | One ffmpeg process, multiple readers | Lower CPU usage, better for many grouped TVs |
-| `redirect` | TVs fetch audio directly from the MA streamserver (no local ffmpeg) | Lowest CPU; per-player codec and DSP applied by MA; no shared-buffer group sync |
-
-```
-Independent Mode:
-┌─────────┐     ┌─────────┐     ┌─────────┐
-│ ffmpeg  │     │ ffmpeg  │     │ ffmpeg  │
-└────┬────┘     └────┬────┘     └────┬────┘
-     │               │               │
-     ▼               ▼               ▼
-   TV 1            TV 2            TV 3
-
-Shared Buffer Mode:
-            ┌─────────┐
-            │ ffmpeg  │
-            └────┬────┘
-                 │
-        ┌────────┼────────┐
-        ▼        ▼        ▼
-      TV 1     TV 2     TV 3
-```
-
-### Limitations
-
-- **No audio stream synchronization** — each TV receives its own independent audio stream, so playback timing may differ by 100-500ms+ between devices
-- Volume syncs but may need individual adjustment on some TVs
-- Experimental: may have issues with 3+ TVs in poor network conditions
-- All TVs in group must be on the same MA server
-- Not suitable for scenarios requiring precise audio sync (e.g., same room with multiple speakers)
-
-### Troubleshooting
-
-**Problem:** One TV in group doesn't play
-- Check WebSocket connection in browser dev tools
-- Verify TV is registered in MA Players list
-- Try removing and re-adding TV to group
-
-**Problem:** Significant delay between TVs
-- Check network latency between server and TVs
-- Use wired Ethernet if possible
-- Reduce group size
+Universal Groups coordinate playback but cannot provide sample-accurate synchronization through the native MSX audio player. TVs in the same room may produce audible timing differences.
 
 ---
 

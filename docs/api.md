@@ -70,8 +70,10 @@ These return MSX native playlist JSON. MSX auto-starts playback when loaded via 
 
 **Audio response headers:**
 - `Content-Type: audio/mpeg` (MP3), `audio/aac` (AAC), `audio/flac` (FLAC)
-- `Content-Length`: set for MP3 (`duration × 40,000 B/s`) and AAC (`duration × 32,000 B/s`); omitted for FLAC (non-deterministic size)
+- `Content-Length`: optionally estimated for MP3 (`duration × 40,000 B/s`) and AAC (`duration × 32,000 B/s`) in the independent local proxy; omitted for FLAC
 - `Transfer-Encoding: chunked` when Content-Length is omitted
+
+Redirected response headers are controlled by the Music Assistant Streamserver.
 
 ## REST Library API
 
