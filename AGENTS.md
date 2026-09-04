@@ -8,10 +8,10 @@ MSX Music Assistant is a Music Assistant (MA) Player Provider that streams music
 
 ## Tech Stack
 
-- **Language:** Python 3.12+
+- **Language:** Python 3.14+
 - **Framework:** aiohttp (embedded HTTP server inside MA provider)
 - **Platform:** Music Assistant server (plugin/provider model)
-- **Testing:** pytest + pytest-asyncio (141 tests: 111 unit + 30 integration)
+- **Testing:** pytest + pytest-asyncio against a mounted upstream MA checkout
 - **Linting:** ruff, mypy, pre-commit
 - **Audio:** ffmpeg subprocess (PCM → MP3/AAC/FLAC)
 
@@ -19,12 +19,12 @@ MSX Music Assistant is a Music Assistant (MA) Player Provider that streams music
 
 ```
 msx-music-assistant/
-├── provider/msx_bridge/          # MA provider plugin — all core logic
-│   ├── __init__.py               # setup() entry point, get_config_entries()
+├── provider/                     # MA provider plugin — mounted as music_assistant.providers.msx_bridge
+│   ├── __init__.py               # setup() entry point
 │   ├── provider.py               # MSXBridgeProvider(PlayerProvider) — lifecycle, player mgmt, WS broadcast
 │   ├── player.py                 # MSXPlayer(Player) — per-TV player state, media events
 │   ├── http_server.py            # MSXHTTPServer — aiohttp routes (MSX, audio, API, WS)
-│   ├── constants.py              # Config keys and defaults (6 entries)
+│   ├── constants.py              # Config keys and defaults
 │   ├── models.py                 # Pydantic models for MSX JSON API (MsxTemplate, MsxItem, MsxContent)
 │   ├── mappers.py                # MA object → MSX model converters
 │   ├── manifest.json             # Provider metadata for MA
@@ -35,18 +35,17 @@ msx-music-assistant/
 │
 ├── tests/                        # All tests
 │   ├── conftest.py               # MA mock fixtures (MockMusicAssistant, etc.)
-│   ├── test_http_server.py       # 53 tests — HTTP routes
-│   ├── test_player.py            # 42 tests — MSXPlayer state machine
-│   ├── test_group_stream.py      # 20 tests — SharedGroupStream
-│   ├── test_provider.py          # 9 tests — provider lifecycle
-│   ├── test_playlist.py          # 5 tests — MSX playlist endpoints
-│   ├── test_init.py              # 6 tests — config entries
-│   ├── test_models.py            # 4 tests — Pydantic models
-│   ├── test_mappers.py           # 2 tests — MA→MSX mappers
-│   └── integration/              # 30 integration tests (require real MA server)
+│   ├── test_http_server.py       # HTTP routes
+│   ├── test_player.py            # MSXPlayer state machine
+│   ├── test_provider.py          # Provider lifecycle and migration
+│   ├── test_playlist.py          # MSX playlist endpoints
+│   ├── test_init.py              # Config entries and capabilities
+│   ├── test_models.py            # Pydantic models
+│   └── test_mappers.py           # MA→MSX mappers
 │
 ├── scripts/                      # Dev tooling
-│   ├── link-to-ma.sh             # Setup venv, symlink provider into MA server, verify imports
+│   ├── setup.sh                  # Setup venv, MA checkout, dependencies, and provider symlink
+│   ├── test-upstream.sh          # Official MA compatibility gate
 │   ├── test-server.sh            # Start/stop/status/log for local MA dev server
 │   └── debug-stream-stop.py      # Debug utility for stream lifecycle
 │
@@ -59,7 +58,7 @@ msx-music-assistant/
 ├── music_assistant/              # MA framework stubs (for IDE/mypy support)
 ├── pyproject.toml                # pytest config, tool settings
 ├── CLAUDE.md                     # Claude Code instructions (architecture, gotchas, key flows)
-├── CONTRIBUTING.md               # Contribution guidelines
+├── docs/contributing.md          # Contribution guidelines
 ├── CHANGELOG.md                  # Release history
 └── README.md                     # Project landing page (EN + RU)
 ```
@@ -68,13 +67,14 @@ msx-music-assistant/
 
 | File | Purpose |
 |------|---------|
-| `provider/msx_bridge/__init__.py` | MA plugin entry point — `setup()` and `get_config_entries()` |
-| `provider/msx_bridge/provider.py` | `MSXBridgeProvider` — lifecycle, player management, WebSocket broadcast, group streaming |
-| `provider/msx_bridge/player.py` | `MSXPlayer` — per-TV player, media event signaling, seek/pause/resume |
-| `provider/msx_bridge/http_server.py` | `MSXHTTPServer` — all HTTP routes (MSX JSON, audio, stream, API, WS, web) |
-| `provider/msx_bridge/constants.py` | All config keys and default values |
+| `provider/__init__.py` | MA plugin entry point — `setup()` |
+| `provider/provider.py` | `MSXBridgeProvider` — lifecycle, player management, WebSocket broadcast |
+| `provider/player.py` | `MSXPlayer` — per-TV player, media event signaling, seek/pause/resume |
+| `provider/http_server.py` | `MSXHTTPServer` — all HTTP routes (MSX JSON, audio, stream, API, WS, web) |
+| `provider/constants.py` | All config keys and default values |
 | `tests/conftest.py` | Shared pytest fixtures: `MockMusicAssistant`, provider/server/player factories |
-| `scripts/link-to-ma.sh` | One-command dev setup: venv + symlink + import verification |
+| `scripts/setup.sh` | Development venv, MA checkout, dependencies, and provider symlink |
+| `scripts/test-upstream.sh` | Full compatibility gate against official MA `dev` |
 | `scripts/test-server.sh` | Local MA dev server lifecycle management |
 
 ## Documentation
@@ -104,18 +104,15 @@ msx-music-assistant/
 ## Development Environment
 
 ```bash
-# Setup (one command — creates venv, installs deps, symlinks provider)
-./scripts/link-to-ma.sh
+# Setup local development environment
+./scripts/setup.sh
 
-# Activate MA venv (required for all commands)
-source /tmp/msx-ma-server/ma-server/.venv/bin/activate
-
-# Run tests
-cd /tmp/msx-ma-server/ma-server && pytest
+# Run the full upstream compatibility gate
+./scripts/test-upstream.sh all
 
 # Start local MA dev server
 ./scripts/test-server.sh start
 
-# Lint / format
-cd /tmp/msx-ma-server/ma-server && pre-commit run --all-files
+# Run one verification stage
+./scripts/test-upstream.sh lint
 ```

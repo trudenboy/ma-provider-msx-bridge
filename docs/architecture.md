@@ -27,7 +27,7 @@ MSX Music Assistant Bridge is a **Music Assistant Player Provider** — a plugin
 
 | Component | Class | Role |
 |-----------|-------|------|
-| **Provider** | `MSXBridgeProvider` | MA `PlayerProvider` — lifecycle, player registration, idle timeout, WebSocket broadcast, group streaming |
+| **Provider** | `MSXBridgeProvider` | MA `PlayerProvider` — lifecycle, player registration, idle timeout, WebSocket broadcast |
 | **Player** | `MSXPlayer` | MA `Player` — represents one Smart TV; stores stream URL, signals media-ready events |
 | **HTTP Server** | `MSXHTTPServer` | aiohttp server — all routes: MSX JSON, audio, stream proxy, REST API, WebSocket |
 
@@ -36,9 +36,8 @@ MSX Music Assistant Bridge is a **Music Assistant Player Provider** — a plugin
 ```
 handle_async_init()
     └─► loaded_in_mass()
-            └─► discover_players()  (restores known players from storage)
-                    └─► idle timeout loop  (runs every 60s, unregisters stale players)
-                            └─► unload()
+            └─► idle timeout loop  (runs every 60s, unregisters stale players)
+                    └─► unload()
 ```
 
 ## Dynamic Player Registration
@@ -92,9 +91,9 @@ Each item: action: "audio:/msx/audio/{player_id}?uri=...&from_playlist=1"
 GET /msx/audio/{player_id}?uri=<track_uri>
     ├─► mass.player_queues.play_media() enqueues track
     ├─► wait for MSXPlayer.wait_for_media() (up to 10 s)
-    └─► mass.streams.get_stream() → raw PCM
-            └─► get_ffmpeg_stream() → MP3/AAC/FLAC → TV speakers
-                (Content-Length set for MP3/AAC; omitted for FLAC)
+    └─► resolve MA Streamserver URL → redirect → TV speakers
+            └─► on resolution failure: local PCM → ffmpeg proxy
+                (optional estimated Content-Length for MP3/AAC; omitted for FLAC)
 ```
 
 ## WebSocket Protocol
@@ -123,11 +122,9 @@ Connection: `GET /ws?device_id=<id>`
 
 ## Player Grouping
 
-When `enable_player_grouping` is `true`, MSX players support the `SET_MEMBERS` feature. Play/pause/stop actions propagate to all group members.
+MSX players are regular Music Assistant players and do not implement native grouping or command fan-out. Create a Music Assistant Universal Group and select the MSX TVs as members. Universal Group owns the session lifecycle, member commands, flow stream, and per-member DSP routing.
 
-**Stream modes** (configured per provider):
-- `independent` — each TV gets its own ffmpeg process
-- `shared` — one ffmpeg process, multiple readers with a catch-up buffer (less CPU, experimental)
+The default `redirect` delivery mode sends the Universal Group stream URL directly to each TV. If URL resolution fails, the provider falls back to a local independent ffmpeg proxy for that TV.
 
 ## See Also
 

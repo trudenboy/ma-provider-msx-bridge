@@ -4,26 +4,24 @@
 
 ## Prerequisites
 
-- [Music Assistant](https://music-assistant.io/) server (or the [MA server fork](https://github.com/trudenboy/ma-server))
+- [Music Assistant](https://music-assistant.io/) server
 - [Media Station X](https://msx.benzac.de/) app installed on your Smart TV
-- Python 3.12+
+- Python 3.14+
 - [uv](https://github.com/astral-sh/uv) (used by MA for venv management)
 
 ## Installation
 
 ```bash
-# 1. Clone repos side by side
-cd ~/Projects
+# 1. Clone the provider
 git clone https://github.com/trudenboy/msx-music-assistant.git
-git clone https://github.com/trudenboy/ma-server.git   # if not already done
 
-# 2. One-command setup: creates venv, installs deps, symlinks provider
+# 2. Create the venv, MA checkout, dependencies, and provider symlink
 cd msx-music-assistant
-./scripts/link-to-ma.sh
+./scripts/setup.sh
 
 # 3. Start the MA server (provider auto-loads)
-source ../ma-server/.venv/bin/activate
-cd ../ma-server && python -m music_assistant --log-level debug
+source .venv/bin/activate
+cd ma-server && python -m music_assistant --log-level debug
 ```
 
 The provider starts an HTTP server on port `8099` by default. You can change this in MA Settings → MSX Bridge Provider.

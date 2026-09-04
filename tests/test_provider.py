@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from typing import cast
+from typing import Any, cast
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
+from music_assistant_models.enums import MediaType
 from music_assistant_models.errors import InvalidDataError, PlayerUnavailableError
 from music_assistant_models.player import PlayerMedia
 
@@ -84,6 +85,47 @@ async def test_get_ma_stream_url_rejects_flow_urls(
     url = await provider.get_ma_stream_url("msx_test", PlayerMedia(uri="library://track/1"))
 
     assert url is None
+
+
+async def test_get_ma_stream_url_accepts_universal_group_flow_media(
+    provider: MSXBridgeProvider, mass_mock: Mock
+) -> None:
+    """Universal Group flow media must be redirected to its common stream."""
+    stream_url = "http://ma:8097/flow/universal-group.mp3?player_id=msx_test"
+    mass_mock.streams.resolve_stream_url = AsyncMock(return_value=stream_url)
+    media = PlayerMedia(uri=stream_url, media_type=MediaType.FLOW_STREAM)
+
+    url = await provider.get_ma_stream_url("msx_test", media)
+
+    assert url == stream_url
+
+
+def test_shared_stream_mode_migrates_to_independent(provider: MSXBridgeProvider) -> None:
+    """The removed shared mode migrates without changing local delivery topology."""
+    cast("Any", provider.config).get_value = Mock(return_value="shared")
+    set_raw_value = Mock()
+    cast("Any", provider.mass.config).set_raw_provider_config_value = set_raw_value
+
+    mode = provider._load_stream_mode()
+
+    assert mode == "independent"
+    set_raw_value.assert_called_once_with(
+        provider.instance_id,
+        "group_stream_mode",
+        "independent",
+    )
+
+
+def test_shared_stream_mode_migration_failure_is_non_fatal(
+    provider: MSXBridgeProvider,
+) -> None:
+    """A failed best-effort config write must not prevent provider startup."""
+    cast("Any", provider.config).get_value = Mock(return_value="shared")
+    cast("Any", provider.mass.config).set_raw_provider_config_value = Mock(
+        side_effect=OSError("read-only")
+    )
+
+    assert provider._load_stream_mode() == "independent"
 
 
 async def test_get_ma_stream_url_returns_none_on_error(

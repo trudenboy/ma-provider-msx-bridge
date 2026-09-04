@@ -4,34 +4,30 @@
 
 ## Prerequisites
 
-- Python 3.12+
+- Python 3.14+
 - [uv](https://github.com/astral-sh/uv) — used by MA for venv and dependency management
-- MA server fork cloned alongside this project (`../ma-server/`)
 
 ## Setup
 
 ```bash
-# Clone repos side by side (if not already done)
-cd ~/Projects
+# Clone the provider
 git clone https://github.com/trudenboy/msx-music-assistant.git
-git clone https://github.com/trudenboy/ma-server.git
 
-# One command: creates venv, installs deps, symlinks provider into MA
+# Create the venv, MA checkout, dependencies, and provider symlink
 cd msx-music-assistant
-./scripts/link-to-ma.sh
+./scripts/setup.sh
 ```
 
-`link-to-ma.sh` does the following:
-1. Creates `../ma-server/.venv/` with uv
+`setup.sh` does the following:
+1. Creates `.venv/` with uv
 2. Installs MA and test dependencies
-3. Symlinks `provider/msx_bridge/` into `ma-server/music_assistant/providers/msx_bridge`
-4. Verifies the import works
+3. Symlinks `provider/` into `ma-server/music_assistant/providers/msx_bridge`
 
 ## Running the Server
 
 ```bash
-source ../ma-server/.venv/bin/activate
-cd ../ma-server && python -m music_assistant --log-level debug
+source .venv/bin/activate
+cd ma-server && python -m music_assistant --log-level debug
 ```
 
 The test-server script provides start/stop/status/log commands:
@@ -45,37 +41,23 @@ The test-server script provides start/stop/status/log commands:
 
 ## Running Tests
 
-All commands require the MA venv:
+Run the provider suite against the mounted upstream Music Assistant checkout:
 
 ```bash
-source ../ma-server/.venv/bin/activate
-
-# Unit tests (fast, no server needed)
-pytest tests/ -v --ignore=tests/integration
-
-# Integration tests (requires running MA server on port 8095)
-pytest tests/integration/ -v
-
-# Specific test file
-pytest tests/test_http_server.py -v
-
-# Run with output
-pytest tests/ -v -s --ignore=tests/integration
+./scripts/test-upstream.sh test
 ```
 
 ### Test Structure
 
-| File | Tests | Covers |
-|------|-------|--------|
-| `test_http_server.py` | 53 | All HTTP routes, responses, and error cases |
-| `test_player.py` | 42 | MSXPlayer state machine, media events, seek/pause |
-| `test_group_stream.py` | 20 | SharedGroupStream (shared ffmpeg, catch-up buffer) |
-| `test_provider.py` | 9 | Provider lifecycle, player registration |
-| `test_playlist.py` | 5 | MSX native playlist endpoints |
-| `test_init.py` | 6 | Config entry setup |
-| `test_models.py` | 4 | Pydantic model validation |
-| `test_mappers.py` | 2 | MA → MSX JSON mappers |
-| `tests/integration/` | 30 | End-to-end with real MA server |
+| File | Covers |
+|------|--------|
+| `test_http_server.py` | HTTP routes, responses, and error cases |
+| `test_player.py` | MSXPlayer state machine, media events, seek/pause |
+| `test_provider.py` | Provider lifecycle, player registration, config migration |
+| `test_playlist.py` | MSX native playlist endpoints |
+| `test_init.py` | Config entry setup and capabilities |
+| `test_models.py` | Pydantic model validation |
+| `test_mappers.py` | MA → MSX JSON mappers |
 
 ## Linting & Type Checking
 
@@ -123,12 +105,13 @@ docs: update README with architecture diagrams
 
 | File | Purpose |
 |------|---------|
-| `provider/msx_bridge/provider.py` | `MSXBridgeProvider` — main provider class |
-| `provider/msx_bridge/player.py` | `MSXPlayer` — per-TV player state |
-| `provider/msx_bridge/http_server.py` | All HTTP routes |
-| `provider/msx_bridge/constants.py` | Config keys and defaults |
+| `provider/provider.py` | `MSXBridgeProvider` — main provider class |
+| `provider/player.py` | `MSXPlayer` — per-TV player state |
+| `provider/http_server.py` | All HTTP routes |
+| `provider/constants.py` | Config keys and defaults |
 | `tests/conftest.py` | `MockMusicAssistant` and shared fixtures |
-| `scripts/link-to-ma.sh` | Dev environment setup |
+| `scripts/setup.sh` | Dev environment setup |
+| `scripts/test-upstream.sh` | Official MA compatibility gate |
 
 See [CLAUDE.md](../CLAUDE.md) for detailed MA conventions, key flows, and gotchas.
 

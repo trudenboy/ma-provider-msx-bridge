@@ -9,43 +9,39 @@ import hmac
 import logging
 import secrets
 import time
-from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any, cast
 
 from music_assistant_models.config_entries import ConfigEntry, ConfigValueOption
-from music_assistant_models.enums import ConfigEntryType, ContentType
+from music_assistant_models.enums import ConfigEntryType, MediaType
 from music_assistant_models.errors import MusicAssistantError
 
 from music_assistant.models.player_provider import PlayerProvider
 
-from .audio_stream import SharedGroupStream
 from .constants import (
-    CONF_ENABLE_GROUPING,
     CONF_GROUP_STREAM_MODE,
     CONF_HTTP_PORT,
+    CONF_INCLUDE_CONTENT_LENGTH,
     CONF_OUTPUT_FORMAT,
     CONF_PLAYER_IDLE_TIMEOUT,
     CONF_SHOW_STOP_NOTIFICATION,
-    DEFAULT_ENABLE_GROUPING,
     DEFAULT_GROUP_STREAM_MODE,
     DEFAULT_HTTP_PORT,
+    DEFAULT_INCLUDE_CONTENT_LENGTH,
     DEFAULT_OUTPUT_FORMAT,
     DEFAULT_PLAYER_IDLE_TIMEOUT,
     DEFAULT_SHOW_STOP_NOTIFICATION,
     GROUP_STREAM_MODE_INDEPENDENT,
     GROUP_STREAM_MODE_REDIRECT,
-    GROUP_STREAM_MODE_SHARED,
+    LEGACY_GROUP_STREAM_MODE_SHARED,
     MSX_PLAYER_ID_PREFIX,
 )
 from .http_server import MSXHTTPServer
 from .player import MSXPlayer
 
-__all__ = ["MSXBridgeProvider", "SharedGroupStream"]
+__all__ = ["MSXBridgeProvider"]
 
 if TYPE_CHECKING:
     from music_assistant_models.player import PlayerMedia
-
-    from music_assistant.controllers.streams.audio_processing import AudioOutputPlan
 
 logger = logging.getLogger(__name__)
 
@@ -54,14 +50,12 @@ class MSXBridgeProvider(PlayerProvider):
     """Player Provider that bridges Music Assistant to Smart TVs via MSX."""
 
     http_server: MSXHTTPServer | None = None
-    grouping_enabled: bool = True
     group_stream_mode: str = DEFAULT_GROUP_STREAM_MODE
+    include_content_length: bool = DEFAULT_INCLUDE_CONTENT_LENGTH
     _player_last_activity: dict[str, float]
     _pending_unregisters: dict[str, asyncio.Event]
     _stream_token_secret: bytes
     _timeout_task: asyncio.Task[None] | None = None
-    _shared_streams: dict[str, SharedGroupStream]  # group_id -> SharedGroupStream
-    _shared_stream_lock: asyncio.Lock
     _background_tasks: set[asyncio.Task[None]]  # fire-and-forget tasks (unregister, stream stop)
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
@@ -71,8 +65,6 @@ class MSXBridgeProvider(PlayerProvider):
         self._pending_unregisters = {}
         # one secret per provider instance; the per-player tokens derive from it
         self._stream_token_secret = secrets.token_bytes(32)
-        self._shared_streams = {}
-        self._shared_stream_lock = asyncio.Lock()
         self._background_tasks = set()
 
     async def get_config_entries(self) -> tuple[ConfigEntry, ...]:
@@ -103,27 +95,26 @@ class MSXBridgeProvider(PlayerProvider):
                 default_value=DEFAULT_SHOW_STOP_NOTIFICATION,
             ),
             ConfigEntry(
-                key=CONF_ENABLE_GROUPING,
-                type=ConfigEntryType.BOOLEAN,
-                required=False,
-                default_value=DEFAULT_ENABLE_GROUPING,
-            ),
-            ConfigEntry(
                 key=CONF_GROUP_STREAM_MODE,
                 type=ConfigEntryType.STRING,
                 required=False,
                 default_value=DEFAULT_GROUP_STREAM_MODE,
+                advanced=True,
                 options=[
-                    ConfigValueOption(
-                        GROUP_STREAM_MODE_INDEPENDENT,
-                    ),
-                    ConfigValueOption(
-                        GROUP_STREAM_MODE_SHARED,
-                    ),
                     ConfigValueOption(
                         GROUP_STREAM_MODE_REDIRECT,
                     ),
+                    ConfigValueOption(
+                        GROUP_STREAM_MODE_INDEPENDENT,
+                    ),
                 ],
+            ),
+            ConfigEntry(
+                key=CONF_INCLUDE_CONTENT_LENGTH,
+                type=ConfigEntryType.BOOLEAN,
+                required=False,
+                default_value=DEFAULT_INCLUDE_CONTENT_LENGTH,
+                advanced=True,
             ),
         )
 
@@ -131,12 +122,9 @@ class MSXBridgeProvider(PlayerProvider):
         """Handle async initialization — start embedded HTTP server."""
         raw_port = cast("int", self.config.get_value(CONF_HTTP_PORT, DEFAULT_HTTP_PORT))
         port = max(1, min(65535, int(raw_port)))
-        self.grouping_enabled = bool(
-            self.config.get_value(CONF_ENABLE_GROUPING, DEFAULT_ENABLE_GROUPING)
-        )
-        self.group_stream_mode = cast(
-            "str",
-            self.config.get_value(CONF_GROUP_STREAM_MODE, DEFAULT_GROUP_STREAM_MODE),
+        self.group_stream_mode = self._load_stream_mode()
+        self.include_content_length = bool(
+            self.config.get_value(CONF_INCLUDE_CONTENT_LENGTH, DEFAULT_INCLUDE_CONTENT_LENGTH)
         )
         self.http_server = MSXHTTPServer(self, port)
         await self.http_server.start()
@@ -167,9 +155,6 @@ class MSXBridgeProvider(PlayerProvider):
         if self._background_tasks:
             await asyncio.gather(*self._background_tasks, return_exceptions=True)
         self._background_tasks.clear()
-
-        # Cleanup shared streams
-        await self.cleanup_shared_streams()
 
         if self.http_server:
             await self.http_server.stop()
@@ -220,7 +205,6 @@ class MSXBridgeProvider(PlayerProvider):
             player_id=player_id,
             name=name,
             output_format=output_format,
-            grouping_enabled=self.grouping_enabled,
             ip_address=ip_address,
         )
         await self.mass.players.register(player)
@@ -342,12 +326,6 @@ class MSXBridgeProvider(PlayerProvider):
         if self.http_server:
             self.http_server.broadcast_seek(player_id, position_seconds)
 
-    # --- Group Stream Management ---
-
-    def is_shared_stream_mode(self) -> bool:
-        """Check if shared buffer stream mode is enabled."""
-        return self.group_stream_mode == GROUP_STREAM_MODE_SHARED
-
     def is_redirect_stream_mode(self) -> bool:
         """
         Check if MA redirect stream mode is enabled.
@@ -371,119 +349,6 @@ class MSXBridgeProvider(PlayerProvider):
         """
         digest = hmac.new(self._stream_token_secret, player_id.encode(), hashlib.sha256)
         return digest.hexdigest()[:32]
-
-    def get_group_id_for_player(self, player: MSXPlayer) -> str | None:
-        """Return a group ID when player is a leader or member, else None."""
-        # If player is synced to another (member), use leader's ID as group
-        if player.synced_to:
-            logger.debug(
-                "[GroupStream] Player %s is member of group %s",
-                player.player_id,
-                player.synced_to,
-            )
-            return player.synced_to
-
-        # If player has group members (is leader), use own ID as group
-        if player.group_members and len(player.group_members) > 1:
-            logger.debug(
-                "[GroupStream] Player %s is leader of group with %d members",
-                player.player_id,
-                len(player.group_members),
-            )
-            return player.player_id
-
-        # Solo player
-        return None
-
-    async def get_or_create_shared_stream(
-        self,
-        group_id: str,
-        media_uri: str,
-        audio_chunks: AsyncIterator[bytes],
-        session_id: str = "",
-        content_type: ContentType | None = None,
-        output_plan: AudioOutputPlan | None = None,
-    ) -> SharedGroupStream:
-        """
-        Get existing shared stream or create new one for the group.
-
-        :param group_id: ID of the group (leader's player_id).
-        :param media_uri: URI of the media being streamed.
-        :param audio_chunks: Async iterator yielding encoded audio chunks.
-        :param session_id: Per-playback identity so restarts are not reused.
-        :param content_type: Encoded codec of this producer, if known.
-        :param output_plan: Filters used to encode this producer.
-        """
-        # Serialize check-and-create: without the lock, two concurrent callers
-        # replacing an old stream both pass the "existing" check while awaiting
-        # existing.stop(), creating two producers — one orphaned.
-        async with self._shared_stream_lock:
-            existing = self._shared_streams.get(group_id)
-
-            # Reuse existing if same media and not finished
-            if (
-                existing
-                and not existing.finished
-                and existing.media_uri == media_uri
-                and existing.session_id == session_id
-                and (
-                    content_type is None
-                    or existing.content_type is None
-                    or existing.content_type == content_type
-                )
-                and (
-                    output_plan is None
-                    or (
-                        existing.output_plan is not None
-                        and existing.output_plan.filter_params == output_plan.filter_params
-                    )
-                )
-            ):
-                logger.info(
-                    "[GroupStream] Reusing existing shared stream for group %s (subscribers: %d)",
-                    group_id,
-                    existing.subscriber_count,
-                )
-                return existing
-
-            # Clean up old stream if exists
-            if existing:
-                logger.info(
-                    "[GroupStream] Replacing old shared stream for group %s "
-                    "(old_uri=%s, new_uri=%s)",
-                    group_id,
-                    existing.media_uri[:50] if existing.media_uri else "N/A",
-                    media_uri[:50] if media_uri else "N/A",
-                )
-                await existing.stop()
-
-            # Create new shared stream
-            logger.info(
-                "[GroupStream] Creating new shared stream for group %s, uri=%s",
-                group_id,
-                media_uri[:80] if media_uri else "N/A",
-            )
-            stream = SharedGroupStream(group_id, media_uri, session_id, content_type=content_type)
-            stream.output_plan = output_plan
-            await stream.start(audio_chunks)
-            self._shared_streams[group_id] = stream
-
-            return stream
-
-    def get_shared_stream(self, group_id: str) -> SharedGroupStream | None:
-        """Return the live shared stream for a group, if one is running."""
-        stream = self._shared_streams.get(group_id)
-        if stream is None or stream.finished:
-            return None
-        return stream
-
-    def remove_shared_stream(self, group_id: str) -> None:
-        """Remove and cleanup shared stream for a group."""
-        if stream := self._shared_streams.pop(group_id, None):
-            logger.info("[GroupStream] Removed shared stream for group %s", group_id)
-            task = self.mass.create_task(stream.stop())
-            self._background_tasks.add(task)
-            task.add_done_callback(self._background_tasks.discard)
 
     async def get_ma_stream_url(self, player_id: str, media: PlayerMedia) -> str | None:
         """
@@ -510,7 +375,7 @@ class MSXBridgeProvider(PlayerProvider):
         # is enabled and the player lacks gapless support. That breaks the MSX
         # per-track model (progress display, auto-advance re-enqueue), so serve
         # such tracks through the local per-track proxy instead.
-        if "/flow/" in stream_url:
+        if "/flow/" in stream_url and media.media_type != MediaType.FLOW_STREAM:
             logger.debug(
                 "[MARedirect] Flow-mode URL not usable for MSX per-track playback, "
                 "falling back to proxy: %s",
@@ -519,13 +384,6 @@ class MSXBridgeProvider(PlayerProvider):
             return None
         logger.debug("[MARedirect] Resolved MA stream URL: %s", stream_url)
         return stream_url
-
-    async def cleanup_shared_streams(self) -> None:
-        """Cleanup all shared streams (called on unload)."""
-        for group_id, stream in list(self._shared_streams.items()):
-            logger.debug("[GroupStream] Cleaning up stream for group %s", group_id)
-            await stream.stop()
-        self._shared_streams.clear()
 
     def player_display_name(
         self, player_id: str, prefix_label: str = "MSX TV", remote_ip: str | None = None
@@ -555,6 +413,27 @@ class MSXBridgeProvider(PlayerProvider):
         if remote_ip:
             return f"{prefix_label} ({suffix}) [{remote_ip}]"
         return f"{prefix_label} ({suffix})"
+
+    def _load_stream_mode(self) -> str:
+        """Load the configured stream mode and migrate the removed shared mode."""
+        raw_mode = self.config.get_value(CONF_GROUP_STREAM_MODE, DEFAULT_GROUP_STREAM_MODE)
+        if raw_mode == LEGACY_GROUP_STREAM_MODE_SHARED:
+            try:
+                self.mass.config.set_raw_provider_config_value(
+                    self.instance_id,
+                    CONF_GROUP_STREAM_MODE,
+                    GROUP_STREAM_MODE_INDEPENDENT,
+                )
+            except KeyError, OSError, RuntimeError, TypeError, ValueError:
+                self.logger.warning(
+                    "Unable to persist stream mode migration from shared to independent",
+                    exc_info=True,
+                )
+            return GROUP_STREAM_MODE_INDEPENDENT
+        if raw_mode not in (GROUP_STREAM_MODE_REDIRECT, GROUP_STREAM_MODE_INDEPENDENT):
+            self.logger.warning("Unknown stream delivery mode %r; using redirect", raw_mode)
+            return DEFAULT_GROUP_STREAM_MODE
+        return raw_mode
 
     async def _handle_player_unregister(self, player_id: str) -> None:
         """Unregister a player with race-condition handling."""

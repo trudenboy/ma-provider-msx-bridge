@@ -4,8 +4,8 @@
 
 **Native playlist** — MSX `playlist:{url}` document built from MA queue or library tracks.
 
-**Audio pipeline** — how encoded audio reaches the TV: redirect, shared group stream, or independent ffmpeg.
+**Audio pipeline** — how encoded audio reaches the TV: MA Streamserver redirect or independent local ffmpeg proxy.
 
-**Shared group stream** — one ffmpeg producer, multiple TV readers with a catch-up buffer.
+**Universal Group** — MA-owned multi-player flow session; MSX TVs participate as regular member players.
 
 **Party adapter** — the MA Party plugin seen from MSX: join QR, stamped covers, SSRF allowlist.
