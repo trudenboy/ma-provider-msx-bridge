@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     from music_assistant.models import ProviderInstanceType
 
 logger = logging.getLogger(__name__)
+CONFIG_MIGRATION_ERRORS = (KeyError, OSError, RuntimeError, TypeError, ValueError)
 
 
 async def setup(
@@ -40,6 +41,6 @@ async def setup(
             await mass.config.remove_provider_config_value(
                 config.instance_id, LEGACY_CONF_ENABLE_GROUPING
             )
-    except KeyError, OSError, RuntimeError, TypeError, ValueError:
+    except CONFIG_MIGRATION_ERRORS:
         logger.warning("Unable to remove legacy MSX grouping config", exc_info=True)
     return MSXBridgeProvider(mass, manifest, config, {ProviderFeature.REMOVE_PLAYER})
