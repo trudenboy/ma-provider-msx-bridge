@@ -10,6 +10,7 @@ from music_assistant_models.enums import PlaybackState, PlayerFeature, PlayerTyp
 from music_assistant_models.player import PlayerMedia
 from music_assistant_models.player_queue import PlayerQueue
 
+from music_assistant.constants import CONF_HTTP_PROFILE
 from music_assistant.providers.msx_bridge.player import MSXPlayer
 from tests.providers.msx_bridge.factories import queue_item as make_queue_item
 
@@ -47,6 +48,14 @@ def test_init_custom_params(provider: Any) -> None:
     cast("Any", p).update_state = Mock()
     assert p._attr_name == "Living Room TV"
     assert p.output_format == "flac"
+
+
+async def test_http_profile_defaults_to_forced_content_length(player: MSXPlayer) -> None:
+    """Redirected MA streams must expose a finite length for MSX progress."""
+    entries = await player.get_config_entries()
+
+    http_profile = next(entry for entry in entries if entry.key == CONF_HTTP_PROFILE)
+    assert http_profile.default_value == "forced_content_length"
 
 
 def test_needs_poll_always_true(player: MSXPlayer) -> None:

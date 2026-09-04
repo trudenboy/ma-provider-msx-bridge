@@ -12,7 +12,10 @@ from music_assistant_models.enums import PlaybackState, PlayerFeature, PlayerTyp
 from music_assistant_models.errors import MusicAssistantError, PlayerUnavailableError
 from music_assistant_models.player import DeviceInfo
 
-from music_assistant.constants import CONF_ENTRY_OUTPUT_CODEC_DEFAULT_MP3
+from music_assistant.constants import (
+    CONF_ENTRY_HTTP_PROFILE_DEFAULT_3,
+    CONF_ENTRY_OUTPUT_CODEC_DEFAULT_MP3,
+)
 from music_assistant.models.player import Player, PlayerMedia
 
 if TYPE_CHECKING:
@@ -95,7 +98,7 @@ class MSXPlayer(Player):
 
     async def get_config_entries(self) -> list[ConfigEntry]:
         """Return per-player config entries — codec is configurable per TV."""
-        return [CONF_ENTRY_OUTPUT_CODEC_DEFAULT_MP3]
+        return [CONF_ENTRY_OUTPUT_CODEC_DEFAULT_MP3, CONF_ENTRY_HTTP_PROFILE_DEFAULT_3]
 
     def mark_available(self) -> None:
         """Mark the player available after proof of life from the TV."""

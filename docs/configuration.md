@@ -25,6 +25,8 @@ The provider exposes these settings in the Music Assistant UI under **Settings â
 
 MP3 is recommended for most TVs because the estimated `Content-Length` header can improve the MSX progress bar and seek behavior. Disable `include_content_length` if a TV truncates or rejects local proxy streams. FLAC always omits the header because its encoded size is non-deterministic. Redirected responses are controlled by the Music Assistant Streamserver, not this option.
 
+Each MSX player defaults to Music Assistant's `forced_content_length` HTTP profile. This gives redirected finite tracks an estimated length so MSX can display playback progress. The profile is available in the advanced per-player settings; Universal Group flow streams remain continuous and do not have a finite per-track HTTP length.
+
 ## Player Idle Timeout
 
 TVs are registered as MA players on their first request. The idle timeout controls when those players are cleaned up:

@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Multi-TV playback now uses Music Assistant Universal Groups and accepts their member-specific flow stream URLs.
 - Direct Music Assistant Streamserver delivery is the recommended default; the independent local proxy remains an advanced fallback.
+- MSX players default to Music Assistant's `forced_content_length` HTTP profile so redirected finite tracks retain playback progress on the TV.
 - Legacy `shared` stream mode configurations migrate to `independent`, and the retired native grouping setting is removed.
 
 ### Removed
