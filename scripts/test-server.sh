@@ -38,7 +38,7 @@ cmd_start() {
     # shellcheck disable=SC1091
     source "$VENV_DIR/bin/activate"
     cd "$MA_SERVER"
-    python -m music_assistant --log-level debug \
+    python -m music_assistant --data-dir "$DATA_DIR" --log-level debug \
         > "$LOG_FILE" 2>&1 &
     local pid=$!
     echo "$pid" > "$PID_FILE"
