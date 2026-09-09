@@ -14,6 +14,7 @@ from urllib.parse import quote
 
 import aiohttp
 from aiohttp import WSMsgType, web
+<<<<<<< provider
 from music_assistant_models.enums import RepeatMode
 from music_assistant_models.errors import (
     InvalidDataError,
@@ -22,6 +23,25 @@ from music_assistant_models.errors import (
 )
 from music_assistant_models.media_items import Album, Track
 
+||||||| upstream-base
+from music_assistant_models.enums import ContentType
+from music_assistant_models.errors import InvalidProviderURI
+from music_assistant_models.media_items import AudioFormat, Track
+
+from music_assistant.constants import SENDSPIN_SERVER_PORT
+from music_assistant.controllers.streams.audio_processing import get_media_session_id
+from music_assistant.controllers.streams.constants import (
+    output_pacing_args,
+)
+=======
+from music_assistant_models.enums import ContentType
+from music_assistant_models.errors import InvalidProviderURI
+from music_assistant_models.media_items import AudioFormat, Track
+
+from music_assistant.constants import SENDSPIN_SERVER_PORT
+from music_assistant.controllers.streams.audio_processing import get_media_session_id
+from music_assistant.controllers.streams.constants import output_pacing_args
+>>>>>>> upstream-head
 from music_assistant.controllers.webserver.helpers.auth_middleware import ImpersonatedUser
 
 from .audio_stream import AudioPipeline, resolve_served_duration
@@ -74,6 +94,44 @@ STATIC_DIR = Path(__file__).parent / "static"
 
 _KNOWN_EXTENSIONS = (".mp3", ".json", ".flac", ".aac")
 
+<<<<<<< provider
+||||||| upstream-base
+PARTY_CACHE_TTL = 10.0
+PARTY_CALL_TIMEOUT = 5.0
+
+# The local proxy modes encode audio themselves, so they carry the core streamserver's
+# pacing ceiling rather than handing a track over as fast as ffmpeg can produce it.
+# See the usage policy note in the streams constants.
+_READRATE_ARGS = output_pacing_args("gapless_burst")
+
+
+class PartyInfo(NamedTuple):
+    """Active-party details resolved from the MA Party plugin."""
+
+    join_url: str
+    name: str | None
+    qr_text: str | None
+    qr_version: str
+
+=======
+PARTY_CACHE_TTL = 10.0
+PARTY_CALL_TIMEOUT = 5.0
+
+# The local proxy modes encode audio themselves, so they carry the core streamserver's
+# pacing ceiling rather than handing a track over as fast as ffmpeg can produce it.
+# See the usage policy note in the streams constants.
+_READRATE_ARGS = output_pacing_args()
+
+
+class PartyInfo(NamedTuple):
+    """Active-party details resolved from the MA Party plugin."""
+
+    join_url: str
+    name: str | None
+    qr_text: str | None
+    qr_version: str
+
+>>>>>>> upstream-head
 
 def _int_param(query: MultiMapping[str], name: str, default: int, max_val: int = 10000) -> int:
     """Parse an integer query parameter safely, clamping to [0, max_val]."""
