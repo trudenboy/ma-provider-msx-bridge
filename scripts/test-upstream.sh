@@ -30,7 +30,7 @@ mount_sources() {
             rm -rf "$provider_dest" "$tests_dest"
             mkdir -p "$provider_dest" "$tests_dest"
             rsync -a --delete "$REPO_ROOT/provider/" "$provider_dest/"
-            rsync -a --delete "$REPO_ROOT/tests/" "$tests_dest/"
+            rsync -a --delete --exclude=standalone/ "$REPO_ROOT/tests/" "$tests_dest/"
             ;;
         *)
             echo "ERROR: MA_MOUNT_MODE must be link or copy" >&2
@@ -100,11 +100,19 @@ ensure_mounted() {
 
 run_tests() {
     ensure_mounted
+    if [[ -d "$REPO_ROOT/tests/standalone" ]]; then
+        (
+            cd "$REPO_ROOT"
+            source "$MA_SERVER_DIR/.venv/bin/activate"
+            pytest --confcutdir=tests/standalone tests/standalone
+        )
+    fi
     (
         cd "$MA_SERVER_DIR"
         source .venv/bin/activate
         pytest --durations 10 --cov-report=term-missing \
             --cov="music_assistant/providers/$PROVIDER_DOMAIN" \
+            --ignore="tests/providers/$PROVIDER_DOMAIN/standalone" \
             "tests/providers/$PROVIDER_DOMAIN"
     )
 }

@@ -1,25 +1,45 @@
 # What does this implement/fix?
 
-Updates the MSX Bridge player provider from v1.4.9 to v1.6.0.
+Updates the bundled MSX Bridge player provider from v1.4.9 to v1.6.0. This includes the changes across the intervening provider releases, not only the last three fixes.
 
-Source: [provider repository](https://github.com/trudenboy/ma-provider-msx-bridge), starting from [v1.6.0](https://github.com/trudenboy/ma-provider-msx-bridge/releases/tag/v1.6.0) with fixes [#262](https://github.com/trudenboy/ma-provider-msx-bridge/pull/262) and [#270](https://github.com/trudenboy/ma-provider-msx-bridge/pull/270).
+### Changes from the bundled v1.4.9
 
-Native MSX playback selects existing queue items instead of replacing the queue, preserves duplicate tracks and long-queue positions, and treats unauthenticated requests as external hardware. Audio delivery uses MA Streamserver redirects by default and an independent per-TV proxy with current source-specific pacing as fallback. Lifecycle, native position reporting, image bounds and cross-origin playlist checks are hardened.
-
-Provider-managed grouping and shared buffers are removed in favor of Universal Groups. The browser kiosk, bundled Sendspin client and kiosk-only routes are removed; browser playback moves to Web Kiosk. Party QR presentation remains, with bounded cover processing and shutdown cleanup.
+- **Queue playback:** selecting an album or playlist in MSX prepares the Music Assistant queue. Playback uses existing queue-item identity instead of replacing or repeatedly appending to the queue. Duplicate tracks, URL-backed radio/audio sources, long queues and start indexes above 10,000 retain their intended position. Native next/previous and track completion follow the MA queue; a no-op at either end does not restart the current track, while repeat-one still restarts intentionally.
+- **TV controls and progress:** native pause/resume and seek reports update MA state, including seeks while paused or before the first progress sample. Playback resets and overlapping commands no longer leave stale clocks or clear another command's WebSocket notification suppression. These changes report native seek to MA; they do not rebuild an HTTP response already consumed by the TV.
+- **Audio delivery and lifecycle:** the recommended default redirects playback to the MA Streamserver. An advanced independent proxy remains available for MP3/AAC/FLAC, with source-specific pacing, bounded buffering and cleanup on disconnect, stop or shutdown. MSX players accept Universal Group member flow URLs. Finite redirected tracks use MA's `forced_content_length` profile for progress reporting; the independent MP3/AAC proxy has an option to omit estimated Content-Length, and FLAC omits it.
+- **Authentication and request handling:** unauthenticated TV playback is treated as external hardware rather than impersonating a user. Audio URLs require the player's stream token and cannot select arbitrary stream addresses. Browser control, WebSocket and token-bearing playlist requests reject cross-origin requests; native Origin-less MSX remains supported. Malformed JSON and invalid position reports are rejected. Expected playback failures receive appropriate HTTP responses; unexpected programming errors remain visible.
+- **Native menus and Party covers:** search retains the source provider and supports older MSX clients; album ordering is deterministic even when sort fields match. Party QR presentation remains available. Cover fetch origins, downloaded bytes, image dimensions, render concurrency and cached PNG bytes are bounded. The compositor no longer changes Pillow's global image limit, and shutdown cancels its owned work.
+- **Removed modes:** provider-managed groups, shared audio producers, the browser kiosk, bundled Sendspin client and kiosk-only routes are removed. Their replacement and upgrade behavior are described below; improvements to retired implementations in intermediate releases are not features of this final snapshot.
 
 ### Migration and breaking changes
 
-- The legacy `shared` delivery setting migrates to `independent`, preserving individual-TV playback through a local proxy. One producer shared between TVs is no longer provided by MSX Bridge.
-- The native grouping setting is removed. Users of provider-managed groups must recreate them as Music Assistant Universal Groups; existing native group membership is not automatically converted.
-- The browser kiosk, bundled Sendspin client and kiosk-only routes are removed. Browser kiosk users must switch to the separate Web Kiosk provider. Native MSX menus, playlists and Party QR remain available.
-- Redirected finite tracks default to MA’s `forced_content_length` profile for MSX progress reporting. Estimated Content-Length on the independent MP3/AAC proxy can be disabled through its advanced setting; FLAC omits it.
+- **Shared buffer streaming enabled:** the stored `shared` delivery setting is migrated to `independent` on load. Each TV uses its own local proxy/encoder; one shared producer is no longer available. Individual-TV playback remains, but resource use and multi-TV delivery change. This migration does not recreate a group or promise the old shared-buffer synchronization behavior.
+- **Provider-managed player grouping enabled:** the legacy grouping setting is removed. Existing native MSX group membership is not converted automatically and the bridge no longer fans commands out to those groups. Recreate the desired membership as a Music Assistant Universal Group. The individual MSX players remain usable as regular players and group members.
+- **Browser kiosk or Sendspin mode in use:** the embedded web player, kiosk launcher option, bundled Sendspin client and kiosk-only lyrics/queue endpoints are removed. Use the separate [Web Kiosk provider](https://github.com/trudenboy/ma-provider-web-kiosk) for browser playback. Native MSX menus, playlists and Party QR remain available.
 
-This description covers the complete v1.4.9 → v1.6.0 update. VERSION remains 1.6.0. The maintainer requested including the current compatibility fix (#262) and previous/no-op regression fix (#270) on 2026-10-08. Those follow-ups are not represented as already present in the historical v1.6.0 tag.
+The dominant change type is **breaking-change**, because existing grouping and shared-buffer setups require migration. The PR is not classified as a non-breaking enhancement.
+
+### Fixed scope for this review
+
+The provider VERSION is held at **1.6.0**. The code under review is head `0281933ba52d863301cb3da561de874b06884fc5`, based on official MA dev `73257004745c8b44be6ef43f0001d6230098020d`.
+
+This snapshot starts from the [historical v1.6.0 release](https://github.com/trudenboy/ma-provider-msx-bridge/releases/tag/v1.6.0) and includes provider [#262](https://github.com/trudenboy/ma-provider-msx-bridge/pull/262) (current MA pacing compatibility), [#270](https://github.com/trudenboy/ma-provider-msx-bridge/pull/270) (previous/no-op) and [#271](https://github.com/trudenboy/ma-provider-msx-bridge/pull/271) (a regression guard against loading the same provider module twice). These later fixes are not claimed to be present in the published v1.6.0 tag; no new release/tag was created for them.
+
+Review proceeds against this snapshot. Further features, version upgrades and module rewrites belong in follow-up PRs. Any correction required by this review should be identified with its regression/evidence rather than introducing another release's changes.
+
+### Review evidence and remaining decisions
+
+The [review audit](https://github.com/trudenboy/ma-provider-msx-bridge/blob/tooling/pr-5868-reviewed-replies/docs/pr-5868-review-evidence.md) maps all 83 inline threads to implemented behavior, removed paths or pending decisions. Resolution alone is not evidence that a concern was fixed. At the latest audit, all 83 threads are marked resolved, but 47 have no inline reply. The previous/no-op thread now has an author reply. Draft explanations exist for the remaining threads; they have not been posted, and replies to human reviewers still need the owner's own wording. Updating this description does not complete that request.
+
+The following limits remain explicit:
+
+- Party discovery still needs an accepted generic contract; [#6184](https://github.com/music-assistant/server/pull/6184) was closed without merge.
+- Cross-origin checks do not provide a control-pairing credential or complete DNS-rebinding protection.
+- Native TV seek updates the MA clock without replacing an active progressive HTTP body. Seeking beyond buffered audio and audible Xbox queue progression need device confirmation.
 
 **Related issue (if applicable):**
 
-[music-assistant/support#6624](https://github.com/music-assistant/support/issues/6624) reports the unauthenticated audio-path failure in MA 2.10.5. The auth fix is included here; successful Xbox playback still needs user confirmation after delivery.
+[music-assistant/support#6624](https://github.com/music-assistant/support/issues/6624) reports unauthenticated playback failure in MA 2.10.5. This PR includes the auth correction; it does not deliver a stable backport or establish successful playback on the affected Xbox.
 
 ## Types of changes
 
@@ -44,6 +64,4 @@ This description covers the complete v1.4.9 → v1.6.0 update. VERSION remains 1
 - [x] I have read and complied with the project's [AI Policy](https://github.com/music-assistant/.github/blob/main/AI_POLICY.md) for any AI-assisted contributions.
 - [ ] I have raised a PR against the documentation repository targeting the main or beta branch as appropriate.
 
-Remaining review decisions are explicit: automatic Party lookup needs an accepted generic contract (#6184 was closed without merge); cross-origin checks are not a control-pairing credential or complete DNS-rebinding defense; native TV seek updates the clock without rebuilding an active progressive HTTP body. Device seek and audible Xbox progression still need runtime confirmation.
-
-Validation: full provider compatibility gate and pre-commit pass against official MA dev 73257004745c8b44be6ef43f0001d6230098020d. The published PR snapshot 0281933ba52d863301cb3da561de874b06884fc5 was separately tested: 324 passed, 1 skipped, mypy passed, upstream lint passed. The PR owner has confirmed compliance with the AI Policy.
+Validation of the actual published provider snapshot: **324 passed, 1 skipped**, mypy and scoped pre-commit passed. [Full upstream Test](https://github.com/music-assistant/server/actions/runs/37801561191) and [PR Checks](https://github.com/music-assistant/server/actions/runs/37802416184) completed successfully. The additional reply-publishing tool and its standalone tests are outside the upstream provider snapshot. The PR stays draft while the remaining explanations and review decisions are completed.

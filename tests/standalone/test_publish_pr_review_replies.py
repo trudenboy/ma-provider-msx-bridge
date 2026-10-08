@@ -140,6 +140,10 @@ args = sys.argv[1:]
 with open(os.environ["FAKE_GH_LOG"], "a") as log:
     log.write(json.dumps(args) + "\\n")
 if "POST" in args:
+    if state.get("post_error"):
+        print(json.dumps({"message": "Validation Failed", "errors": [state["post_error"]]}))
+        print("gh: Validation Failed (HTTP 422)", file=sys.stderr)
+        sys.exit(1)
     payload = json.load(sys.stdin)
     state["threads"][0]["comments"]["nodes"].append({"id": "posted", "body": payload["body"],
         "author": {"login": "owner", "__typename": "User"}, "url": "https://github.com/reply"})
@@ -338,3 +342,21 @@ def test_pagination_cannot_hide_a_human_in_a_bot_thread(tmp_path: Path) -> None:
     assert result.returncode != 0
     assert "human_authored" in result.stderr
     assert "POST" not in (tmp_path / "calls.jsonl").read_text()
+
+
+def test_api_validation_details_are_reported(tmp_path: Path) -> None:
+    """A failed POST must expose GitHub's actionable validation explanation."""
+    bundle, env = github_cli(tmp_path)
+    state_path = tmp_path / "state.json"
+    state = json.loads(state_path.read_text())
+    state["post_error"] = {"field": "body", "code": "custom", "message": "Reply was rejected"}
+    state_path.write_text(json.dumps(state))
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT), "--bundle", str(bundle), "--publish", "--reviewed-by-human"],
+        capture_output=True,
+        text=True,
+        check=False,
+        env=env,
+    )
+    assert result.returncode != 0
+    assert "Reply was rejected" in result.stderr

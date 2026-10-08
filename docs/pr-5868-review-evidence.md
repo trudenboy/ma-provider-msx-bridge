@@ -1,7 +1,7 @@
 # PR #5868 — evidence map for maintainer review
 
 Snapshot: 2026-10-08. Upstream head: `0281933ba52d863301cb3da561de874b06884fc5`.
-All 83 threads retrieved, no next page: 82 resolved, 1 open; 48 have no reply.
+All 83 threads retrieved, no next page: 83 resolved, 0 open; 47 have no reply.
 
 This is an evidence index, not text to post verbatim. Human-reviewer replies
 remain human-written. Maintainer judgement is required before any automated
@@ -97,4 +97,4 @@ owner-attribution response was superseded by the external-hardware fix.
 | [80](https://github.com/music-assistant/server/pull/5868#discussion_r3922050645) | copilot-pull-request-reviewer / has replies | resolved | Origin/token-bearing routes: HTTP control and browser WS origin guards plus centralized token-bearing playlist checks exist. Origin-less native clients remain supported. See cross-origin and token-bearing playlist tests. |
 | [81](https://github.com/music-assistant/server/pull/5868#discussion_r3922050699) | copilot-pull-request-reviewer / has replies | resolved | Owner impersonation: Earlier owner-attribution reply was superseded by #259/1.5.10. Native hardware does not select a user. See support-6624 draft/backport and native_queue_advances regression. |
 | [82](https://github.com/music-assistant/server/pull/5868#discussion_r3932176208) | copilot-pull-request-reviewer / has replies | resolved | Version/full delta: Prepared docs/pr-5868-description.md covers 1.4.9 → 1.6.0 and migration of removed modes. The description is published; VERSION remains 1.6.0. |
-| [83](https://github.com/music-assistant/server/pull/5868#discussion_r3946368654) | OzGav / no reply | OPEN | Previous/no-op: Provider #270 merged and synced. First-item/actual-previous/repeat-one red/green regressions pass on the actual published head. The discussion awaits a human-written reply. |
+| [83](https://github.com/music-assistant/server/pull/5868#discussion_r3946368654) | OzGav / has replies | resolved | Previous/no-op: Provider #270 merged and synced. First-item/actual-previous/repeat-one red/green regressions pass on the actual published head. The author reply is visible at discussion_r4221348759. |

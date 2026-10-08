@@ -3,9 +3,9 @@
 Скрипт: `scripts/publish_pr_review_replies.py`. Нужны Python 3.10+ и
 авторизованный `gh` с правом отвечать в PR. Без аргументов — офлайн-просмотр.
 
-Срез 2026-10-08: 83 review threads, 82 закрыты, открыт только
-[thread 83: previous/no-op](https://github.com/music-assistant/server/pull/5868#discussion_r3946368654).
-Исправление из provider #270 уже опубликовано. Проверенный head:
+Срез 2026-10-08: 83 review threads, все закрыты.
+[Thread 83: previous/no-op](https://github.com/music-assistant/server/pull/5868#discussion_r3946368654).
+получил ответ владельца и также закрыт. Исправление из provider #270 уже опубликовано. Проверенный head:
 `0281933ba52d863301cb3da561de874b06884fc5`; полный upstream CI и PR Checks зелёные.
 
 Черновики для всех веток сохранены в [pr-5868-replies.json](pr-5868-replies.json).
@@ -59,5 +59,8 @@ human-authored текста; `--publish` блокируется, пока он �
 .cache/ma-upstream/server/.venv/bin/pytest --confcutdir=tests/standalone tests/standalone/test_publish_pr_review_replies.py -q
 ```
 
-Проверено: 12 CLI-тестов; полный gate на актуальном MA dev — 336 passed,
-1 skipped; Ruff, mypy, pre-commit и live `--check` прошли. Ответы не отправлялись.
+Проверено: 13 CLI-тестов; provider gate на актуальном MA dev — 324 passed,
+1 skipped; Ruff, mypy, pre-commit и live `--check` прошли. Из этого процесса подготовки ответы не отправлялись.
+
+Ошибки API теперь включают JSON validation details из `gh`, а не только
+HTTP-статус. Точная причина прошлых HTTP 422 остаётся неизвестной.

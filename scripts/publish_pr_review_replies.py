@@ -52,7 +52,8 @@ def gh(endpoint: str, **fields: Any) -> Any:
         payload = None
     result = subprocess.run(command, input=payload, text=True, capture_output=True, check=False)
     if result.returncode:
-        raise ValueError(f"GitHub API failed ({endpoint}): {result.stderr.strip()}")
+        details = "\n".join(part.strip() for part in (result.stderr, result.stdout) if part.strip())
+        raise ValueError(f"GitHub API failed ({endpoint}): {details}")
     data = json.loads(result.stdout)
     if isinstance(data, dict) and data.get("errors"):
         raise ValueError(f"GraphQL returned errors: {data['errors']}")
