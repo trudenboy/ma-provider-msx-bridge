@@ -11,8 +11,12 @@ No review thread is resolved and no PR metadata is changed.
 
 import argparse
 import json
+import os
 import subprocess
 import sys
+import tempfile
+from collections.abc import Iterator
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from typing import Any
 
@@ -193,6 +197,22 @@ def plan(
     return candidates
 
 
+@contextmanager
+def publication_lock() -> Iterator[None]:
+    """Allow one publisher per local OS user, across checkouts and reply bundles."""
+    try:
+        import fcntl  # noqa: PLC0415 - optional POSIX dependency for publication only
+    except ImportError:
+        raise ValueError("Publication locking requires a POSIX system (Linux or macOS).") from None
+    lock_path = Path(tempfile.gettempdir()) / f"msx-pr-5868-publish-{os.getuid()}.lock"
+    with lock_path.open("a") as lock_file:
+        try:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise ValueError("Another publication is running; wait before retrying.") from None
+        yield
+
+
 def main() -> None:
     """Run an offline preview by default; opt in explicitly to live operations."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -214,42 +234,43 @@ def main() -> None:
     if args.publish and not args.reviewed_by_human:
         parser.error("--publish requires --reviewed-by-human")
     try:
-        bundle = json.loads(args.bundle.read_text())
-        if bundle["repo"] != REPO or bundle["pr"] != PR:
-            raise ValueError("This script is restricted to music-assistant/server PR #5868.")
-        if not args.check and not args.publish:
-            for reply in bundle["threads"]:
-                selected = (
-                    reply["resolved_at_snapshot"] and len(reply["comments"]) == 1
-                    if args.resolved_unanswered
-                    else not reply["resolved_at_snapshot"]
-                )
-                if selected:
-                    print(f"Thread {reply['root_comment_id']}\n{reply['body']}\n")
-            print("Offline preview only; live open threads and CI require --check.")
-            return
-        check_head_and_ci(bundle)
-        viewer = gh("user")["login"]
-        candidates = plan(
-            bundle, viewer, publishing=args.publish, resolved_unanswered=args.resolved_unanswered
-        )
-        print(f"Verified head {bundle['expected_head']}; {len(candidates)} reply candidate(s).")
-        for reply in candidates:
-            print(f"Thread {reply['root_comment_id']}\n{reply['body']}\n")
-        if args.publish:
+        with publication_lock() if args.publish else nullcontext():
+            bundle = json.loads(args.bundle.read_text())
+            if bundle["repo"] != REPO or bundle["pr"] != PR:
+                raise ValueError("This script is restricted to music-assistant/server PR #5868.")
+            if not args.check and not args.publish:
+                for reply in bundle["threads"]:
+                    selected = (
+                        reply["resolved_at_snapshot"] and len(reply["comments"]) == 1
+                        if args.resolved_unanswered
+                        else not reply["resolved_at_snapshot"]
+                    )
+                    if selected:
+                        print(f"Thread {reply['root_comment_id']}\n{reply['body']}\n")
+                print("Offline preview only; live open threads and CI require --check.")
+                return
+            check_head_and_ci(bundle)
+            viewer = gh("user")["login"]
+            candidates = plan(
+                bundle, viewer, publishing=args.publish, resolved_unanswered=args.resolved_unanswered
+            )
+            print(f"Verified head {bundle['expected_head']}; {len(candidates)} reply candidate(s).")
             for reply in candidates:
-                # Revalidate the full discussion and CI immediately before every write.
-                check_head_and_ci(bundle)
-                current = plan(
-                    bundle, viewer, publishing=True, resolved_unanswered=args.resolved_unanswered
-                )
-                if not any(item["thread_id"] == reply["thread_id"] for item in current):
-                    continue
-                response = gh(
-                    f"repos/{REPO}/pulls/{PR}/comments/{reply['root_comment_id']}/replies",
-                    body=reply["body"].strip() + "\n\n" + marker(bundle, reply),
-                )
-                print(f"Published: {response['html_url']}")
+                print(f"Thread {reply['root_comment_id']}\n{reply['body']}\n")
+            if args.publish:
+                for reply in candidates:
+                    # Revalidate the full discussion and CI immediately before every write.
+                    check_head_and_ci(bundle)
+                    current = plan(
+                        bundle, viewer, publishing=True, resolved_unanswered=args.resolved_unanswered
+                    )
+                    if not any(item["thread_id"] == reply["thread_id"] for item in current):
+                        continue
+                    response = gh(
+                        f"repos/{REPO}/pulls/{PR}/comments/{reply['root_comment_id']}/replies",
+                        body=reply["body"].strip() + "\n\n" + marker(bundle, reply),
+                    )
+                    print(f"Published: {response['html_url']}")
     except (OSError, ValueError, KeyError, TypeError, IndexError) as error:
         print(f"Stopped: {error}", file=sys.stderr)
         sys.exit(1)

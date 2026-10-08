@@ -6,10 +6,11 @@ Read the [four reply drafts](pr-5868-followup-replies.json) and [updated descrip
 
 ```bash
 cd /mnt/data/Projects/mass/ma-provider-msx-bridge
-gh pr edit 5868 --repo music-assistant/server --body-file docs/pr-5868-description.md
+jq -n --rawfile body docs/pr-5868-description.md '{body: $body}' |
+  gh api --method PATCH repos/music-assistant/server/pulls/5868 --input - --jq .html_url
 ```
 
-The body edit triggers PR Checks / Verify on the current head. The final-head Test workflow is https://github.com/music-assistant/server/actions/runs/37833590467. Wait for lint, test, provider-scope and Verify to succeed before the next step. Do not remove those required checks to bypass a pending or failing run.
+The REST body edit avoids older gh pr edit releases accessing the deprecated GraphQL projectCards field, and triggers PR Checks / Verify on the current head. The final-head Test workflow is https://github.com/music-assistant/server/actions/runs/37833590467. Wait for lint, test, provider-scope and Verify to succeed before the next step. Do not remove those required checks to bypass a pending or failing run.
 
 ## 2. Preview, verify and publish four responses
 
@@ -20,7 +21,7 @@ python3 scripts/publish_pr_review_replies.py --bundle docs/pr-5868-followup-repl
 python3 scripts/publish_pr_review_replies.py --bundle docs/pr-5868-followup-replies.json --check
 ```
 
-Run each command only if the previous one succeeds. The publisher refuses a changed PR head, new open comments, a changed discussion, failed/pending checks, or an unreviewed human discussion. Repeated publication of the same reviewed text is idempotent. If a pending review produces GitHub's one-pending-review-per-user error, submit or remove the intended pending review first; do not delete published replies to work around it.
+Run each command only if the previous one succeeds. The publisher refuses a changed PR head, new open comments, a changed discussion, failed/pending checks, or an unreviewed human discussion. Repeated publication of the same reviewed text is idempotent. A POSIX file lock rejects concurrent publishers running under the same local OS user, even from different checkouts or bundles; publishers on different machines still require coordination. If a pending review produces GitHub's one-pending-review-per-user error, submit or remove the intended pending review first; do not delete published replies to work around it.
 
 ## 3. Resolve the four fixed bot threads after successful publication
 

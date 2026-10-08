@@ -7,6 +7,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -438,3 +439,54 @@ def test_resolved_batch_stops_when_a_selected_thread_changes(tmp_path: Path, cha
     )
     assert result.returncode != 0
     assert "POST" not in (tmp_path / "calls.jsonl").read_text()
+
+
+def test_parallel_publisher_stops_before_contacting_github(tmp_path: Path) -> None:
+    """A second process cannot publish while the first is between validation and POST."""
+    bundle, env = github_cli(tmp_path)
+    env["TMPDIR"] = str(tmp_path)
+    ready = tmp_path / "ready"
+    release = tmp_path / "release"
+    env["FAKE_GH_READY"] = str(ready)
+    env["FAKE_GH_RELEASE"] = str(release)
+    fake_gh = tmp_path / "gh"
+    fake_gh.write_text(
+        fake_gh.read_text().replace(
+            "args = sys.argv[1:]",
+            "args = sys.argv[1:]\n"
+            "import time\n"
+            "ready = Path(os.environ['FAKE_GH_READY'])\n"
+            "if not ready.exists():\n"
+            "    ready.touch()\n"
+            "    while not Path(os.environ['FAKE_GH_RELEASE']).exists():\n"
+            "        time.sleep(0.02)",
+        )
+    )
+    command = [
+        sys.executable,
+        str(SCRIPT),
+        "--bundle",
+        str(bundle),
+        "--publish",
+        "--reviewed-by-human",
+    ]
+    with subprocess.Popen(
+        command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env
+    ) as first:
+        try:
+            deadline = time.monotonic() + 10
+            while not ready.exists():
+                assert time.monotonic() < deadline, "First publisher never reached its API boundary"
+                time.sleep(0.02)
+            second = subprocess.run(
+                command, capture_output=True, text=True, check=False, env=env, timeout=10
+            )
+            assert second.returncode != 0
+            assert "Another publication is running" in second.stderr
+            assert not (tmp_path / "calls.jsonl").exists()
+        finally:
+            release.touch()
+            _, first_stderr = first.communicate(timeout=10)
+    assert first.returncode == 0, first_stderr
+    calls = [json.loads(line) for line in (tmp_path / "calls.jsonl").read_text().splitlines()]
+    assert len([call for call in calls if "POST" in call]) == 1

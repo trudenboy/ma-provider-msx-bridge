@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Review reply publication rejects concurrent local runs to prevent duplicate GitHub replies.
 - Independent stream failures return HTTP 503 before headers, and abort incomplete responses after headers.
 - MP3/AAC Content-Length estimates cover the full duration of recordings longer than twelve hours.
 - Native next-track playback resets the paused position clock without reloading the TV playlist.
