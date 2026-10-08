@@ -360,3 +360,81 @@ def test_api_validation_details_are_reported(tmp_path: Path) -> None:
     )
     assert result.returncode != 0
     assert "Reply was rejected" in result.stderr
+
+
+def test_resolved_unanswered_mode_posts_once_without_reopening(tmp_path: Path) -> None:
+    """Opt-in publication covers the frozen unanswered resolved set exactly once."""
+    bundle, env = github_cli(tmp_path)
+    data = json.loads(bundle.read_text())
+    data["threads"][0]["resolved_at_snapshot"] = True
+    bundle.write_text(json.dumps(data))
+    state_path = tmp_path / "state.json"
+    state = json.loads(state_path.read_text())
+    state["threads"][0]["isResolved"] = True
+    state["threads"].append(
+        {
+            "id": "already-answered",
+            "isResolved": True,
+            "comments": {"nodes": [], "pageInfo": {"hasNextPage": False}},
+        }
+    )
+    state_path.write_text(json.dumps(state))
+    for _ in range(2):
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPT),
+                "--bundle",
+                str(bundle),
+                "--resolved-unanswered",
+                "--publish",
+                "--reviewed-by-human",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            env=env,
+        )
+        assert result.returncode == 0, result.stderr
+    calls = [json.loads(line) for line in (tmp_path / "calls.jsonl").read_text().splitlines()]
+    assert len([call for call in calls if "POST" in call]) == 1
+    assert "resolveReviewThread" not in str(calls)
+    assert json.loads(state_path.read_text())["threads"][0]["isResolved"] is True
+
+
+@pytest.mark.parametrize("change", ["reopened", "answered", "missing"])
+def test_resolved_batch_stops_when_a_selected_thread_changes(tmp_path: Path, change: str) -> None:
+    """Closed-batch publication cannot silently accept a changed reviewed target."""
+    bundle, env = github_cli(tmp_path)
+    data = json.loads(bundle.read_text())
+    data["threads"][0]["resolved_at_snapshot"] = True
+    bundle.write_text(json.dumps(data))
+    state_path = tmp_path / "state.json"
+    state = json.loads(state_path.read_text())
+    thread = state["threads"][0]
+    thread["isResolved"] = True
+    if change == "reopened":
+        thread["isResolved"] = False
+    elif change == "answered":
+        comment = dict(thread["comments"]["nodes"][0], id="new-comment", body="Already answered")
+        thread["comments"]["nodes"].append(comment)
+    else:
+        state["threads"] = []
+    state_path.write_text(json.dumps(state))
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--bundle",
+            str(bundle),
+            "--resolved-unanswered",
+            "--publish",
+            "--reviewed-by-human",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        env=env,
+    )
+    assert result.returncode != 0
+    assert "POST" not in (tmp_path / "calls.jsonl").read_text()

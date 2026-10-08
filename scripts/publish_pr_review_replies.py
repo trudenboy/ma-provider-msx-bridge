@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Preview, check, or publish reviewed replies to open PR #5868 discussions.
+Preview, check, or publish reviewed replies to PR #5868 discussions.
 
 Requires Python 3.10+ and an authenticated GitHub CLI for live operations.
 No review thread is resolved and no PR metadata is changed.
@@ -123,14 +123,32 @@ def signature(comments: list[dict[str, Any]]) -> list[tuple[Any, ...]]:
     return [(comment["id"], comment["body"], comment["author"]) for comment in comments]
 
 
-def plan(bundle: dict[str, Any], viewer: str, *, publishing: bool) -> list[dict[str, Any]]:
-    """Validate all open threads before returning any candidate to publish."""
+def plan(
+    bundle: dict[str, Any], viewer: str, *, publishing: bool, resolved_unanswered: bool = False
+) -> list[dict[str, Any]]:
+    """Validate the selected frozen discussion set before returning candidates."""
     known = {reply["thread_id"]: reply for reply in bundle["threads"]}
     if len(known) != len(bundle["threads"]):
         raise ValueError("Duplicate thread in reply bundle.")
+    targets = (
+        {
+            reply["thread_id"]
+            for reply in bundle["threads"]
+            if reply["resolved_at_snapshot"] and len(reply["comments"]) == 1
+        }
+        if resolved_unanswered
+        else set()
+    )
+    seen = set()
     candidates = []
     for thread in live_threads():
-        if thread["isResolved"]:
+        if resolved_unanswered:
+            if thread["id"] not in targets:
+                continue
+            if not thread["isResolved"]:
+                raise ValueError(f"Selected thread {thread['id']} was reopened; review it again.")
+            seen.add(thread["id"])
+        elif thread["isResolved"]:
             continue
         reply = known.get(thread["id"])
         if reply is None:
@@ -170,6 +188,8 @@ def plan(bundle: dict[str, Any], viewer: str, *, publishing: bool) -> list[dict[
                 )
             print(f"Human-authored text required before publication: {root_id}")
         candidates.append(reply)
+    if targets - seen:
+        raise ValueError("Selected resolved discussions disappeared; review the bundle again.")
     return candidates
 
 
@@ -185,6 +205,11 @@ def main() -> None:
     mode.add_argument("--check", action="store_true", help="Read-only live verification")
     mode.add_argument("--publish", action="store_true", help="Post validated replies")
     parser.add_argument("--reviewed-by-human", action="store_true")
+    parser.add_argument(
+        "--resolved-unanswered",
+        action="store_true",
+        help="Use only threads resolved with one root comment in the reviewed bundle",
+    )
     args = parser.parse_args()
     if args.publish and not args.reviewed_by_human:
         parser.error("--publish requires --reviewed-by-human")
@@ -194,23 +219,30 @@ def main() -> None:
             raise ValueError("This script is restricted to music-assistant/server PR #5868.")
         if not args.check and not args.publish:
             for reply in bundle["threads"]:
-                if not reply["resolved_at_snapshot"]:
+                selected = (
+                    reply["resolved_at_snapshot"] and len(reply["comments"]) == 1
+                    if args.resolved_unanswered
+                    else not reply["resolved_at_snapshot"]
+                )
+                if selected:
                     print(f"Thread {reply['root_comment_id']}\n{reply['body']}\n")
             print("Offline preview only; live open threads and CI require --check.")
             return
         check_head_and_ci(bundle)
         viewer = gh("user")["login"]
-        candidates = plan(bundle, viewer, publishing=args.publish)
-        print(
-            f"Verified head {bundle['expected_head']}; {len(candidates)} open reply candidate(s)."
+        candidates = plan(
+            bundle, viewer, publishing=args.publish, resolved_unanswered=args.resolved_unanswered
         )
+        print(f"Verified head {bundle['expected_head']}; {len(candidates)} reply candidate(s).")
         for reply in candidates:
             print(f"Thread {reply['root_comment_id']}\n{reply['body']}\n")
         if args.publish:
             for reply in candidates:
                 # Revalidate the full discussion and CI immediately before every write.
                 check_head_and_ci(bundle)
-                current = plan(bundle, viewer, publishing=True)
+                current = plan(
+                    bundle, viewer, publishing=True, resolved_unanswered=args.resolved_unanswered
+                )
                 if not any(item["thread_id"] == reply["thread_id"] for item in current):
                     continue
                 response = gh(

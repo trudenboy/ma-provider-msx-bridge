@@ -1,5 +1,9 @@
 # Публикация проверенных ответов в PR #5868
 
+Для выбранных владельцем 47 закрытых веток без ответа используйте
+[команды публикации](pr-5868-publication-commands.md) и отдельный режим
+`--resolved-unanswered`. Обычный режим ниже выбирает только открытые ветки.
+
 Скрипт: `scripts/publish_pr_review_replies.py`. Нужны Python 3.10+ и
 авторизованный `gh` с правом отвечать в PR. Без аргументов — офлайн-просмотр.
 
@@ -59,7 +63,7 @@ human-authored текста; `--publish` блокируется, пока он �
 .cache/ma-upstream/server/.venv/bin/pytest --confcutdir=tests/standalone tests/standalone/test_publish_pr_review_replies.py -q
 ```
 
-Проверено: 13 CLI-тестов; provider gate на актуальном MA dev — 324 passed,
+Проверено: 17 CLI-тестов; provider gate на актуальном MA dev — 324 passed,
 1 skipped; Ruff, mypy, pre-commit и live `--check` прошли. Из этого процесса подготовки ответы не отправлялись.
 
 Ошибки API теперь включают JSON validation details из `gh`, а не только
