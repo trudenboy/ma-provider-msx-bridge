@@ -1,0 +1,21 @@
+--- a/music_assistant/providers/msx_bridge/http_server.py
++++ b/music_assistant/providers/msx_bridge/http_server.py
+@@ -1460,9 +1460,7 @@
+             # play_media() instead of returning the previous track's media.
+             player.expect_new_media()
+             try:
+-                async with ImpersonatedUser(
+-                    self.provider.mass, await self.provider.get_owner_username()
+-                ):
++                async with ImpersonatedUser(self.provider.mass, None):
+                     await self.provider.mass.player_queues.play_media(player_id, uri)
+             finally:
+                 if from_playlist:
+@@ -2594,6 +2592,6 @@
+         if self._get_msx_player(player_id) is None:
+             return web.json_response({"error": "Unknown MSX player"}, status=404)
+
+-        async with ImpersonatedUser(self.provider.mass, await self.provider.get_owner_username()):
++        async with ImpersonatedUser(self.provider.mass, None):
+             await self.provider.mass.player_queues.play_media(player_id, track_uri)
+         return web.json_response({"status": "ok"})
