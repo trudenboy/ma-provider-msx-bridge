@@ -68,14 +68,19 @@ def plugin_position_after_resume(frames: list[dict[str, Any]]) -> float:
     html = (Path(http_server.__file__).parent / "static/plugin.html").read_text()
     script = html.split("<script>", 1)[1].split("</script>", 1)[0]
     result = subprocess.run(  # noqa: S603 - fixed local runtime and shipped plugin
-        [node, "-e", NODE_RUNNER], input=json.dumps({"script": script, "frames": frames}),
-        capture_output=True, text=True, check=True,
+        [node, "-e", NODE_RUNNER],
+        input=json.dumps({"script": script, "frames": frames}),
+        capture_output=True,
+        text=True,
+        check=True,
     )
     return float(json.loads(result.stdout))
 
 
 async def test_native_next_from_pause_starts_new_item_at_zero(
-    provider: MSXBridgeProvider, player: MSXPlayer, mass_mock: Mock,
+    provider: MSXBridgeProvider,
+    player: MSXPlayer,
+    mass_mock: Mock,
 ) -> None:
     """A real suppressed play_media transition resets the native clock before video:play."""
     server = http_server.MSXHTTPServer(provider, 0)
@@ -91,7 +96,9 @@ async def test_native_next_from_pause_starts_new_item_at_zero(
 
     mass_mock.create_task = schedule
     with player.suppress_ws_notify():
-        await player.play_media(PlayerMedia(uri="http://ma/next", source_id="queue", queue_item_id="2"))
+        await player.play_media(
+            PlayerMedia(uri="http://ma/next", source_id="queue", queue_item_id="2")
+        )
     await asyncio.gather(*tasks)
     frames = [json.loads(call.args[0]) for call in cast("AsyncMock", ws.send_str).await_args_list]
     assert plugin_position_after_resume(frames) == 0
