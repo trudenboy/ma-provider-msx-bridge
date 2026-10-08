@@ -26,6 +26,10 @@ from music_assistant_models.queue_item import QueueItem
 from music_assistant_models.streamdetails import StreamDetails
 
 from music_assistant.controllers.streams.constants import PacingProfile, output_pacing_args
+from music_assistant.controllers.webserver.helpers.auth_middleware import (
+    current_user,
+    impersonated_user,
+)
 from music_assistant.providers.msx_bridge.audio_stream import _collect_prebuffer, build_audio_params
 from music_assistant.providers.msx_bridge.constants import PRE_BUFFER_BYTES
 from music_assistant.providers.msx_bridge.http_server import MSXHTTPServer
@@ -2841,3 +2845,117 @@ class _AsyncCtx:
 
     async def __aexit__(self, *args: object) -> None:
         pass
+
+
+async def test_previous_at_queue_start_does_not_reload_playlist(
+    provider: MSXBridgeProvider, mass_mock: Mock
+) -> None:
+    """Previous at the first item without repeat must not restart the track."""
+    _register_msx_player(mass_mock, provider, "msx_test")
+    queue = _wire_queue(mass_mock, [_make_queue_item("library://track/1")])
+    queue.repeat_mode = RepeatMode.OFF
+    server = MSXHTTPServer(provider, 0)
+    client = AiohttpTestClient(TestServer(server.app))
+    await client.start_server()
+    try:
+        response = await client.get("/api/previous/msx_test")
+        assert response.status == 200
+        data = await response.json()
+        assert data["response"]["data"]["action"] == "[]"
+    finally:
+        await client.close()
+
+
+@pytest.mark.parametrize(
+    ("initial_index", "repeat_mode"), [(1, RepeatMode.OFF), (0, RepeatMode.ONE)]
+)
+async def test_previous_keeps_queue_movement_and_repeat_one(
+    provider: MSXBridgeProvider,
+    mass_mock: Mock,
+    initial_index: int,
+    repeat_mode: RepeatMode,
+) -> None:
+    """Previous must reload a selected item and preserve an intentional repeat-one restart."""
+    _register_msx_player(mass_mock, provider, "msx_test")
+    queue = _wire_queue(
+        mass_mock,
+        [_make_queue_item("library://track/1"), _make_queue_item("library://track/2")],
+    )
+    queue.current_index = initial_index
+    queue.repeat_mode = repeat_mode
+
+    async def move_previous(_player_id: str) -> None:
+        queue.current_index = max(0, initial_index - 1)
+
+    mass_mock.players.cmd_previous_track.side_effect = move_previous
+    server = MSXHTTPServer(provider, 0)
+    client = AiohttpTestClient(TestServer(server.app))
+    await client.start_server()
+    try:
+        response = await client.get("/api/previous/msx_test")
+        assert response.status == 200
+        data = await response.json()
+        action = data["response"]["data"]["action"]
+        assert action.startswith("playlist:")
+        query = parse_qs(urlsplit(action.removeprefix("playlist:")).query)
+        assert query["start"] == ["0"]
+    finally:
+        await client.close()
+
+
+async def test_native_queue_advances_without_authentication(
+    provider: MSXBridgeProvider, mass_mock: Mock
+) -> None:
+    """Two native audio requests must serve their queued tracks without a user session."""
+    player = _register_msx_player(mass_mock, provider, "msx_test")
+    player.update_state = Mock()  # type: ignore[misc,method-assign]
+    items = [
+        _make_queue_item("library://track/1", queue_item_id="first"),
+        _make_queue_item("library://track/2", queue_item_id="second"),
+    ]
+    queue = _wire_queue(mass_mock, items)
+
+    async def select_item(_queue_id: str, item_id: str) -> None:
+        index = next(i for i, item in enumerate(items) if item.queue_item_id == item_id)
+        queue.current_index = index
+        await player.play_media(
+            PlayerMedia(
+                uri=items[index].uri,
+                source_id=queue.queue_id,
+                queue_item_id=item_id,
+                media_type=MediaType.TRACK,
+            )
+        )
+
+    mass_mock.player_queues.play_index.side_effect = select_item
+    mass_mock.streams.get_stream = Mock(side_effect=lambda *_args, **_kwargs: _async_iter([b"pcm"]))
+    mass_mock.streams.resolve_stream_url = AsyncMock(side_effect=InvalidDataError("no session"))
+    provider.group_stream_mode = "independent"
+    user_context = current_user.set(None)
+    owner_context = impersonated_user.set(None)
+    server = MSXHTTPServer(provider, 0)
+    client = AiohttpTestClient(TestServer(server.app))
+    await client.start_server()
+    try:
+        for item in items:
+            token = provider.get_stream_token("msx_test")
+            with patch(
+                "music_assistant.providers.msx_bridge.audio_stream.get_ffmpeg_stream",
+                return_value=_async_iter([item.queue_item_id.encode()]),
+            ):
+                response = await client.get(
+                    f"/msx/audio/msx_test?uri={quote(item.uri, safe='')}&from_playlist=1"
+                    f"&queue_item_id={item.queue_item_id}&token={token}"
+                )
+                assert response.status == 200
+                assert await response.read() == item.queue_item_id.encode()
+            assert player.current_media is not None
+            assert player.current_media.queue_item_id == item.queue_item_id
+        assert queue.current_index == 1
+        assert queue.items == 2
+        mass_mock.player_queues.play_media.assert_not_awaited()
+        mass_mock.webserver.auth.list_users.assert_not_awaited()
+    finally:
+        await client.close()
+        current_user.reset(user_context)
+        impersonated_user.reset(owner_context)

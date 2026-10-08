@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Previous at the start of a queue no longer restarts the current track when repeat is disabled.
 - Independent audio delivery now uses Music Assistant’s current pacing profiles for buffered tracks, radio, realtime tracks, continuous group streams, and live audio sources.
 
 ## [1.6.0] - 2026-09-04

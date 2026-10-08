@@ -1,46 +1,49 @@
 # TODO
 
-## Решено ✅
+Срез backlog: 2026-10-08. Выпущенная версия — 1.6.0; изменения в открытых PR
+не считаются доставленными пользователям Music Assistant.
 
-### Быстрая остановка воспроизведения (Stop) на MSX
+## Приоритеты
 
-**Статус: РЕШЕНО (2025-02)**
+1. Завершить совместимость с актуальным MA: reverse-sync pacing #262,
+   полный upstream gate на записанном SHA и maintainer review перед merge.
+2. Доставить исправление unauthenticated playback пользователям stable:
+   support music-assistant/support#6624. В MA 2.10.5 остаётся старый
+   impersonation-путь; локальный fix уже есть с 1.5.10. Подготовленный
+   минимальный backport требует решения upstream maintainer и проверки Xbox.
+3. Завершить review music-assistant/server#5868: previous/no-op regression,
+   описание полного перехода 1.4.9 → 1.6.0, миграция удалённых режимов,
+   проверяемые пояснения к review threads. Держать согласованный scope.
+4. Согласовать закрытие неприменимого reverse-sync #264: owner attribution
+   удалён вместе с impersonation для native MSX; не возвращать этот код.
+5. После merge исправлений перепроверить wrapper sync #268 и закрывать
+   CI incidents только по свежим зелёным runs.
+6. Сопоставить upstream/provider snapshots перед sync: текущий preflight
+   остаётся fail-closed. Не применять историческое upstream-ahead override.
 
-Реализовано:
-- **Instant Stop:** `notify_play_stopped` отправляет `broadcast_stop` + `cancel_streams` дважды
-- **Disable → Enable:** Переопределён `on_player_disabled` без unregister
-- **Quick stop API:** `POST /api/quick-stop/{player_id}` и кнопка на dashboard
-- **MSX plugin:** Цепочка `[player:eject|player:hide]` для быстрого закрытия
-- **Config опция:** `abort_stream_first` для альтернативного порядка
+## Реализовано
 
----
+- Быстрая остановка: WebSocket stop, закрытие MSX player и отмена потоков.
+- Bidirectional pause/resume, position reports и native seek между MA и MSX.
+- Queue-backed native playback, поиск, библиотека и Party QR на MSX pages.
+- Universal Groups вместо provider-managed grouping и shared buffers.
+- MA Streamserver redirect по умолчанию, independent proxy как fallback.
+- Browser kiosk и Sendspin web client удалены из этого provider; исторические
+  kiosk/SPA планы не являются активными задачами MSX Bridge.
 
-## В разработке 🚧
+## Требует проверки на устройствах
 
-### Bidirectional WebSocket Position Sync
+- Автоматический переход минимум между двумя треками на Xbox после доставки
+  auth fix: звук, stream response, позиция устройства и отсутствие ошибок.
+- Pause/resume/seek и reconnect на поддерживаемых Smart TV/MSX версиях.
+- Universal Group flow playback, radio/live sources и совместимость
+  Content-Length профилей. Точность синхронизации HTTP-клиентов должна
+  измеряться на устройствах; Universal Groups не доказывают её автоматически.
 
-**Статус:** Частично реализовано
+## Возможные дальнейшие функции
 
-**Сделано:**
-- MA → MSX: Play, Stop, Pause, track change
-- MSX → MA: Player registration, position updates
+Lyrics, visualizations и sleep timer для native MSX остаются идеями.
+Начинать их после стабилизации текущего playback, по отдельной feature spec
+и с подтверждёнными пользовательскими сценариями.
 
-**TODO:**
-- MSX → MA: Playback state changes (user pause/play on TV remote)
-- Real-time position display in MA UI
-
-### Audio Stream Sync for Groups
-
-**Статус:** Не реализовано
-
-Текущие Group Stream Modes (`independent`/`shared`) синхронизируют команды, но не аудиопоток. Для точной синхронизации (<10ms) нужен Sendspin или аналог.
-
----
-
-## Идеи на будущее 💡
-
-- **Chromecast-style casting** — отправка музыки на TV из MA UI одним кликом
-- **TV remote → MA queue** — навигация по очереди MA с пульта TV
-- **Visualizations** — аудио-визуализации на TV во время воспроизведения
-- **Lyrics display** — отображение текста песен на TV
-- **Sleep timer** — таймер автовыключения на TV
+Подробный срез и evidence сохранены в локальном отчёте анализа проекта.
