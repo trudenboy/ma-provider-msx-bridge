@@ -2,7 +2,7 @@
 id: "0007"
 title: "Remove the browser web kiosk from MSX Bridge"
 size: M
-status: inprogress
+status: done
 priority: P0
 effort_minutes: 40
 feature_id:
@@ -67,3 +67,8 @@ sequenceDiagram
     TV->>Bridge: MSX Player (plugin, menu, audio, WS)
     Bridge-->>TV: native MSX playback
 ```
+
+## Completion
+
+Implemented and merged in provider PR #231 (1.4.17). The standalone Web Kiosk
+provider owns browser playback; MSX Bridge retains native TV functionality.
