@@ -13,18 +13,19 @@ import aiohttp
 import pytest
 from aiohttp.test_utils import TestClient as AiohttpTestClient
 from aiohttp.test_utils import TestServer
-from music_assistant_models.enums import PlaybackState, RepeatMode
+from music_assistant_models.enums import ContentType, MediaType, PlaybackState, RepeatMode
 from music_assistant_models.errors import (
     InvalidDataError,
     MusicAssistantError,
     PlayerUnavailableError,
 )
-from music_assistant_models.media_items import Album, Artist, Playlist, Track
+from music_assistant_models.media_items import Album, Artist, AudioFormat, Playlist, Track
 from music_assistant_models.player import PlayerMedia
 from music_assistant_models.player_queue import PlayerQueue
 from music_assistant_models.queue_item import QueueItem
+from music_assistant_models.streamdetails import StreamDetails
 
-from music_assistant.controllers.streams.constants import output_pacing_args
+from music_assistant.controllers.streams.constants import PacingProfile, output_pacing_args
 from music_assistant.providers.msx_bridge.audio_stream import _collect_prebuffer, build_audio_params
 from music_assistant.providers.msx_bridge.constants import PRE_BUFFER_BYTES
 from music_assistant.providers.msx_bridge.http_server import MSXHTTPServer
@@ -2072,14 +2073,42 @@ async def test_msx_audio_plays_queued_library_item_without_play_media(
         await client.close()
 
 
-async def test_msx_audio_proxy_paces_output(provider: MSXBridgeProvider, mass_mock: Mock) -> None:
-    """The local proxy must carry the core streamserver's pacing ceiling."""
+@pytest.mark.parametrize(
+    ("media_type", "is_realtime", "profile"),
+    [
+        (MediaType.TRACK, False, PacingProfile.DEFAULT),
+        (MediaType.RADIO, True, PacingProfile.NEAR_REALTIME),
+        (MediaType.TRACK, True, PacingProfile.NEAR_REALTIME),
+        (MediaType.AUDIO_SOURCE, True, PacingProfile.LOW_LATENCY),
+        (MediaType.FLOW_STREAM, False, PacingProfile.NEAR_REALTIME),
+    ],
+    ids=["buffered-track", "radio", "realtime-track", "live-source", "group-flow"],
+)
+async def test_msx_audio_proxy_paces_output(
+    provider: MSXBridgeProvider,
+    mass_mock: Mock,
+    media_type: MediaType,
+    is_realtime: bool,
+    profile: PacingProfile,
+) -> None:
+    """Local audio delivery must use the source's core streamserver pacing profile."""
     server = MSXHTTPServer(provider, 0)
     client = AiohttpTestClient(TestServer(server.app))
     await client.start_server()
     try:
-        _make_audio_player(mass_mock)
-        _wire_queue(mass_mock, [_make_queue_item("library://track/1")])
+        _player, media = _make_audio_player(mass_mock)
+        media.media_type = media_type
+        item = _make_queue_item("library://track/1")
+        media.source_id = item.queue_id
+        media.queue_item_id = item.queue_item_id
+        item.streamdetails = StreamDetails(
+            provider="test",
+            item_id="1",
+            audio_format=AudioFormat(content_type=ContentType.PCM_S16LE),
+            media_type=media_type,
+            is_realtime=is_realtime,
+        )
+        _wire_queue(mass_mock, [item])
         token = provider.get_stream_token("msx_test")
         mass_mock.streams = Mock()
         mass_mock.streams.get_stream = Mock(return_value=_async_iter([b"pcm"]))
@@ -2091,9 +2120,10 @@ async def test_msx_audio_proxy_paces_output(provider: MSXBridgeProvider, mass_mo
         ) as ffmpeg_mock:
             resp = await client.get(f"/msx/audio/msx_test?uri=library://track/1&token={token}")
             assert resp.status == 200
+            assert await resp.read() == b"encoded"
 
         extra_args = ffmpeg_mock.call_args.kwargs["extra_input_args"]
-        assert extra_args == output_pacing_args("gapless_burst")
+        assert extra_args == output_pacing_args(profile)
     finally:
         await client.close()
 
