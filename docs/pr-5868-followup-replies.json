@@ -1,0 +1,89 @@
+{
+  "repo": "music-assistant/server",
+  "pr": 5868,
+  "expected_head": "c81e8cd0481b04368bd17f455b9f1b0581fe41f4",
+  "required_checks": [
+    "lint",
+    "test",
+    "provider-scope",
+    "Verify"
+  ],
+  "threads": [
+    {
+      "number": 84,
+      "thread_id": "PRRT_kwDOCxIirM6qeipU",
+      "root_comment_id": 4222110331,
+      "resolved_at_snapshot": false,
+      "comments": [
+        {
+          "id": "PRRC_kwDOCxIirM77qEp7",
+          "author": {
+            "login": "copilot-pull-request-reviewer",
+            "__typename": "Bot"
+          },
+          "body": "[CRITICAL] In Independent mode, a source/encoder failure before the first chunk still commits HTTP 200 here while current_media is set. The producer signals EOF, its exception is retrieved only during cleanup, and run_stream_task() then swallows MusicAssistantError/OSError. Check the producer result before sending headers and return an error such as HTTP 503 for expected startup failures; abort the connection if the response has already started.",
+          "url": "https://github.com/music-assistant/server/pull/5868#discussion_r4222110331"
+        }
+      ],
+      "human_authored": false,
+      "body": "The producer result is checked before audio headers are prepared. Expected startup failures now return HTTP 503, including failures after a partial prebuffer; failures after headers abort the transport instead of ending a truncated response successfully. HTTP regression tests cover MusicAssistantError/OSError before startup and a failing chunked response during playback."
+    },
+    {
+      "number": 85,
+      "thread_id": "PRRT_kwDOCxIirM6qeipv",
+      "root_comment_id": 4222110376,
+      "resolved_at_snapshot": false,
+      "comments": [
+        {
+          "id": "PRRC_kwDOCxIirM77qEqo",
+          "author": {
+            "login": "copilot-pull-request-reviewer",
+            "__typename": "Bot"
+          },
+          "body": "[CRITICAL] In Independent mode, MP3/AAC items longer than 12 hours advertise only 12 hours of audio bytes, although the encoder keeps producing the full item. This truncates delivery at the advertised Content-Length. Use the full served duration, or omit Content-Length for these items rather than clamping it.",
+          "url": "https://github.com/music-assistant/server/pull/5868#discussion_r4222110376"
+        }
+      ],
+      "human_authored": false,
+      "body": "The twelve-hour clamp is removed. Optional MP3/AAC Content-Length estimates now use the full served duration; thirteen-hour regression tests assert the complete byte estimates for both codecs. The existing option to omit the estimate remains available, and FLAC still omits it."
+    },
+    {
+      "number": 86,
+      "thread_id": "PRRT_kwDOCxIirM6qeiqZ",
+      "root_comment_id": 4222110431,
+      "resolved_at_snapshot": false,
+      "comments": [
+        {
+          "id": "PRRC_kwDOCxIirM77qErf",
+          "author": {
+            "login": "copilot-pull-request-reviewer",
+            "__typename": "Bot"
+          },
+          "body": "[CRITICAL] Native video:play events always use the resume handler, which restarts the clock from pausedAtPosition. After pausing at 20 seconds and selecting Next, the new track therefore inherits that offset: /api/next suppresses the WebSocket playlist notification that normally resets it. Reset the clock on an actual native item transition while preserving the position for same-item resumes and leaving no-op navigation unchanged.",
+          "url": "https://github.com/music-assistant/server/pull/5868#discussion_r4222110431"
+        }
+      ],
+      "human_authored": false,
+      "body": "Actual native play_media transitions now send a clock_reset frame without reloading the playlist. The plugin clears the stale paused position on that frame; same-item resumes and no-op navigation retain their position because they do not start a new item. A Node.js runtime test executes the shipped plugin with real provider frames and verifies zero after a native transition and twenty seconds after same-item resume."
+    },
+    {
+      "number": 87,
+      "thread_id": "PRRT_kwDOCxIirM6qeiq5",
+      "root_comment_id": 4222110477,
+      "resolved_at_snapshot": false,
+      "comments": [
+        {
+          "id": "PRRC_kwDOCxIirM77qEsN",
+          "author": {
+            "login": "copilot-pull-request-reviewer",
+            "__typename": "Bot"
+          },
+          "body": "[PROBLEM] Move legacy-key cleanup and shared-mode conversion into controllers/config/migrations.py, following https://github.com/music-assistant/server/pull/5589#discussion_r4175696071. Provider-local cleanup misses disabled instances, and remove_provider_config_value() returns early for stored False values (controllers/config/providers.py:522-527), so the new test verifies a call without proving removal. Add an idempotent raw-settings migration and stored-shape tests under tests/controllers/config/.",
+          "url": "https://github.com/music-assistant/server/pull/5868#discussion_r4222110477"
+        }
+      ],
+      "human_authored": false,
+      "body": "Persistent cleanup and shared-to-independent conversion are moved into the MA core settings migration before provider loading. It deletes the legacy key by membership, including False/None, and also processes disabled instances. Stored-JSON tests call the actual migration, check the resulting data, preserve unrelated providers/settings, and verify idempotency. Provider setup no longer writes migration data; a read-only legacy mode fallback remains for older standalone MA installations."
+    }
+  ]
+}
