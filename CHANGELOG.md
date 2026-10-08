@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Independent stream failures return HTTP 503 before headers, and abort incomplete responses after headers.
+- MP3/AAC Content-Length estimates cover the full duration of recordings longer than twelve hours.
+- Native next-track playback resets the paused position clock without reloading the TV playlist.
+- Upstream MA settings migration removes legacy grouping keys, including false/null values and disabled provider instances, and converts shared delivery to independent.
 - Previous at the start of a queue no longer restarts the current track when repeat is disabled.
 - Independent audio delivery now uses Music Assistant’s current pacing profiles for buffered tracks, radio, realtime tracks, continuous group streams, and live audio sources.
 
