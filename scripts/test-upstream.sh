@@ -66,12 +66,12 @@ setup() {
 
     update
     if [ ! -x "$MA_SERVER_DIR/.venv/bin/python" ]; then
-        (
-            cd "$MA_SERVER_DIR"
-            uv venv .venv --python 3.14
-            VIRTUAL_ENV="$MA_SERVER_DIR/.venv" uv pip install --index-strategy unsafe-best-match -e "." -e ".[test]" -r requirements_all.txt
-        )
+        uv venv "$MA_SERVER_DIR/.venv" --python 3.14
     fi
+    (
+        cd "$MA_SERVER_DIR"
+        VIRTUAL_ENV="$MA_SERVER_DIR/.venv" uv pip install --index-strategy unsafe-best-match -e "." -e ".[test]" -r requirements_all.txt
+    )
     install_manifest_requirements
     mount_sources
 }
@@ -131,7 +131,7 @@ run_lint() {
                 "tests/providers/$PROVIDER_DOMAIN"
         )
         # These hooks regenerate repository-wide artifacts unrelated to the mounted provider.
-        SKIP=gen_requirements_all,build_translations_source pre-commit run --files "${files[@]}"
+        UV_NO_SYNC=1 SKIP=gen_requirements_all,build_translations_source pre-commit run --files "${files[@]}"
     )
 }
 
