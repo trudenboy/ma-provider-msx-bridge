@@ -1,0 +1,32 @@
+{
+  "repo": "music-assistant/server",
+  "pr": 5868,
+  "expected_head": "faa413dca07cd13e2392a063c811debd6c46c514",
+  "required_checks": [
+    "lint",
+    "test",
+    "provider-scope",
+    "Verify"
+  ],
+  "threads": [
+    {
+      "number": 88,
+      "thread_id": "PRRT_kwDOCxIirM6qjr9F",
+      "root_comment_id": 4224254633,
+      "resolved_at_snapshot": false,
+      "comments": [
+        {
+          "id": "PRRC_kwDOCxIirM77yQKp",
+          "author": {
+            "login": "copilot-pull-request-reviewer",
+            "__typename": "Bot"
+          },
+          "body": "[PROBLEM] This migration removes the retired grouping key but leaves the equally retired persisted `enable_sendspin_bridge` key behind for users who changed its former default. Removed config keys are live stored data and must be cleared in the core migration; pop this key here and add a stored-settings regression case covering it.",
+          "url": "https://github.com/music-assistant/server/pull/5868#discussion_r4224254633"
+        }
+      ],
+      "human_authored": false,
+      "body": "The core migration now removes both retired switches, enable_player_grouping and enable_sendspin_bridge, by key membership. Six stored-settings cases cover True/False/None on enabled and disabled MSX instances, including users who changed the former default. They check the resulting JSON, preserve unrelated settings and other providers, and verify that the second migration pass makes no changes."
+    }
+  ]
+}
