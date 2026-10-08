@@ -14,7 +14,17 @@ The proposed acceptance test is sound and should remain unchanged:
 
 Manual Next is not a recovery/verification step: on the reported version it skips past the silent current item and invalidates the automatic-transition check. No additional diagnostic request is warranted before an installable build exists.
 
-Immediate handoff needed: identify or prepare a reproducible server build containing the verified PR revision that the reporter can actually install in their HA add-on setup. A provider release/PR link by itself is insufficient, and a generic Docker image must not be represented as an HA add-on installation. No build, release, stable backport or upstream merge is promised or initiated by this analysis.
+Verified installation route: the official Music Assistant DEV SERVER app supports server_repo in owner/repo@reference format, including branches containing a slash. The owner proposed `trudenboy/ma-server@integration/dev`; the branch currently points to `78b278e80e02c33b4096c7bf9ae8398432ce5626` and contains the fixes. Set Server repository to that value and leave Frontend repository empty. Save and start/restart the app; it installs the server source itself, so a separately published test image is not required. Stop the regular MA app during the test and connect the Xbox and HA integration to the DEV instance. This installation method is documented; installation/startup on the reporter's HA host has not yet been confirmed.
+
+Sources checked live:
+
+- https://github.com/music-assistant/home-assistant-addon/blob/main/music_assistant_dev/README.md
+- https://github.com/music-assistant/home-assistant-addon/blob/main/music_assistant_dev/entrypoint.sh
+- https://github.com/music-assistant/home-assistant-addon/blob/main/music_assistant_dev/translations/en.yaml
+
+The owner subsequently observed a successful automatic transition on Samsung Tizen. That observation does not establish the Xbox result, HA position progression, or absence of auth errors in logs.
+
+Upstream Test for final PR head c81e8cd completed successfully: https://github.com/music-assistant/server/actions/runs/37833590467.
 
 Keep #6624 open until the actual Xbox acceptance test passes. The authentication defect has a code correction and regression evidence; audible queue progression on this console remains unverified. Preserve that distinction in the PR description.
 
@@ -23,7 +33,7 @@ Keep #6624 open until the actual Xbox acceptance test passes. The authentication
 - Thank the reporter for clarifying that the changes have not been installed.
 - Confirm their automatic-transition test is the intended acceptance test; no manual Next.
 - Explain that the update runs on the MA server, while the existing Xbox MSX app is used as the client.
-- Provide a concrete installable HA add-on build/version and instructions only once verified; currently no such artifact is supplied by these PR links.
+- Give the verified DEV app repository setting and setup instructions in the [reply draft](support-6624-dev-app-reply.md).
 - Ask for diagnostics after the run they already offered, rather than repeating earlier requests now.
 
-This is a human issue discussion. Per CLAUDE.md, AI may prepare these notes; the owner writes and posts the final reply.
+The owner supplied the DEV app proposal. The reply draft is prepared for their review and has not been posted.
