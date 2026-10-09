@@ -1,10 +1,10 @@
 # What does this implement/fix?
 
-Makes native MSX playback follow the MA queue, including selected duplicate occurrences, natural EOF and Repeat Off/One/All. Streaming uses chunked delivery instead of estimated MP3/AAC sizes; disabled players reject new playback, and server restart recovers the native WebSocket automatically. Native seek rebuilds the MA stream with source-time labels; search cancellation, Party QR captions and immediate Stop are also corrected.
+Makes native MSX playback follow the MA queue, including selected duplicate occurrences, natural EOF and Repeat Off/One/All. Streaming uses chunked delivery instead of estimated MP3/AAC sizes; disabled players reject new playback, and server restart recovers the native WebSocket automatically. Native seek rebuilds the MA stream with source-time labels; search cancellation, Party QR captions and immediate Stop are also corrected. Configuration labels describe the immediate Stop behavior.
 
 **Breaking migration:** removes provider-native grouping, shared producers, the embedded browser kiosk and bundled Sendspin client. Before provider loading, MA clears the retired switches and converts stored `shared` delivery to `independent`, including disabled instances. Recreate groups as Universal Groups; use the separate [Web Kiosk provider](https://github.com/trudenboy/ma-provider-web-kiosk) for browser playback. Explicit existing HTTP profiles are preserved; new MSX players default to chunked delivery.
 
-Validation: official MA dev compatibility gate passes; patched MA provider/controller/migration tests: **1010 passed, 1 skipped**; full MA pre-commit passes. Pixel 8 repeat and MP3/AAC/FLAC delivery checks pass. Current Samsung Tizen/group compatibility, camera QR scanning and acoustic seek-marker confirmation remain unverified. No new release or tag is created.
+Validation: official MA dev compatibility gate passes; patched MA provider/controller/migration tests: **1010 passed, 1 skipped**; full MA pre-commit passes. Pixel 8 repeat, MP3/AAC/FLAC delivery and native Latin search checks pass. Current Samsung Tizen/group compatibility, camera QR scanning and acoustic seek-marker confirmation remain unverified. No new release or tag is created.
 
 Related issue: [music-assistant/support#6624](https://github.com/music-assistant/support/issues/6624).
 

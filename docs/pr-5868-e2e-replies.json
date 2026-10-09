@@ -1,7 +1,7 @@
 {
   "repo": "music-assistant/server",
   "pr": 5868,
-  "expected_head": "d00b5b2a33beb9b586ea94a2d1bd850da7838172",
+  "expected_head": "510904d72c1bc3dd46bb3fd0c415063aa942566c",
   "required_checks": [
     "lint",
     "test",
