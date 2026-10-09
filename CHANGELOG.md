@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Avoid unsupported progress override actions on MSX 0.1.145: detect the host framework version and keep native progress with source-time labels on older clients.
+
 - Disabled retained MSX players reject new playback, including requests that finish preparing after disable. The accompanying MA core fix applies runtime configuration before provider hooks and rolls it back on failure.
 - MP3/AAC/FLAC streaming no longer advertises an estimated encoded size. New MSX players use chunked HTTP; explicit existing player profiles remain unchanged.
 - Natural decoder completion now follows MA Repeat Off/One/All, marks exhausted queues as ended, and consumes each decoder callback once. Old playlist generations cannot bind replacement playback.

@@ -27,7 +27,7 @@ Streaming encoders add headers and padding; a bitrate estimate is not an exact b
 
 New MSX players default to Music Assistant's `chunked` HTTP profile. Existing explicitly saved per-player `http_profile` values are preserved. If redirected MP3/AAC playback truncates or never reaches EOF, select `chunked` in the player's advanced settings; the provider-level legacy switch does not control MA Streamserver responses. Universal Group flow streams remain continuous.
 
-The native position labels display source time, while MSX reports stream time to MA (MA adds the seek offset). Known durations are supplied to the native controls. Native rewind/forward buttons request a new MA stream at the source position; arbitrary HTTP Range seeking is unavailable for these chunked transcodes, so the native progress marker is disabled. Seek through MA remains available.
+The native position labels display source time, while MSX reports stream time to MA (MA adds the seek offset). Known durations are supplied to the native controls. MSX 0.1.146 or newer also shows source time on the progress bar. Older versions (including Samsung Tizen MSX 0.1.145), or a host that does not report its version, retain the native stream-time progress bar while the text labels show source time. Native rewind/forward buttons request a new MA stream at the source position; arbitrary HTTP Range seeking is unavailable for these chunked transcodes, so the native progress marker is disabled. Seek through MA remains available.
 
 ## Player Idle Timeout
 
