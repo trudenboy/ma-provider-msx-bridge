@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Selecting an album or playlist replaces the queue regardless of its default enqueue mode, preserving the selected duplicate occurrence without waiting for a playback notification.
+- Overlapping native playback commands retain WebSocket notification suppression until every command has finished.
+
 - The MA core migration also removes the retired Sendspin bridge switch from stored MSX settings, including disabled instances and false/null values.
 - Review reply publication rejects concurrent local runs to prevent duplicate GitHub replies.
 - Independent stream failures return HTTP 503 before headers, and abort incomplete responses after headers.

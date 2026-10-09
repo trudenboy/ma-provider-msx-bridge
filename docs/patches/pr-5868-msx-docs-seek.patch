@@ -1,0 +1,5 @@
+--- a/src/content/docs/player-support/msx-bridge.md
++++ b/src/content/docs/player-support/msx-bridge.md
+@@ -81,0 +82,2 @@
++- Skipping ahead on the TV to a part of the track that has not loaded yet has not been tested and may not work.
++

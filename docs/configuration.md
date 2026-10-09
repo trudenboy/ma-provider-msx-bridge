@@ -69,3 +69,7 @@ The removed legacy `shared` value is migrated to `independent`. Recreate any old
 - [Getting Started](getting-started.md) — initial setup
 - [Architecture](architecture.md) — how config values affect streaming behavior
 - [API Reference](api.md) — quick-stop endpoint and playback control
+
+## Playback limitations
+
+- Skipping ahead on the TV to a part of the track that has not loaded yet has not been tested and may not work.

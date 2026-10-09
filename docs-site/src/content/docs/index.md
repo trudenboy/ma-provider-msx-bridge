@@ -33,3 +33,7 @@ Provider created and maintained by [TrudenBoy](https://github.com/TrudenBoy).
 
 
 Setup instructions are on the [Configuration](configuration/) page.
+
+## Known issues
+
+- Skipping ahead on the TV to a part of the track that has not loaded yet has not been tested and may not work.
