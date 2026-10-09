@@ -65,12 +65,12 @@ These return MSX native playlist JSON. MSX auto-starts playback when loaded via 
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/msx/audio/{player_id}?uri=<track_uri>&from_playlist=1` | Enqueue track in MA, wait for ready, stream audio |
+| GET | `/msx/audio/{player_id}?uri=<track_uri>&from_playlist=1` | Select the existing MA queue occurrence, wait for ready, stream audio |
 | GET | `/stream/{player_id}` | Direct stream proxy for already-playing media |
 
 **Audio response headers:**
 - `Content-Type: audio/mpeg` (MP3), `audio/aac` (AAC), `audio/flac` (FLAC)
-- `Content-Length`: optionally estimated for MP3 (`duration × 40,000 B/s`) and AAC (`duration × 32,000 B/s`) in the independent local proxy; omitted for FLAC
+- `Content-Length`: omitted for independent MP3/AAC/FLAC; the encoded size is not known before EOF
 - `Transfer-Encoding: chunked` when Content-Length is omitted
 
 Redirected response headers are controlled by the Music Assistant Streamserver.
@@ -99,10 +99,13 @@ Returns JSON. Useful for external clients (scripts, integrations).
 | POST | `/api/pause/{player_id}` | — | Pause |
 | POST | `/api/stop/{player_id}` | — | Stop and close MSX player |
 | POST | `/api/quick-stop/{player_id}` | — | Instant stop (aborts stream + double WS broadcast) |
-| POST | `/api/next/{player_id}` | — | Next track |
+| GET/POST | `/api/next/{player_id}` | — | Manual Next track |
+| GET/POST | `/api/complete/{player_id}?playback_id=<decoder_id>` | — | Consume current decoder completion using natural repeat semantics |
 | POST | `/api/previous/{player_id}` | — | Previous track |
 
-**Stop vs Quick Stop:** normal stop waits for the current stream to finish before closing MSX (~30 s on some TVs). Quick stop aborts the stream immediately and broadcasts stop twice for a near-instant close.
+**Stop vs Quick Stop:** both eject/hide native MSX playback immediately. Quick stop additionally aborts the producer and broadcasts stop twice. With `show_stop_notification=true`, Stop shows an informational notice after eject; no Continue dialog can revive buffered playback.
+
+Native queue audio URLs also carry the stream token, queue occurrence, decoder ID and playback generation. Old generations and disabled players cannot start a replacement stream; repeated completion callbacks are no-ops. Completion of a finite queue marks it ended so Play can restart it.
 
 ## WebSocket
 

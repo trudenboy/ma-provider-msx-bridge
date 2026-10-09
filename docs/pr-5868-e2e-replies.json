@@ -1,0 +1,114 @@
+{
+  "repo": "music-assistant/server",
+  "pr": 5868,
+  "expected_head": "510904d72c1bc3dd46bb3fd0c415063aa942566c",
+  "required_checks": [
+    "lint",
+    "test",
+    "provider-scope",
+    "Verify"
+  ],
+  "threads": [
+    {
+      "number": 89,
+      "thread_id": "PRRT_kwDOCxIirM6qo0ex",
+      "root_comment_id": 4226420547,
+      "resolved_at_snapshot": false,
+      "comments": [
+        {
+          "author": {
+            "__typename": "User",
+            "login": "OzGav"
+          },
+          "body": "Please move _migrate_msx_bridge_settings down to the bottom of the file, next to the other private _migrate_* helpers. Our code style keeps private functions below the public ones, and right now this one sits between migrate() and migrate_provider_setup_data(). The migration itself looks good and the tests cover it well.",
+          "id": "PRRC_kwDOCxIirM776g9D",
+          "url": "https://github.com/music-assistant/server/pull/5868#discussion_r4226420547"
+        }
+      ],
+      "human_authored": false,
+      "body": "The MSX migration helper is now at the bottom of migrations.py, beside the other private helpers. Its logic is unchanged; all sixteen MSX stored-settings migration cases still pass.",
+      "human_reviewed": true
+    },
+    {
+      "number": 90,
+      "thread_id": "PRRT_kwDOCxIirM6qo13G",
+      "root_comment_id": 4226429779,
+      "resolved_at_snapshot": false,
+      "comments": [
+        {
+          "author": {
+            "__typename": "User",
+            "login": "OzGav"
+          },
+          "body": "This docstring explains why CORS is open and why the audio routes are left out. That is useful, but it belongs in inline comments. The docstring should just tell the caller what the function does, so a single line like “Add CORS headers to responses” is enough. The same applies to `_reject_invalid_stream_token` at line 1647, `_reject_cross_site` at line 1664 and `_get_prefix` at line 1872. I have mentioned this project standard before so please remember it.",
+          "id": "PRRC_kwDOCxIirM776jNT",
+          "url": "https://github.com/music-assistant/server/pull/5868#discussion_r4226429779"
+        }
+      ],
+      "human_authored": false,
+      "body": "I checked docstrings throughout the provider, including all four helpers you named. They now describe caller-facing behavior and parameters; the implementation explanations are kept as inline comments.",
+      "human_reviewed": true
+    },
+    {
+      "number": 91,
+      "thread_id": "PRRT_kwDOCxIirM6qo3aU",
+      "root_comment_id": 4226439945,
+      "resolved_at_snapshot": false,
+      "comments": [
+        {
+          "author": {
+            "__typename": "User",
+            "login": "OzGav"
+          },
+          "body": "This call doesn’t pass an enqueue option, so it uses whatever the user has set as their default for albums or playlists. If that is “play next” or “add”, the album doesn’t replace the queue. It gets added after the current item, so `items[start]` in `_start_play_context` points at the wrong track. When the track URI check fails, the fallback can pick an older copy of the same track elsewhere in the queue. With “add”, nothing starts playing, so `wait_for_media` waits the full 10 seconds before the jump happens. It also starts the first track and then jumps, so every selection opens a stream it throws away straight after.\n\nThe queue controller can already do this in one step. Something like `play_media(player_id, uri, option=QueueOption.REPLACE, start_item=track_uri)` starts at the right track and lets you drop the `expect_new_media`, `wait_for_media` and `play_index` steps. If the TV can only send a position and not a track URI, please at least pass `QueueOption.REPLACE` so the queue position and the album position always match.",
+          "id": "PRRC_kwDOCxIirM776lsJ",
+          "url": "https://github.com/music-assistant/server/pull/5868#discussion_r4226439945"
+        }
+      ],
+      "human_authored": false,
+      "body": "Container playback now explicitly passes QueueOption.REPLACE, and no longer arms or waits for player media after the queue has loaded. I retained indexed selection because a track URI alone cannot distinguish repeated occurrences in a playlist. Four HTTP regressions use the actual MA enqueue/load path with Add and Play next defaults and verify that the old queue is replaced and the selected duplicate occurrence plays. This still uses play_index after replacement for a non-first selection; it does not implement the single-stream start_item optimization.",
+      "human_reviewed": true
+    },
+    {
+      "number": 92,
+      "thread_id": "PRRT_kwDOCxIirM6qo5PU",
+      "root_comment_id": 4226451627,
+      "resolved_at_snapshot": false,
+      "comments": [
+        {
+          "author": {
+            "__typename": "User",
+            "login": "OzGav"
+          },
+          "body": "This setter forces the counter back to 1 or 0. That undoes the reason the counter exists, which is so two overlapping commands can’t clear each other’s suppression. Only the tests use it (test_player.py lines 432, 452 and 701 to 723). Could you remove the setter and have those tests use with `player.suppress_ws_notify()` instead?",
+          "id": "PRRC_kwDOCxIirM776oir",
+          "url": "https://github.com/music-assistant/server/pull/5868#discussion_r4226451627"
+        }
+      ],
+      "human_authored": false,
+      "body": "The setter is removed, and the playback, pause and resume tests now use suppress_ws_notify(). The nesting test remains; an additional regression verifies that direct assignment cannot clear an active suppression context.",
+      "human_reviewed": true
+    },
+    {
+      "number": 93,
+      "thread_id": "PRRT_kwDOCxIirM6qqtG9",
+      "root_comment_id": 4227204137,
+      "resolved_at_snapshot": false,
+      "comments": [
+        {
+          "id": "PRRC_kwDOCxIirM779gQp",
+          "body": "[PROBLEM] This needs to more clearly describe the issue you're having and what it's fixing: the description is now a long audit/validation essay with extra “Fixed scope” and “Review evidence” sections, and its pinned review head (`faa413d`) is stale versus the current head (`3b99570`). Trim it to a few author-verified sentences plus concise breaking-migration notes, and remove the stale SHA.",
+          "url": "https://github.com/music-assistant/server/pull/5868#discussion_r4227204137",
+          "author": {
+            "__typename": "Bot",
+            "login": "copilot-pull-request-reviewer"
+          }
+        }
+      ],
+      "human_authored": false,
+      "body": "Shortened the description to the playback changes and breaking migration, with one validation paragraph. Removed the stale pinned head and audit sections.",
+      "human_reviewed": true
+    }
+  ],
+  "publication_authorization": "User explicitly reviewed all drafts and authorized publication in this session."
+}

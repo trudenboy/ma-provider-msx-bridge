@@ -6,6 +6,7 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
+from uuid import uuid4
 
 from music_assistant_models.errors import MusicAssistantError
 from music_assistant_models.media_items import (
@@ -26,6 +27,7 @@ if TYPE_CHECKING:
         MediaItemImage,
         PlayableMediaItemType,
     )
+    from music_assistant_models.player import PlayerMedia
 
     from .provider import MSXBridgeProvider
 
@@ -73,7 +75,7 @@ def queue_nav_properties(player_id: str, prefix: str = "") -> dict[str, str]:
         "button:next:action": next_action,
         "button:prev:icon": "default",
         "button:prev:action": prev_action,
-        "trigger:complete": next_action,
+        "trigger:complete": "[]",
     }
 
 
@@ -107,12 +109,9 @@ def play_context_action(
 
 
 def sort_album_tracks(tracks: list[Track]) -> list[Track]:
-    """
-    Sort album tracks deterministically.
-
-    Include stable track identity so separate display and playlist requests
-    agree even when disc, track number, and title are identical.
-    """
+    """Sort album tracks deterministically."""
+    # Include stable track identity so separate display and playlist requests
+    # agree even when disc, track number, and title are identical.
     return sorted(
         tracks,
         key=lambda t: (
@@ -162,10 +161,9 @@ def get_image_url(
     """
     Get an image URL for a media item.
 
-    :param prefer_proxy: Route the image through the MA imageproxy so the URL
-        points at the MA server (rather than a remote CDN). Needed for the
-        party QR-cover compositor, which only accepts MA-hosted sources.
+    :param prefer_proxy: Return an MA-hosted imageproxy URL.
     """
+    # The party QR-cover compositor only accepts MA-hosted image sources.
     if item.image:
         return provider.mass.metadata.get_image_url(item.image, prefer_proxy=prefer_proxy)
     return None
@@ -314,17 +312,18 @@ def map_tracks_to_msx_playlist(
     provider: MSXBridgeProvider,
     device_param: str = "",
     qr_cover_base: str | None = None,
+    *,
+    current_media: PlayerMedia | None = None,
+    playback_generation: str | None = None,
 ) -> MsxContent:
     """
-    Map tracks to an MSX Content page for playlist playback.
+    Map tracks to an MSX playlist content page.
 
-    MSX ``playlist:{URL}`` loads a standard Content Root Object.
-    Each item uses ``action: "audio:{URL}"`` so MSX can play them sequentially.
-    The page-level ``action`` auto-starts playback at the requested track index.
-
-    :param qr_cover_base: When set (active party), item backgrounds are routed
-        through this QR-compositing endpoint so the join QR shows on covers.
+    :param qr_cover_base: Optional endpoint for track covers with a party join QR code.
     """
+    # MSX ``playlist:{URL}`` loads a standard Content Root Object.
+    # Each item uses ``action: "audio:{URL}"`` so MSX can play them sequentially.
+    # The page-level ``action`` auto-starts playback at the requested track index.
     token = provider.get_stream_token(player_id)
     msx_items = []
     for track in tracks:
@@ -356,6 +355,24 @@ def map_tracks_to_msx_playlist(
             queue_item_id=track.queue_item_id,
         )
         nav = queue_nav_properties(player_id, prefix)
+        served_duration = duration
+        if current_media and track.queue_item_id == current_media.queue_item_id:
+            served_duration = current_media.stream_duration or duration
+        if served_duration > 0:
+            nav["video:duration"] = str(served_duration)
+        nav["button:rewind:icon"] = "default"
+        nav["button:rewind:action"] = "interaction:commit:message:seek:-10"
+        nav["button:forward:icon"] = "default"
+        nav["button:forward:action"] = "interaction:commit:message:seek:+10"
+        # Chunked transcodes do not provide arbitrary HTTP Range seeking.
+        nav["progress:marker:enable"] = "false"
+        playback_id = uuid4().hex
+        action += f"&playback_id={playback_id}"
+        if playback_generation:
+            action += f"&playback_generation={quote(playback_generation, safe='')}"
+        nav["trigger:complete"] = (
+            f"execute:{prefix}/api/complete/{player_id}?playback_id={playback_id}"
+        )
 
         msx_items.append(
             MsxItem(

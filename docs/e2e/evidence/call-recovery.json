@@ -1,0 +1,98 @@
+{
+  "before": {
+    "decoder_active": false,
+    "playback_id": null,
+    "time": 609309.136155798,
+    "state": "idle",
+    "index": 1,
+    "position": 175.95888352394104,
+    "repeat": "all",
+    "item": "3fc6aa0ef89c46e9a4412569f1014e57",
+    "ws_count": 1
+  },
+  "call_state_lines": [
+    "mCallState=0",
+    "mCallState=0"
+  ],
+  "pause_stop_events": [
+    {
+      "timestamp": "2026-10-09 09:06:37",
+      "event": "pause"
+    },
+    {
+      "timestamp": "2026-10-09 09:07:07",
+      "event": "stop"
+    }
+  ],
+  "after": [
+    {
+      "decoder_active": true,
+      "playback_id": "95d46ddf24c543fc9eee5bab672ef556",
+      "time": 609342.511700236,
+      "state": "playing",
+      "index": 1,
+      "position": 176.59623432159424,
+      "repeat": "all",
+      "item": "3fc6aa0ef89c46e9a4412569f1014e57",
+      "ws_count": 0
+    },
+    {
+      "decoder_active": true,
+      "playback_id": "95d46ddf24c543fc9eee5bab672ef556",
+      "time": 609344.714364644,
+      "state": "playing",
+      "index": 1,
+      "position": 179.19177627563477,
+      "repeat": "all",
+      "item": "3fc6aa0ef89c46e9a4412569f1014e57",
+      "ws_count": 1
+    },
+    {
+      "decoder_active": true,
+      "playback_id": "95d46ddf24c543fc9eee5bab672ef556",
+      "time": 609346.928273803,
+      "state": "playing",
+      "index": 1,
+      "position": 181.19563150405884,
+      "repeat": "all",
+      "item": "3fc6aa0ef89c46e9a4412569f1014e57",
+      "ws_count": 1
+    },
+    {
+      "decoder_active": true,
+      "playback_id": "95d46ddf24c543fc9eee5bab672ef556",
+      "time": 609349.122960292,
+      "state": "playing",
+      "index": 1,
+      "position": 183.1973752975464,
+      "repeat": "all",
+      "item": "3fc6aa0ef89c46e9a4412569f1014e57",
+      "ws_count": 1
+    },
+    {
+      "decoder_active": true,
+      "playback_id": "95d46ddf24c543fc9eee5bab672ef556",
+      "time": 609351.342241266,
+      "state": "playing",
+      "index": 1,
+      "position": 185.19979095458984,
+      "repeat": "all",
+      "item": "3fc6aa0ef89c46e9a4412569f1014e57",
+      "ws_count": 1
+    },
+    {
+      "decoder_active": true,
+      "playback_id": "95d46ddf24c543fc9eee5bab672ef556",
+      "time": 609353.531587093,
+      "state": "playing",
+      "index": 1,
+      "position": 187.20172142982483,
+      "repeat": "all",
+      "item": "3fc6aa0ef89c46e9a4412569f1014e57",
+      "ws_count": 1
+    }
+  ],
+  "recovery_passed": true,
+  "startup_ws_reconnect_seconds_upper_bound": 2.202664408017881,
+  "interruption": "User reported a telephone call during the soak; uninterrupted soak invalidated."
+}

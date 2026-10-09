@@ -120,3 +120,7 @@ See [CLAUDE.md](../CLAUDE.md) for detailed MA conventions, key flows, and gotcha
 - [Architecture](architecture.md) — provider structure and key flows
 - [Contributing](contributing.md) — PR process, review guidelines
 - [API Reference](api.md) — all HTTP endpoints for testing manually
+
+## Native device acceptance
+
+Use [the MSX E2E runner](e2e/runner.md) on the isolated Docker stand. Provider type and compatibility checks use `./scripts/test-upstream.sh all` against current official MA; the standalone repository environment can resolve an older MA installation and is not the authoritative contract gate. Core fixes must also pass the relevant controller suite and full MA pre-commit in the patched checkout.

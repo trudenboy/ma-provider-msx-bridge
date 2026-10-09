@@ -5,9 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- Disabled retained MSX players reject new playback, including requests that finish preparing after disable. The accompanying MA core fix applies runtime configuration before provider hooks and rolls it back on failure.
+- MP3/AAC/FLAC streaming no longer advertises an estimated encoded size. New MSX players use chunked HTTP; explicit existing player profiles remain unchanged.
+- Natural decoder completion now follows MA Repeat Off/One/All, marks exhausted queues as ended, and consumes each decoder callback once. Old playlist generations cannot bind replacement playback.
+- WebSocket reconnect includes normal server shutdowns, rejects stale socket callbacks, and resynchronizes playback identity without reviving an obsolete decoder.
+- Native source-time labels and known durations account for stream offsets. Forward/rewind request backend seek; unsupported chunked Range seeking is not exposed as progress-marker dragging.
+- Native search cancels superseded requests and releases the busy state after cancellation, errors and timeout.
+- Party captions no longer overlap QR images. Stop ejects immediately before showing an optional informational notice.
+- The accompanying MA enqueue fix checks active-protocol capability and revalidates queue/player/session after asynchronous handovers.
+
+### Added
+
+- A strict native-device E2E runner with synthetic fixtures, decoder telemetry, sanitized snapshots, and optional Unix-only diagnostics that restore the isolated server and phone settings in `finally`.
+
 ## [1.6.1] - 2026-10-08
 
 ### Fixed
+
+- Selecting an album or playlist replaces the queue regardless of its default enqueue mode, preserving the selected duplicate occurrence without waiting for a playback notification.
+- Overlapping native playback commands retain WebSocket notification suppression until every command has finished.
 
 - The MA core migration also removes the retired Sendspin bridge switch from stored MSX settings, including disabled instances and false/null values.
 - Review reply publication rejects concurrent local runs to prevent duplicate GitHub replies.

@@ -1,14 +1,14 @@
 diff --git a/music_assistant/controllers/config/migrations.py b/music_assistant/controllers/config/migrations.py
-index 02b73c4..2c2a34f 100644
+index 02b73c4..5562509 100644
 --- a/music_assistant/controllers/config/migrations.py
 +++ b/music_assistant/controllers/config/migrations.py
-@@ -655,0 +656,27 @@ async def migrate(data: dict[str, Any]) -> bool:  # noqa: PLR0915
+@@ -655,0 +656,5 @@ async def migrate(data: dict[str, Any]) -> bool:  # noqa: PLR0915
 +    # Remove provider-native MSX grouping and migrate its former shared delivery mode.
 +    # TODO: remove after 2.12 release
 +    if _migrate_msx_bridge_settings(data):
 +        changed = True
 +
-+    return changed
+@@ -1879,0 +1885,22 @@ def _migrate_player_icons(data: dict[str, Any]) -> bool:
 +
 +
 +def _migrate_msx_bridge_settings(data: dict[str, Any]) -> bool:
@@ -30,6 +30,7 @@ index 02b73c4..2c2a34f 100644
 +        if values.get("group_stream_mode") == "shared":
 +            values["group_stream_mode"] = "independent"
 +            changed = True
++    return changed
 diff --git a/tests/controllers/config/test_msx_bridge_migration.py b/tests/controllers/config/test_msx_bridge_migration.py
 new file mode 100644
 index 0000000..ec0946c

@@ -1,0 +1,516 @@
+[
+  {
+    "path": "/health",
+    "method": "GET",
+    "expected": 200,
+    "status": 200,
+    "pass": true,
+    "seconds": 0.004,
+    "bytes": 56,
+    "items": 0
+  },
+  {
+    "path": "/msx/start.json",
+    "method": "GET",
+    "expected": 200,
+    "status": 200,
+    "pass": true,
+    "seconds": 0.001,
+    "bytes": 116,
+    "items": 0
+  },
+  {
+    "path": "/msx/launcher.json",
+    "method": "GET",
+    "expected": 200,
+    "status": 200,
+    "pass": true,
+    "seconds": 0.001,
+    "bytes": 334,
+    "items": 1
+  },
+  {
+    "path": "/msx/menu.json",
+    "method": "GET",
+    "expected": 200,
+    "status": 200,
+    "pass": true,
+    "seconds": 0.007,
+    "bytes": 992,
+    "items": 7
+  },
+  {
+    "path": "/msx/albums.json",
+    "method": "GET",
+    "expected": 200,
+    "status": 200,
+    "pass": true,
+    "seconds": 0.003,
+    "bytes": 1978,
+    "items": 5
+  },
+  {
+    "path": "/msx/artists.json",
+    "method": "GET",
+    "expected": 200,
+    "status": 200,
+    "pass": true,
+    "seconds": 0.005,
+    "bytes": 11965,
+    "items": 50
+  },
+  {
+    "path": "/msx/playlists.json",
+    "method": "GET",
+    "expected": 200,
+    "status": 200,
+    "pass": true,
+    "seconds": 0.003,
+    "bytes": 4042,
+    "items": 13
+  },
+  {
+    "path": "/msx/tracks.json",
+    "method": "GET",
+    "expected": 200,
+    "status": 200,
+    "pass": true,
+    "seconds": 0.01,
+    "bytes": 51304,
+    "items": 50
+  },
+  {
+    "path": "/msx/recently-played.json",
+    "method": "GET",
+    "expected": 200,
+    "status": 200,
+    "pass": true,
+    "seconds": 0.009,
+    "bytes": 53282,
+    "items": 50
+  },
+  {
+    "path": "/msx/party.json",
+    "method": "GET",
+    "expected": 200,
+    "status": 200,
+    "pass": true,
+    "seconds": 0.001,
+    "bytes": 258,
+    "items": 2
+  },
+  {
+    "path": "/api/party",
+    "method": "GET",
+    "expected": 200,
+    "status": 200,
+    "pass": true,
+    "seconds": 0.001,
+    "bytes": 104,
+    "items": 0
+  },
+  {
+    "path": "/msx/plugin.html",
+    "method": "GET",
+    "expected": 200,
+    "status": 200,
+    "pass": true,
+    "seconds": 0.001,
+    "bytes": 27874
+  },
+  {
+    "path": "/msx/input.html",
+    "method": "GET",
+    "expected": 200,
+    "status": 200,
+    "pass": true,
+    "seconds": 0.001,
+    "bytes": 273
+  },
+  {
+    "path": "/msx/input.js",
+    "method": "GET",
+    "expected": 200,
+    "status": 200,
+    "pass": true,
+    "seconds": 0.003,
+    "bytes": 59338
+  },
+  {
+    "path": "/api/albums",
+    "method": "GET",
+    "expected": 200,
+    "status": 200,
+    "pass": true,
+    "seconds": 0.003,
+    "bytes": 1555,
+    "items": 5
+  },
+  {
+    "path": "/api/albums/2/tracks",
+    "method": "GET",
+    "expected": 200,
+    "status": 200,
+    "pass": true,
+    "seconds": 0.005,
+    "bytes": 6270,
+    "items": 13
+  },
+  {
+    "path": "/msx/albums/2/tracks.json",
+    "method": "GET",
+    "expected": 200,
+    "status": 200,
+    "pass": true,
+    "seconds": 0.005,
+    "bytes": 15555,
+    "items": 13
+  },
+  {
+    "path": "/api/artists",
+    "method": "GET",
+    "expected": 200,
+    "status": 200,
+    "pass": true,
+    "seconds": 0.005,
+    "bytes": 9600,
+    "items": 50
+  },
+  {
+    "path": "/api/artists/20/albums",
+    "method": "GET",
+    "expected": 200,
+    "status": 200,
+    "pass": true,
+    "seconds": 0.002,
+    "bytes": 13,
+    "items": 0
+  },
+  {
+    "path": "/msx/artists/20/albums.json",
+    "method": "GET",
+    "expected": 200,
+    "status": 200,
+    "pass": true,
+    "seconds": 0.002,
+    "bytes": 181,
+    "items": 1
+  },
+  {
+    "path": "/api/playlists",
+    "method": "GET",
+    "expected": 200,
+    "status": 200,
+    "pass": true,
+    "seconds": 0.002,
+    "bytes": 2846,
+    "items": 13
+  },
+  {
+    "path": "/api/playlists/4/tracks",
+    "method": "GET",
+    "expected": 200,
+    "status": 200,
+    "pass": true,
+    "seconds": 0.164,
+    "bytes": 170278,
+    "items": 500
+  },
+  {
+    "path": "/msx/playlists/4/tracks.json",
+    "method": "GET",
+    "expected": 200,
+    "status": 200,
+    "pass": true,
+    "seconds": 0.068,
+    "bytes": 523377,
+    "items": 500
+  },
+  {
+    "path": "/api/tracks",
+    "method": "GET",
+    "expected": 200,
+    "status": 200,
+    "pass": true,
+    "seconds": 0.008,
+    "bytes": 16485,
+    "items": 50
+  },
+  {
+    "path": "/api/recently-played",
+    "method": "GET",
+    "expected": 200,
+    "status": 200,
+    "pass": true,
+    "seconds": 0.005,
+    "bytes": 6897,
+    "items": 20
+  },
+  {
+    "path": "/api/search",
+    "method": "GET",
+    "expected": 400,
+    "status": 400,
+    "pass": true,
+    "seconds": 0.001,
+    "bytes": 40,
+    "items": 0
+  },
+  {
+    "path": "/api/search?q=Trooper",
+    "method": "GET",
+    "expected": 200,
+    "status": 200,
+    "pass": true,
+    "seconds": 0.02,
+    "bytes": 10322,
+    "items": 0
+  },
+  {
+    "path": "/api/search?q=%D0%91%D1%80%D0%B0%D0%B2%D0%BE",
+    "method": "GET",
+    "expected": 200,
+    "status": 200,
+    "pass": true,
+    "seconds": 0.016,
+    "bytes": 10010,
+    "items": 0
+  },
+  {
+    "path": "/api/search?q=msxe2e_no_hits_954786",
+    "method": "GET",
+    "expected": 200,
+    "status": 200,
+    "pass": true,
+    "seconds": 0.009,
+    "bytes": 3142,
+    "items": 0
+  },
+  {
+    "path": "/api/play",
+    "method": "POST",
+    "expected": 400,
+    "status": 400,
+    "pass": true,
+    "seconds": 0.002,
+    "bytes": 30,
+    "items": 0
+  },
+  {
+    "path": "/api/play",
+    "method": "POST",
+    "expected": 400,
+    "status": 400,
+    "pass": true,
+    "seconds": 0.001,
+    "bytes": 30,
+    "items": 0
+  },
+  {
+    "path": "/api/play",
+    "method": "POST",
+    "expected": 400,
+    "status": 400,
+    "pass": true,
+    "seconds": 0.001,
+    "bytes": 43,
+    "items": 0
+  },
+  {
+    "path": "/api/play",
+    "method": "POST",
+    "expected": 400,
+    "status": 400,
+    "pass": true,
+    "seconds": 0.001,
+    "bytes": 43,
+    "items": 0
+  },
+  {
+    "path": "/api/play",
+    "method": "POST",
+    "expected": 400,
+    "status": 400,
+    "pass": true,
+    "seconds": 0.001,
+    "bytes": 30,
+    "items": 0
+  },
+  {
+    "path": "/api/play",
+    "method": "POST",
+    "expected": 404,
+    "status": 404,
+    "pass": true,
+    "seconds": 0.001,
+    "bytes": 31,
+    "items": 0
+  },
+  {
+    "path": "/api/pause/msx_e2e_missing",
+    "method": "GET",
+    "expected": 404,
+    "status": 404,
+    "pass": true,
+    "seconds": 0.001,
+    "bytes": 31,
+    "items": 0
+  },
+  {
+    "path": "/api/pause/msx_e2e_missing",
+    "method": "GET",
+    "expected": 403,
+    "status": 403,
+    "pass": true,
+    "seconds": 0.001,
+    "bytes": 40,
+    "items": 0
+  },
+  {
+    "path": "/api/stop/msx_e2e_missing",
+    "method": "GET",
+    "expected": 404,
+    "status": 404,
+    "pass": true,
+    "seconds": 0.001,
+    "bytes": 31,
+    "items": 0
+  },
+  {
+    "path": "/api/stop/msx_e2e_missing",
+    "method": "GET",
+    "expected": 403,
+    "status": 403,
+    "pass": true,
+    "seconds": 0.001,
+    "bytes": 40,
+    "items": 0
+  },
+  {
+    "path": "/api/quick-stop/msx_e2e_missing",
+    "method": "GET",
+    "expected": 404,
+    "status": 404,
+    "pass": true,
+    "seconds": 0.001,
+    "bytes": 31,
+    "items": 0
+  },
+  {
+    "path": "/api/quick-stop/msx_e2e_missing",
+    "method": "GET",
+    "expected": 403,
+    "status": 403,
+    "pass": true,
+    "seconds": 0.001,
+    "bytes": 40,
+    "items": 0
+  },
+  {
+    "path": "/api/next/msx_e2e_missing",
+    "method": "GET",
+    "expected": 404,
+    "status": 404,
+    "pass": true,
+    "seconds": 0.001,
+    "bytes": 31,
+    "items": 0
+  },
+  {
+    "path": "/api/next/msx_e2e_missing",
+    "method": "GET",
+    "expected": 403,
+    "status": 403,
+    "pass": true,
+    "seconds": 0.001,
+    "bytes": 40,
+    "items": 0
+  },
+  {
+    "path": "/api/previous/msx_e2e_missing",
+    "method": "GET",
+    "expected": 404,
+    "status": 404,
+    "pass": true,
+    "seconds": 0.001,
+    "bytes": 31,
+    "items": 0
+  },
+  {
+    "path": "/api/previous/msx_e2e_missing",
+    "method": "GET",
+    "expected": 403,
+    "status": 403,
+    "pass": true,
+    "seconds": 0.001,
+    "bytes": 40,
+    "items": 0
+  },
+  {
+    "path": "/api/complete/msx_e2e_missing",
+    "method": "GET",
+    "expected": 404,
+    "status": 404,
+    "pass": true,
+    "seconds": 0.001,
+    "bytes": 31,
+    "items": 0
+  },
+  {
+    "path": "/api/complete/msx_e2e_missing",
+    "method": "GET",
+    "expected": 403,
+    "status": 403,
+    "pass": true,
+    "seconds": 0.001,
+    "bytes": 40,
+    "items": 0
+  },
+  {
+    "path": "/api/play",
+    "method": "POST",
+    "expected": 403,
+    "status": 403,
+    "pass": true,
+    "seconds": 0.001,
+    "bytes": 40,
+    "items": 0
+  },
+  {
+    "path": "/msx/audio/msx_e2e_missing?token=invalid",
+    "method": "GET",
+    "expected": 400,
+    "status": 400,
+    "pass": true,
+    "seconds": 0.001,
+    "bytes": 21
+  },
+  {
+    "path": "/msx/audio/msx_192_168_10_229?token=invalid&uri=library%3A%2F%2Ftrack%2F1",
+    "method": "GET",
+    "expected": 403,
+    "status": 403,
+    "pass": true,
+    "seconds": 0.001,
+    "bytes": 31
+  },
+  {
+    "path": "/msx/playlist/tracks.json",
+    "method": "GET",
+    "expected": 403,
+    "status": 403,
+    "pass": true,
+    "seconds": 0.001,
+    "bytes": 40,
+    "items": 0
+  },
+  {
+    "path": "/ws",
+    "method": "GET",
+    "expected": 403,
+    "status": 403,
+    "pass": true,
+    "seconds": 0.001,
+    "bytes": 31
+  }
+]

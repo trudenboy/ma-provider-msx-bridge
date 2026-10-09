@@ -11,21 +11,23 @@ The provider exposes these settings in the Music Assistant UI under **Settings �
 | `http_port` | `8099` | Port for the embedded HTTP server |
 | `output_format` | `mp3` | Audio format sent to TVs: `mp3`, `aac`, or `flac` |
 | `player_idle_timeout` | `30` | Minutes before an idle (unconnected) TV player is unregistered |
-| `show_stop_notification` | `false` | Show a confirmation dialog on MSX when MA stops playback |
+| `show_stop_notification` | `false` | Show an informational notice after MSX playback is stopped |
 | `group_stream_mode` | `redirect` | Advanced: how audio is delivered to TVs (see Stream Delivery Mode below) |
-| `include_content_length` | `true` | Advanced: include an estimated length on local MP3/AAC proxy responses |
+| `include_content_length` | `false` | Deprecated compatibility key, hidden from new setup; independent streaming always omits estimated lengths |
 
 ## Output Format
 
-| Format | Bitrate estimate | Content-Length | Notes |
-|--------|-----------------|----------------|-------|
-| `mp3` | ~320 kbps (40,000 B/s) | ✅ Set | Best compatibility; MSX progress bar works |
-| `aac` | ~256 kbps (32,000 B/s) | ✅ Set | Good quality, slightly smaller |
-| `flac` | varies | ❌ Omitted | Lossless; MSX progress bar may not work |
+| Format | Independent delivery | Notes |
+|--------|----------------------|-------|
+| `mp3` | Chunked, no estimated Content-Length | Broad decoder compatibility |
+| `aac` | Chunked, no estimated Content-Length | Encoded size varies with content |
+| `flac` | Chunked, no estimated Content-Length | Lossless |
 
-MP3 is recommended for most TVs because the estimated `Content-Length` header can improve the MSX progress bar and seek behavior. Disable `include_content_length` if a TV truncates or rejects local proxy streams. FLAC always omits the header because its encoded size is non-deterministic. Redirected responses are controlled by the Music Assistant Streamserver, not this option.
+Streaming encoders add headers and padding; a bitrate estimate is not an exact body size. Independent delivery therefore omits Content-Length even if the legacy `include_content_length` value remains saved as `true`.
 
-Each MSX player defaults to Music Assistant's `forced_content_length` HTTP profile. This gives redirected finite tracks an estimated length so MSX can display playback progress. The profile is available in the advanced per-player settings; Universal Group flow streams remain continuous and do not have a finite per-track HTTP length.
+New MSX players default to Music Assistant's `chunked` HTTP profile. Existing explicitly saved per-player `http_profile` values are preserved. If redirected MP3/AAC playback truncates or never reaches EOF, select `chunked` in the player's advanced settings; the provider-level legacy switch does not control MA Streamserver responses. Universal Group flow streams remain continuous.
+
+The native position labels display source time, while MSX reports stream time to MA (MA adds the seek offset). Known durations are supplied to the native controls. Native rewind/forward buttons request a new MA stream at the source position; arbitrary HTTP Range seeking is unavailable for these chunked transcodes, so the native progress marker is disabled. Seek through MA remains available.
 
 ## Player Idle Timeout
 
@@ -62,10 +64,15 @@ The removed legacy `shared` value is migrated to `independent`. Recreate any old
 | **Play** (after pause) | Resumes from paused position | Sets player state to Playing |
 | **Quick Stop** | Aborts stream + double WS stop broadcast | Stops immediately |
 
-**`show_stop_notification`**: when enabled, MSX shows a confirmation dialog before closing the player. Useful to prevent accidental stops when controlling playback from MA.
+**`show_stop_notification`**: when enabled, MSX ejects/hides playback immediately and then shows “Playback stopped.” as an informational notice. There is no delayed confirmation or Continue action.
 
 ## See Also
 
 - [Getting Started](getting-started.md) — initial setup
 - [Architecture](architecture.md) — how config values affect streaming behavior
 - [API Reference](api.md) — quick-stop endpoint and playback control
+
+## Playback limitations
+
+- Native progress-marker dragging is disabled for chunked transcodes. Forward/rewind and MA seek rebuild the stream at a source position; device and group compatibility still require verification.
+- MA dev stops a paused queue after 30 seconds to release its stream. Resume uses MA's saved position.

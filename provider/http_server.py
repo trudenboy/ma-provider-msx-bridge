@@ -14,7 +14,7 @@ from urllib.parse import quote
 
 import aiohttp
 from aiohttp import WSMsgType, web
-from music_assistant_models.enums import RepeatMode
+from music_assistant_models.enums import PlaybackState, QueueOption, RepeatMode
 from music_assistant_models.errors import (
     InvalidDataError,
     MusicAssistantError,
@@ -231,6 +231,9 @@ class MSXHTTPServer:
             payload["next_action"] = next_action
         if prev_action:
             payload["prev_action"] = prev_action
+        player = self._get_msx_player(player_id)
+        if player:
+            payload.update(player.clock_context())
         msg = json.dumps(payload)
         for ws in list(clients):
             if not ws.closed:
@@ -257,6 +260,9 @@ class MSXHTTPServer:
             "url": playlist_url,
             "player_id": player_id,
         }
+        player = self._get_msx_player(player_id)
+        if player:
+            payload.update(player.clock_context())
         msg = json.dumps(payload)
         for ws in list(clients):
             if not ws.closed:
@@ -285,7 +291,9 @@ class MSXHTTPServer:
 
     def broadcast_clock_reset(self, player_id: str) -> None:
         """Notify native playback of a new item without changing the TV playlist."""
-        msg = json.dumps({"type": "clock_reset"})
+        player = self._get_msx_player(player_id)
+        context = player.clock_context() if player else {}
+        msg = json.dumps({"type": "clock_reset", **context})
         for ws in list(self._ws_clients.get(player_id, set())):
             if not ws.closed:
                 self.provider.mass.create_task(self._ws_send(ws, msg, player_id))
@@ -456,6 +464,7 @@ class MSXHTTPServer:
             ("/api/quick-stop/{player_id}", self._handle_quick_stop),
             ("/api/play-context/{player_id}", self._handle_play_context),
             ("/api/next/{player_id}", self._handle_next),
+            ("/api/complete/{player_id}", self._handle_complete),
             ("/api/previous/{player_id}", self._handle_previous),
         ):
             self.app.router.add_get(path, handler)
@@ -465,18 +474,15 @@ class MSXHTTPServer:
 
     @web.middleware
     async def _cors_middleware(self, request: web.Request, handler: Any) -> web.StreamResponse:
-        """
-        Add CORS headers to all responses.
-
-        Wildcard CORS is intentional: this server runs on LAN (default port 8099).
-        The MSX plugin (/msx/plugin.html) is served from the same origin, so
-        browser playback-control POSTs from the status dashboard are same-origin.
-        MSX TV app only makes GET requests. This matches MA's own webserver pattern.
-
-        The audio routes are the exception and get no header at all: a media element
-        plays a cross-origin source without CORS, so withholding it costs nothing
-        and keeps a cross-origin fetch() from reading the audio.
-        """
+        """Add CORS headers to responses."""
+        # Wildcard CORS is intentional: this server runs on LAN (default port 8099).
+        # The MSX plugin (/msx/plugin.html) is served from the same origin, so
+        # browser playback-control POSTs from the status dashboard are same-origin.
+        # MSX TV app only makes GET requests. This matches MA's own webserver pattern.
+        #
+        # The audio routes are the exception and get no header at all: a media element
+        # plays a cross-origin source without CORS, so withholding it costs nothing
+        # and keeps a cross-origin fetch() from reading the audio.
         if request.method == "OPTIONS":
             return web.Response(
                 headers={
@@ -934,12 +940,19 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
             # PNG, not SVG: MSX image slots on older TV engines cannot decode SVG
             item = MsxItem(
                 image=f"{prefix}/api/party/qr.png",
-                label=party.qr_text or "Scan to join the party",
+                layout="0,0,4,4",
             )
         content = MsxContent(
             headline=(party.name if party else None) or "Party",
             template=MsxTemplate(type="separate", layout="0,0,4,4"),
-            items=[item],
+            items=[
+                item,
+                MsxItem(
+                    type="default", layout="4,0,8,4", text=party.qr_text or "Scan to join the party"
+                ),
+            ]
+            if party
+            else [item],
         )
         return web.json_response(dump_msx(content))
 
@@ -1215,6 +1228,7 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
             self.provider.mass.player_queues.items(queue_id, limit=queue.items) if queue else []
         )
         tracks = queue_items_to_tracks(queue_items)
+        player = self._get_msx_player(player_id)
 
         playlist = map_tracks_to_msx_playlist(
             tracks,
@@ -1224,6 +1238,8 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
             self.provider,
             device_param,
             qr_cover_base=await self._qr_cover_base(prefix),
+            current_media=player.current_media if player else None,
+            playback_generation=player.playback_generation if player else None,
         )
         return web.json_response(dump_msx(playlist))
 
@@ -1241,7 +1257,7 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
         requested_queue_item_id = request.query.get("queue_item_id")
 
         player = self.provider.mass.players.get_player(player_id)
-        if not player or not isinstance(player, MSXPlayer):
+        if not player or not isinstance(player, MSXPlayer) or not player.config.enabled:
             return web.Response(status=404, text="Player not found")
         if rejected := self._reject_invalid_stream_token(request, player_id):
             return rejected
@@ -1252,6 +1268,7 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
                 uri,
                 from_playlist=from_playlist,
                 queue_item_id=requested_queue_item_id,
+                expected_generation=request.query.get("playback_generation"),
             )
         except InvalidDataError as err:
             return web.Response(status=400, text=str(err))
@@ -1261,6 +1278,7 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
             logger.exception("Unable to prepare audio for MSX player %s", player_id)
             return web.Response(status=503, text="Unable to prepare audio")
 
+        player.bind_native_completion(request.query.get("playback_id", ""), prepared)
         return await self._serve_audio_stream(
             request,
             player,
@@ -1295,13 +1313,10 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
         )
 
     async def _handle_ws(self, request: web.Request) -> web.WebSocketResponse:
-        """
-        WebSocket for push playback — clients subscribe by player_id.
-
-        Uses the same player_id derivation (device_id or IP) as content and
-        stream endpoints so broadcast_stop reaches the correct client.
-        Registers the player in MA on connect so the player appears when MSX starts.
-        """
+        """Serve the WebSocket endpoint for player playback updates."""
+        # Uses the same player_id derivation (device_id or IP) as content and
+        # stream endpoints so broadcast_stop reaches the correct client.
+        # Registers the player in MA on connect so the player appears when MSX starts.
         if self._reject_cross_site(request):
             raise web.HTTPForbidden(text="Cross-site WebSocket rejected")
         if origin := request.headers.get("Origin"):
@@ -1325,6 +1340,14 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
         )
         if player and isinstance(player, MSXPlayer):
             player.on_ws_connected()
+            await ws.send_json(
+                {
+                    "type": "state_sync",
+                    "enabled": player.config.enabled,
+                    "state": player.playback_state.value,
+                    **player.clock_context(),
+                }
+            )
 
         try:
             async for msg in ws:
@@ -1370,6 +1393,24 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
         with player.suppress_ws_notify():
             await self.provider.mass.players.cmd_play(player_id)
 
+    async def _cmd_seek_for_generation(
+        self,
+        player_id: str,
+        queue_id: str,
+        position: int,
+        generation: str | None,
+    ) -> None:
+        """Reject a queued native seek after playback was replaced or stopped."""
+        player = self._get_msx_player(player_id)
+        if (
+            player is None
+            or player.current_media is None
+            or player.playback_generation != generation
+            or player.current_media.source_id != queue_id
+        ):
+            return
+        await self.provider.mass.player_queues.seek(queue_id, position)
+
     def _handle_ws_message(self, player_id: str, data: str) -> None:
         """Process an inbound WebSocket message from MSX."""
         try:
@@ -1382,6 +1423,29 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
             return
 
         msg_type = msg.get("type")
+        if msg_type in {"position", "pause", "resume", "seek", "seek_request"}:
+            msx_player = self._get_msx_player(player_id)
+            if msx_player is None:
+                return
+            if "playback_id" in msg and msg["playback_id"] != msx_player.playback_generation:
+                return
+        if msg_type == "seek_request":
+            seek_player = self._get_msx_player(player_id)
+            if seek_player is None:
+                return
+            position = msg.get("position")
+            if _is_finite_position(position):
+                queue = self.provider.mass.player_queues.get_active_queue(player_id)
+                if queue and queue.active:
+                    self.provider.mass.create_task(
+                        self._cmd_seek_for_generation(
+                            player_id,
+                            queue.queue_id,
+                            int(position),
+                            seek_player.playback_generation,
+                        )
+                    )
+            return
         if msg_type == "position":
             position = msg.get("position")
             if _is_finite_position(position):
@@ -1418,7 +1482,7 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
         player_id = _strip_known_extension(request.match_info["player_id"])
 
         player = self.provider.mass.players.get_player(player_id)
-        if not player or not isinstance(player, MSXPlayer):
+        if not player or not isinstance(player, MSXPlayer) or not player.config.enabled:
             return web.Response(status=404, text="Player not found")
         if rejected := self._reject_invalid_stream_token(request, player_id):
             return rejected
@@ -1647,14 +1711,11 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
     def _reject_invalid_stream_token(
         self, request: web.Request, player_id: str
     ) -> web.Response | None:
-        """
-        Reject an audio request that does not carry the player's own stream token.
-
-        A TV cannot send an auth header, so the token travels in the URL the bridge
-        itself generated. This stops a request that was never handed out — a web page
-        firing an <audio> tag at this LAN server. A URL that was handed out stays valid
-        until the provider reloads, so this is not a defence against a captured URL.
-        """
+        """Reject audio requests with an invalid or missing player stream token."""
+        # A TV cannot send an auth header, so the token travels in the URL the bridge
+        # itself generated. This stops a request that was never handed out — a web page
+        # firing an <audio> tag at this LAN server. A URL that was handed out stays valid
+        # until the provider reloads, so this is not a defence against a captured URL.
         expected = self.provider.get_stream_token(player_id)
         if not secrets.compare_digest(request.query.get("token", ""), expected):
             return web.Response(status=403, text="Invalid or missing stream token")
@@ -1662,15 +1723,12 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
 
     @staticmethod
     def _reject_cross_site(request: web.Request) -> web.Response | None:
-        """
-        Reject browser cross-site requests to state-changing endpoints (CSRF guard).
-
-        Any web page can fire an unauthenticated GET at this LAN server via an
-        img/script tag; modern browsers mark such requests with
-        Sec-Fetch-Site: cross-site. Legitimate callers are same-origin (web
-        player, MSX interaction plugin, dashboard) or non-browser clients that
-        omit the header entirely — both pass.
-        """
+        """Reject browser cross-site requests."""
+        # Any web page can fire an unauthenticated GET at this LAN server via an
+        # img/script tag; modern browsers mark such requests with
+        # Sec-Fetch-Site: cross-site. Legitimate callers are same-origin (web
+        # player, MSX interaction plugin, dashboard) or non-browser clients that
+        # omit the header entirely — both pass.
         fetch_site = request.headers.get("Sec-Fetch-Site", "").lower()
         if fetch_site not in ("", "none", "same-origin"):
             return web.json_response({"error": "Cross-site request rejected"}, status=403)
@@ -1695,8 +1753,9 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
         try:
             async with ImpersonatedUser(self.provider.mass, None):
                 with player.suppress_ws_notify():
-                    player.expect_new_media()
-                    await self.provider.mass.player_queues.play_media(player_id, uri)
+                    await self.provider.mass.player_queues.play_media(
+                        player_id, uri, option=QueueOption.REPLACE
+                    )
                     await self._start_play_context(
                         player_id, player, track_uri=track_uri, start=start
                     )
@@ -1786,6 +1845,41 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
             return _msx_execute_ok()
         return _msx_execute_ok(self._queue_playlist_action(request, player_id))
 
+    async def _handle_complete(self, request: web.Request) -> web.Response:
+        """Complete one native decoder generation using natural MA queue selection."""
+        if rejected := self._reject_cross_site(request):
+            return rejected
+        player_id = _strip_known_extension(request.match_info["player_id"])
+        player = self._get_msx_player(player_id)
+        if player is None:
+            return web.json_response({"error": "Unknown MSX player"}, status=404)
+        async with player._prepare_lock:
+            media = player.current_media
+            queue = self.provider.mass.player_queues.get_active_queue(player_id)
+            if (
+                media is None
+                or queue is None
+                or media.source_id != queue.queue_id
+                or queue.current_item is None
+                or media.queue_item_id != queue.current_item.queue_item_id
+                or not player.claim_native_completion(request.query.get("playback_id", ""))
+            ):
+                return _msx_execute_ok()
+            next_item = self.provider.mass.player_queues.get_next_item(
+                queue.queue_id, media.queue_item_id
+            )
+            if next_item is None:
+                await self.provider.mass.player_queues.stop(queue.queue_id)
+                self.provider.mass.player_queues.mark_ended(queue.queue_id)
+                return _msx_execute_ok("[player:eject|player:hide]")
+            with player.suppress_ws_notify():
+                await self.provider.mass.player_queues.play_index(
+                    queue.queue_id, next_item.queue_item_id
+                )
+            if not player.config.enabled or player.playback_state != PlaybackState.PLAYING:
+                return _msx_execute_ok()
+            return _msx_execute_ok(self._queue_playlist_action(request, player_id))
+
     async def _handle_previous(self, request: web.Request) -> web.Response:
         """Skip to previous track."""
         if rejected := self._reject_cross_site(request):
@@ -1813,8 +1907,6 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
         start: int,
     ) -> None:
         """Jump to the selected track after enqueuing a container."""
-        if track_uri or start > 0:
-            await player.wait_for_media(timeout=10.0)
         queue = self.provider.mass.player_queues.get_active_queue(player_id)
         if queue is None:
             return
@@ -1865,30 +1957,26 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
     def _get_msx_player(self, player_id: str) -> MSXPlayer | None:
         """Return the MSXPlayer for player_id if it belongs to this provider, else None."""
         player = self.provider.mass.players.get_player(player_id, raise_unavailable=False)
-        if isinstance(player, MSXPlayer) and player.provider == self.provider:
+        if (
+            isinstance(player, MSXPlayer)
+            and player.provider == self.provider
+            and player.config.enabled
+        ):
             return player
         return None
 
     def _get_prefix(self, request: web.Request) -> str:
-        """
-        Build URL prefix for JSON content, using our known port.
-
-        Uses aiohttp's parsed URL host (IPv6-safe, no port) and substitutes
-        self.port. Note: host is still derived from the Host header; a crafted
-        header can influence the returned host, but the server binds to 0.0.0.0
-        so there is no single canonical IP to validate against.
-        """
+        """Return the HTTP URL prefix for this server."""
+        # Uses aiohttp's parsed URL host (IPv6-safe, no port) and substitutes
+        # self.port. Note: host is still derived from the Host header; a crafted
+        # header can influence the returned host, but the server binds to 0.0.0.0
+        # so there is no single canonical IP to validate against.
         host: str = request.url.host or request.host.split(":")[0]  # IPv6-safe, no port
         host_addr = f"[{host}]" if ":" in host else host  # bracket IPv6 literals for URLs
         return f"http://{host_addr}:{self.port}"
 
     def _get_player_id_and_device_param(self, request: web.Request) -> tuple[str, str]:
-        """
-        Extract player_id and device_id query param from request.
-
-        Returns (player_id, device_param) where device_param is e.g. "device_id=xxx"
-        or "" if using IP fallback.
-        """
+        """Return the player ID and encoded device query parameter for this request."""
         device_id = request.query.get("device_id")
         remote_ip = request.remote or "unknown"
 
@@ -1918,12 +2006,7 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
     async def _ensure_player_for_request(
         self, request: web.Request
     ) -> tuple[str, str, MSXPlayer | None]:
-        """
-        Get or register player for this request.
-
-        Returns (player_id, device_param, player).
-        Player may be None if registration failed.
-        """
+        """Return the player ID, device query parameter, and registered player, if available."""
         player_id, device_param = self._get_player_id_and_device_param(request)
         remote_ip = request.remote
         # Web player clients pass source=web to distinguish from MSX TV players

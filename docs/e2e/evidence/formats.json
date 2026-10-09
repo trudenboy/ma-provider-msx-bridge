@@ -1,0 +1,105 @@
+[
+  {
+    "mode": "redirect",
+    "codec": "mp3",
+    "passed": true,
+    "mimes": [
+      "audio/mpeg"
+    ],
+    "observed_indices": [
+      0,
+      1
+    ],
+    "final_state": "idle",
+    "samples": 23,
+    "ws_counts": [
+      0,
+      1
+    ]
+  },
+  {
+    "mode": "redirect",
+    "codec": "aac",
+    "passed": true,
+    "mimes": [
+      "audio/aac"
+    ],
+    "observed_indices": [
+      0,
+      1
+    ],
+    "final_state": "idle",
+    "samples": 23,
+    "ws_counts": [
+      1
+    ]
+  },
+  {
+    "mode": "redirect",
+    "codec": "flac",
+    "passed": true,
+    "mimes": [
+      "audio/flac"
+    ],
+    "observed_indices": [
+      0,
+      1
+    ],
+    "final_state": "idle",
+    "samples": 23,
+    "ws_counts": [
+      1
+    ]
+  },
+  {
+    "mode": "independent",
+    "codec": "mp3",
+    "passed": true,
+    "mimes": [
+      "audio/mpeg"
+    ],
+    "observed_indices": [
+      0,
+      1
+    ],
+    "final_state": "idle",
+    "samples": 23,
+    "ws_counts": [
+      1
+    ]
+  },
+  {
+    "mode": "independent",
+    "codec": "aac",
+    "passed": true,
+    "mimes": [
+      "audio/aac"
+    ],
+    "observed_indices": [
+      0,
+      1
+    ],
+    "final_state": "idle",
+    "samples": 23,
+    "ws_counts": [
+      1
+    ]
+  },
+  {
+    "mode": "independent",
+    "codec": "flac",
+    "passed": true,
+    "mimes": [
+      "audio/flac"
+    ],
+    "observed_indices": [
+      0,
+      1
+    ],
+    "final_state": "idle",
+    "samples": 23,
+    "ws_counts": [
+      1
+    ]
+  }
+]

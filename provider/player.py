@@ -6,14 +6,15 @@ import asyncio
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
+from uuid import uuid4
 
 from music_assistant_models.enums import PlaybackState, PlayerFeature, PlayerType
 from music_assistant_models.errors import MusicAssistantError, PlayerUnavailableError
 from music_assistant_models.player import DeviceInfo
 
 from music_assistant.constants import (
-    CONF_ENTRY_HTTP_PROFILE_DEFAULT_3,
+    CONF_ENTRY_HTTP_PROFILE_DEFAULT_1,
     CONF_ENTRY_OUTPUT_CODEC_DEFAULT_MP3,
 )
 from music_assistant.models.player import Player, PlayerMedia
@@ -41,6 +42,8 @@ class MSXPlayer(Player):
     _last_ws_position: float | None = None
     _ws_ever_connected: bool = False
     _track_started_at: float = 0.0
+    _native_completion_token: str | None = None
+    playback_generation: str | None = None
 
     def __init__(
         self,
@@ -98,7 +101,7 @@ class MSXPlayer(Player):
 
     async def get_config_entries(self) -> list[ConfigEntry]:
         """Return per-player config entries — codec is configurable per TV."""
-        return [CONF_ENTRY_OUTPUT_CODEC_DEFAULT_MP3, CONF_ENTRY_HTTP_PROFILE_DEFAULT_3]
+        return [CONF_ENTRY_OUTPUT_CODEC_DEFAULT_MP3, CONF_ENTRY_HTTP_PROFILE_DEFAULT_1]
 
     def mark_available(self) -> None:
         """Mark the player available after proof of life from the TV."""
@@ -112,19 +115,18 @@ class MSXPlayer(Player):
         self.mark_available()
 
     def on_ws_disconnected(self) -> None:
-        """
-        Mark player unavailable when last WebSocket client disconnects while playing.
-
-        If the player was playing when the TV dropped the WS connection,
-        mark it unavailable so MA reflects the actual state.
-        """
+        """Mark a playing player unavailable when its last WebSocket client disconnects."""
         if self._attr_playback_state == PlaybackState.PLAYING:
             self._attr_available = False
             self.update_state()
 
     async def play_media(self, media: PlayerMedia) -> None:
         """Handle PLAY MEDIA command — store stream URL for the TV to fetch."""
+        if not self.config.enabled:
+            raise PlayerUnavailableError("Player is disabled")
         self.logger.info("play_media on %s: uri=%s", self.display_name, media.uri)
+        self._native_completion_token = None
+        self.playback_generation = uuid4().hex
         self.current_stream_url = media.uri
         self._attr_current_media = media
         self._media_ready.set()
@@ -143,6 +145,8 @@ class MSXPlayer(Player):
 
     async def play(self) -> None:
         """Handle PLAY (resume) command."""
+        if not self.config.enabled:
+            raise PlayerUnavailableError("Player is disabled")
         self.logger.info("play (resume) on %s", self.display_name)
         if self._attr_playback_state == PlaybackState.PAUSED:
             await self._resume_from_pause()
@@ -167,6 +171,8 @@ class MSXPlayer(Player):
         """Handle STOP command."""
         self.logger.info("stop on %s", self.display_name)
         self._attr_playback_state = PlaybackState.IDLE
+        self._native_completion_token = None
+        self.playback_generation = None
         self._attr_current_media = None
         self._attr_elapsed_time = None
         self._attr_elapsed_time_last_updated = None
@@ -179,6 +185,38 @@ class MSXPlayer(Player):
         self.update_state()
         provider = cast("MSXBridgeProvider", self.provider)
         provider.notify_play_stopped(self.player_id)
+
+    def clock_context(self) -> dict[str, Any]:
+        """Return source metadata separately from the decoder's stream-time clock."""
+        media = self.current_media
+        offset = 0.0
+        if media and media.source_id and media.queue_item_id:
+            item = self.mass.player_queues.get_item(media.source_id, media.queue_item_id)
+            if item and item.streamdetails:
+                offset = item.streamdetails.seek_position
+        return {
+            "playback_id": self.playback_generation,
+            "source_offset": offset,
+            "source_duration": media.duration if media else None,
+            "served_duration": self._served_duration(),
+        }
+
+    def bind_native_completion(self, token: str, media: PlayerMedia | None) -> None:
+        """Bind one native decoder request to its current media generation."""
+        if media is not None and self.current_media is media and self.config.enabled:
+            self._native_completion_token = token
+
+    def claim_native_completion(self, token: str) -> bool:
+        """Consume a decoder's completion once, rejecting stopped or replaced playback."""
+        if (
+            not token
+            or token != self._native_completion_token
+            or self.playback_state != PlaybackState.PLAYING
+            or not self.config.enabled
+        ):
+            return False
+        self._native_completion_token = None
+        return True
 
     async def volume_set(self, volume_level: int) -> None:
         """Handle VOLUME_SET command."""
@@ -197,12 +235,9 @@ class MSXPlayer(Player):
             cast("MSXBridgeProvider", self.provider).notify_seek(self.player_id, position_seconds)
 
     def update_position(self, position: float) -> None:
-        """
-        Update elapsed time from a WebSocket position report.
-
-        Only accepts updates while PLAYING — late reports arriving after
-        pause() would overwrite the correctly accumulated elapsed_time.
-        """
+        """Update elapsed time from a WebSocket position report while playing."""
+        # Only accepts updates while PLAYING — late reports arriving after
+        # pause() would overwrite the correctly accumulated elapsed_time.
         if self._attr_playback_state != PlaybackState.PLAYING:
             return
         normalized = max(0.0, float(position))
@@ -242,14 +277,12 @@ class MSXPlayer(Player):
 
     async def poll(self) -> None:
         """
-        Poll player for state updates.
+        Update the player state.
 
-        Raises PlayerUnavailableError if the player was marked unavailable
-        (e.g. WS disconnected while playing — TV likely went offline).
-
-        If a recent WebSocket position report was received (within 10s),
-        skip wall-clock increment — the WS data is more accurate.
+        :raises PlayerUnavailableError: If the player is unavailable.
         """
+        # If a recent WebSocket position report was received (within 10s),
+        # skip wall-clock increment — the WS data is more accurate.
         if not self._attr_available:
             raise PlayerUnavailableError(
                 f"MSX TV {self.display_name} is offline (WebSocket disconnected)",
@@ -277,23 +310,23 @@ class MSXPlayer(Player):
 
     def expect_new_media(self) -> None:
         """
-        Arm wait_for_media() to wait for the NEXT play_media() call.
+        Arm wait_for_media() for the next play_media() call.
 
-        Call this before initiating playback that will (asynchronously) invoke
-        play_media(). Without arming, wait_for_media() would return the stale
-        current_media left over from a previous track.
+        Call before requesting new playback to avoid returning the previous media.
         """
         self._media_ready.clear()
 
     async def wait_for_media(self, timeout: float = 10.0) -> PlayerMedia | None:
         """
-        Wait for play_media() to set current_media, with timeout.
+        Wait for new media after arming, or return the current media.
 
-        Fast path: current_media already set and not armed via expect_new_media()
-        — return immediately. Slow path: wait for the next play_media() to signal.
-        After stop(), _attr_current_media is None — this method returns None even
-        if the event happens to still be set.
+        :param timeout: Maximum time to wait for new media, in seconds.
+        :return: The current media, or None if stopped or the wait times out.
         """
+        # Fast path: current_media already set and not armed via expect_new_media()
+        # — return immediately. Slow path: wait for the next play_media() to signal.
+        # After stop(), _attr_current_media is None — this method returns None even
+        # if the event happens to still be set.
         if self._attr_current_media is not None and self._media_ready.is_set():
             return self._attr_current_media
         if not self._media_ready.is_set():
@@ -321,10 +354,6 @@ class MSXPlayer(Player):
     def _skip_ws_notify(self) -> bool:
         """True while at least one suppress_ws_notify() context is active."""
         return self._skip_ws_depth > 0
-
-    @_skip_ws_notify.setter
-    def _skip_ws_notify(self, value: bool) -> None:
-        self._skip_ws_depth = 1 if value else 0
 
     def _notify_msx_playback(self, media: PlayerMedia) -> None:
         """Send WS notification to MSX about the new playback state."""
@@ -371,12 +400,9 @@ class MSXPlayer(Player):
         self._playing_from_queue = True
 
     def _served_duration(self) -> float | None:
-        """
-        Return the length in seconds of the audio served to the TV, if known.
-
-        The TV reports its position within that audio, which is shorter than the
-        media item itself when playback starts at a seek position.
-        """
+        """Return the length in seconds of the audio served to the TV, if known."""
+        # The TV reports its position within that audio, which is shorter than the
+        # media item itself when playback starts at a seek position.
         if (media := self._attr_current_media) is None:
             return None
         duration = media.stream_duration or media.duration
@@ -396,15 +422,12 @@ class MSXPlayer(Player):
             return fallback
 
     async def _resume_from_pause(self) -> None:
-        """
-        Resume playback after pause — tell MSX to unpause its native player.
-
-        Note: the HTTP audio stream stays open during pause. For short pauses
-        the chunk buffer (maxsize=32) absorbs the gap. Long pauses (minutes)
-        may cause stream starvation — ffmpeg backs up, and MSX may get silence
-        or a playback error on resume. A reconnect mechanism would be needed
-        for reliable long-pause support.
-        """
+        """Resume playback on the native MSX player."""
+        # Note: the HTTP audio stream stays open during pause. For short pauses
+        # the chunk buffer (maxsize=32) absorbs the gap. Long pauses (minutes)
+        # may cause stream starvation — ffmpeg backs up, and MSX may get silence
+        # or a playback error on resume. A reconnect mechanism would be needed
+        # for reliable long-pause support.
         self._attr_playback_state = PlaybackState.PLAYING
         self._attr_elapsed_time_last_updated = time.time()
         self._last_ws_position = None
