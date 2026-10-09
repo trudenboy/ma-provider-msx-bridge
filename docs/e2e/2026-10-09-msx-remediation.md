@@ -1,12 +1,12 @@
 # MSX: исправления после Pixel 8 E2E
 
-Дата: 2026-10-09. Изменения реализованы и проверены; версия не повышалась. Семь MA commits опубликованы в PR #5868 (head `e28320e`), описание обновлено. Provider branch и ответы синхронизируются по прямому поручению пользователя. Дополнительный непрерывный soak остановлен по его просьбе; сохранены 37 partial samples. 30-минутный PASS не заявляется.
+Дата: 2026-10-09. Изменения реализованы и проверены; версия не повышалась. Восемь MA commits опубликованы в PR #5868 (head `d00b5b2`), описание обновлено. Provider branch и ответы синхронизируются по прямому поручению пользователя. Дополнительный непрерывный soak остановлен по его просьбе; сохранены 37 partial samples. 30-минутный PASS не заявляется.
 
 ## Срез и изменения
 
 - Official MA dev: `d22d28c087ded4289c67c8121c7697f02d9f6e62`.
 - Исходный PR #5868: `3b99570efe098e96e7ee7ee196443ebd2f8d6f3c`.
-- Исправленный MA checkout: `e28320efeaf7f6d7e8468560efdf66dd89bb8780`.
+- Исправленный MA checkout: `d00b5b2a33beb9b586ea94a2d1bd850da7838172`.
 - Provider product HEAD: `c502a6f`; исходный HEAD: `96d700893e89d5a3e2f7a6411e551d9b23cc048c`.
 - Устройство: Pixel 8, Android 17, native MSX 0.1.165.
 
@@ -20,6 +20,8 @@
 | F7 | Source offset отдельно от served clock; source duration/labels; native Forward/Rewind вызывают backend seek | `c28fd71` / `04ea19a` |
 | F8 | Реальный supports_enqueue проверяется перед scheduled work и после awaits; stale queue/session/item не помечается enqueued | MA `bba3f2c` |
 | F9 | QR caption вне изображения; Stop немедленно eject/hide, notification показывает уже состоявшуюся остановку | `c502a6f` / `e28320e` |
+
+Дополнительный MA commit `d00b5b2` согласует UI labels с немедленным Stop и deprecated Content-Length; Python-код не менялся.
 
 F3/F4/F5/F7 используют общий playback generation и объединены в один provider commit. Два core исправления сохранены отдельно. Старый URL Repeat One не может перепривязаться к новой generation того же queue item. Миграция retired grouping/kiosk/Sendspin из исходного PR сохранена.
 
@@ -69,7 +71,7 @@ Root standalone pre-commit mypy разрешает старую установл
 
 ## Подготовка PR
 
-[Patch](../patches/pr-5868-e2e-remediation.patch) содержит все семь MA commits относительно исходного PR head; reverse apply check выполнен. [Краткое описание PR](../pr-5868-description.md) опубликовано; [пять ответов](../pr-5868-e2e-replies.json) подготовлены. Четыре замечания OzGav уже закрыты кодом исходного head; их ответы уточняют фактическое поведение, без обещания отсутствующей single-stream optimization. Пятый ответ Copilot сопровождает сокращение описания.
+[Patch](../patches/pr-5868-e2e-remediation.patch) содержит все восемь MA commits относительно исходного PR head; reverse apply check выполнен. [Краткое описание PR](../pr-5868-description.md) опубликовано; [пять ответов](../pr-5868-e2e-replies.json) подготовлены. Четыре замечания OzGav уже закрыты кодом исходного head; их ответы уточняют фактическое поведение, без обещания отсутствующей single-stream optimization. Пятый ответ Copilot сопровождает сокращение описания.
 
 Пользователь проверил все черновики и прямо разрешил публикацию. Bundle сохраняет честную отметку `human_authored: false` и отдельно фиксирует `human_reviewed: true` и разрешение пользователя; это явное пользовательское поручение на публикацию, а не утверждение о человеческом авторстве текста. Expected head в новом bundle совпадает с опубликованным patched MA head. GitHub provider-scope и PR Verify уже прошли, lint/test выполняются; publisher повторно проверяет head и CI перед отправкой. Существующий пользовательский bundle не изменялся.
 

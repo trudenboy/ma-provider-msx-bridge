@@ -64,7 +64,7 @@ The removed legacy `shared` value is migrated to `independent`. Recreate any old
 | **Play** (after pause) | Resumes from paused position | Sets player state to Playing |
 | **Quick Stop** | Aborts stream + double WS stop broadcast | Stops immediately |
 
-**`show_stop_notification`**: when enabled, MSX shows a confirmation dialog before closing the player. Useful to prevent accidental stops when controlling playback from MA.
+**`show_stop_notification`**: when enabled, MSX ejects/hides playback immediately and then shows “Playback stopped.” as an informational notice. There is no delayed confirmation or Continue action.
 
 ## See Also
 
