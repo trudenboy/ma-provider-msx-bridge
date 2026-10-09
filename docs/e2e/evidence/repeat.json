@@ -1,0 +1,144 @@
+{
+  "passed": true,
+  "runs": [
+    {
+      "round": 1,
+      "mode": "off",
+      "samples": 34,
+      "observed_indices": [
+        0,
+        1,
+        2
+      ],
+      "final_state": "idle",
+      "natural_item_changes": 2,
+      "position_resets": 3,
+      "ws_counts": [
+        0,
+        1
+      ]
+    },
+    {
+      "round": 1,
+      "mode": "one",
+      "samples": 28,
+      "observed_indices": [
+        0
+      ],
+      "final_state": "playing",
+      "natural_item_changes": 0,
+      "position_resets": 3,
+      "ws_counts": [
+        1
+      ]
+    },
+    {
+      "round": 1,
+      "mode": "all",
+      "samples": 58,
+      "observed_indices": [
+        0,
+        1,
+        2
+      ],
+      "final_state": "playing",
+      "natural_item_changes": 6,
+      "position_resets": 6,
+      "ws_counts": [
+        1
+      ]
+    },
+    {
+      "round": 2,
+      "mode": "off",
+      "samples": 34,
+      "observed_indices": [
+        0,
+        1,
+        2
+      ],
+      "final_state": "idle",
+      "natural_item_changes": 2,
+      "position_resets": 3,
+      "ws_counts": [
+        1
+      ]
+    },
+    {
+      "round": 2,
+      "mode": "one",
+      "samples": 28,
+      "observed_indices": [
+        0
+      ],
+      "final_state": "playing",
+      "natural_item_changes": 0,
+      "position_resets": 3,
+      "ws_counts": [
+        1
+      ]
+    },
+    {
+      "round": 2,
+      "mode": "all",
+      "samples": 58,
+      "observed_indices": [
+        0,
+        1,
+        2
+      ],
+      "final_state": "playing",
+      "natural_item_changes": 6,
+      "position_resets": 6,
+      "ws_counts": [
+        1
+      ]
+    },
+    {
+      "round": 3,
+      "mode": "off",
+      "samples": 34,
+      "observed_indices": [
+        0,
+        1,
+        2
+      ],
+      "final_state": "idle",
+      "natural_item_changes": 2,
+      "position_resets": 3,
+      "ws_counts": [
+        1
+      ]
+    },
+    {
+      "round": 3,
+      "mode": "one",
+      "samples": 28,
+      "observed_indices": [
+        0
+      ],
+      "final_state": "playing",
+      "natural_item_changes": 0,
+      "position_resets": 3,
+      "ws_counts": [
+        1
+      ]
+    },
+    {
+      "round": 3,
+      "mode": "all",
+      "samples": 58,
+      "observed_indices": [
+        0,
+        1,
+        2
+      ],
+      "final_state": "playing",
+      "natural_item_changes": 6,
+      "position_resets": 6,
+      "ws_counts": [
+        1
+      ]
+    }
+  ]
+}

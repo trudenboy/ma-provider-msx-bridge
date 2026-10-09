@@ -93,8 +93,10 @@ GET /msx/audio/{player_id}?uri=<track_uri>
     ├─► wait for MSXPlayer.wait_for_media() (up to 10 s)
     └─► resolve MA Streamserver URL → redirect → TV speakers
             └─► on resolution failure: local PCM → ffmpeg proxy
-                (optional estimated Content-Length for MP3/AAC; omitted for FLAC)
+                (chunked MP3/AAC/FLAC; no estimated Content-Length)
 ```
+
+Native EOF calls `/api/complete/{player_id}` with the decoder identity. The handler validates the active occurrence, consumes the callback once and uses MA natural repeat selection. Manual Next keeps its separate skip semantics. Playback generations invalidate old queue URLs and clock frames after replace, Stop or seek.
 
 ## WebSocket Protocol
 
@@ -110,13 +112,16 @@ Connection: `GET /ws?device_id=<id>`
 | `resume` | — | Resume display |
 | `playlist` | `{url}` | Load MA queue as MSX native playlist |
 | `goto_index` | `{index}` | Jump to track N in current playlist |
-| `seek` | `{position_seconds}` | Seek to position |
+| `seek` | `{position}` | Legacy decoder seek notification |
+| `clock_reset` | `{playback_id, source_offset, source_duration, served_duration}` | Reset stream clock for new playback |
+| `state_sync` | `{enabled, state, playback_id, source_offset, source_duration, served_duration}` | Synchronize a reconnected plugin |
 
 **TV → MA messages:**
 
 | Type | Payload | Effect |
 |------|---------|--------|
-| `position` | `{seconds}` | Update `player.current_position` (overrides wall-clock for 10 s) |
+| `position` | `{position, playback_id}` | Report stream time; MA applies the source offset |
+| `seek_request` | `{position, playback_id}` | Request backend seek in source time |
 | `pause` | `{position}` | Pause player in MA |
 | `resume` | — | Resume player in MA |
 
@@ -131,3 +136,5 @@ The default `redirect` delivery mode sends the Universal Group stream URL direct
 - [Getting Started](getting-started.md) — installation and TV setup
 - [API Reference](api.md) — all HTTP endpoints
 - [Configuration](configuration.md) — provider config entries
+
+Playback frames carry `playback_id`, `source_offset`, `source_duration` and `served_duration`. Position telemetry remains stream time; source labels add the offset locally, and MA applies its own queue offset. Native `seek_request` carries source time and rebuilds the stream through MA. On reconnect, `state_sync` prevents an obsolete decoder from resuming; normal close codes remain retryable while the plugin page is active.

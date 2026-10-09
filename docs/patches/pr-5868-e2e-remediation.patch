@@ -1,0 +1,1945 @@
+diff --git a/music_assistant/controllers/player_queues/stream_feeder.py b/music_assistant/controllers/player_queues/stream_feeder.py
+index 8c9bbe6..6ed0e2c 100644
+--- a/music_assistant/controllers/player_queues/stream_feeder.py
++++ b/music_assistant/controllers/player_queues/stream_feeder.py
+@@ -258,6 +258,10 @@ class StreamFeederMixin(_PlayerQueuesBase):
+             # ignore this for flow mode
+             return
+
++        player = self.mass.players.get_player(queue_id)
++        if player is None or not player.supports_enqueue:
++            return
++
+         async def _enqueue_next_item_on_player(next_item: QueueItem) -> None:
+             # Player state updates can lag behind queue loading, so wait before validating.
+             async with self.mass.players.wait_for_player_update(
+@@ -270,6 +274,7 @@ class StreamFeederMixin(_PlayerQueuesBase):
+             player = self.mass.players.get_player(queue_id)
+             if (
+                 player is None
++                or not player.supports_enqueue
+                 or player.state.playback_state != PlaybackState.PLAYING
+                 or player.state.active_source not in (queue.queue_id, None)
+                 or queue_data.session_id != session_id
+@@ -296,10 +301,39 @@ class StreamFeederMixin(_PlayerQueuesBase):
+             if current_next is None or current_next.queue_item_id != next_item.queue_item_id:
+                 return
+
+-            await self.mass.players.enqueue_next_media(
+-                player_id=queue_id,
+-                media=await self.player_media_from_queue_item(next_item),
++            media = await self.player_media_from_queue_item(next_item)
++            # Media resolution yields: a protocol/session/item may have changed meanwhile.
++            current_player = self.mass.players.get_player(queue_id)
++            current_item = queue.current_item
++            current_next = (
++                self.get_next_item(queue_id, current_item.queue_item_id) if current_item else None
+             )
++            if (
++                current_player is not player
++                or not player.supports_enqueue
++                or player.state.playback_state != PlaybackState.PLAYING
++                or player.state.active_source not in (queue.queue_id, None)
++                or self._queue_data.get(queue_id) is not queue_data
++                or queue_data.session_id != session_id
++                or queue.flow_mode
++                or current_next is None
++                or current_next.queue_item_id != next_item.queue_item_id
++            ):
++                return
++            await self.mass.players.enqueue_next_media(player_id=queue_id, media=media)
++            current_item = queue.current_item
++            current_next = (
++                self.get_next_item(queue_id, current_item.queue_item_id) if current_item else None
++            )
++            if (
++                self.mass.players.get_player(queue_id) is not player
++                or not player.supports_enqueue
++                or self._queue_data.get(queue_id) is not queue_data
++                or queue_data.session_id != session_id
++                or current_next is None
++                or current_next.queue_item_id != next_item.queue_item_id
++            ):
++                return
+             if queue_data.next_item_id_enqueued != next_item.queue_item_id:
+                 queue_data.next_item_id_enqueued = next_item.queue_item_id
+                 self.logger.debug(
+diff --git a/music_assistant/controllers/players/controller.py b/music_assistant/controllers/players/controller.py
+index ed56a52..88b281c 100644
+--- a/music_assistant/controllers/players/controller.py
++++ b/music_assistant/controllers/players/controller.py
+@@ -2439,52 +2439,37 @@ class PlayerController(AnnouncementsMixin, AudioSourceMixin, ProtocolLinkingMixi
+             elif player.state.playback_state != PlaybackState.IDLE:
+                 await self.cmd_stop(config.player_id)
+
+-        # signal player provider that the player got enabled/disabled
+-        if (player_enabled or player_disabled) and player_provider:
+-            assert isinstance(player_provider, PlayerProvider)  # for type checking
+-            # Collect linked protocol IDs to cascade the enable/disable to.
+-            # Without this, a disabled native parent leaves its linked protocols
+-            # registered after restart; they then fail to find their parent and
+-            # get wrapped in a fresh Universal Player.
+-            cascade_protocol_ids: list[str] = []
+-            parent_is_protocol = player.state.type == PlayerType.PROTOCOL if player else False
+-            if not parent_is_protocol:
+-                if player and player.linked_output_protocols:
+-                    cascade_protocol_ids = [
+-                        link.output_protocol_id for link in player.linked_output_protocols
+-                    ]
+-                else:
+-                    cascade_protocol_ids = self._get_cached_protocol_ids(config.player_id)
+-            if player_disabled:
+-                player_provider.on_player_disabled(config.player_id)
+-            elif player_enabled:
+-                player_provider.on_player_enabled(config.player_id)
+-            for protocol_id in cascade_protocol_ids:
+-                protocol_raw = self.mass.config.get(f"{CONF_PLAYERS}/{protocol_id}")
+-                if not protocol_raw:
+-                    continue
+-                if bool(protocol_raw.get("enabled", True)) == bool(player_enabled):
+-                    continue
+-                self.mass.create_task(
+-                    self.mass.config.save_player_config(
+-                        protocol_id, {ATTR_ENABLED: bool(player_enabled)}
+-                    )
+-                )
+-            return  # enabling/disabling a player will be handled by the provider
+-
+-        if not player:
+-            return  # guard against player not being registered (yet)
+-
+         resume_queue: PlayerQueue | None = (
+             self.mass.player_queues.get(player.state.active_source)
+-            if player.state.active_source
++            if player and player.state.active_source
+             else None
+         )
+
+-        # ensure player state gets updated with any updated config
+-        player.set_config(config)
+-        await player.on_config_updated()
+-        player.update_state()
++        # Providers may retain their registered player on disable. Apply the saved
++        # config after stopping under the old state, before notifying the provider.
++        previous_config = player.config if player else None
++        try:
++            if player:
++                player.set_config(config)
++                await player.on_config_updated()
++                player.update_state()
++            if (player_enabled or player_disabled) and player_provider:
++                assert isinstance(player_provider, PlayerProvider)  # for type checking
++                self._notify_provider_player_enabled_change(
++                    player, player_provider, config, player_enabled
++                )
++                return  # enabling/disabling a player will be handled by the provider
++        except Exception:
++            # ConfigController rolls back persistence on failure; keep the retained
++            # runtime player consistent with that same previous configuration.
++            if player and previous_config:
++                player.set_config(previous_config)
++                player.update_state()
++            raise
++
++        if not player:
++            return  # guard against player not being registered (yet)
++
+         # if the PlayerQueue was playing, restart playback
+         if resume_queue and resume_queue.state == PlaybackState.PLAYING:
+             requires_restart = any(
+@@ -2571,6 +2556,41 @@ class PlayerController(AnnouncementsMixin, AudioSourceMixin, ProtocolLinkingMixi
+         """Iterate over all players."""
+         return iter(self._players.values())
+
++    def _notify_provider_player_enabled_change(
++        self,
++        player: Player | None,
++        player_provider: PlayerProvider,
++        config: PlayerConfig,
++        enabled: bool,
++    ) -> None:
++        """Notify the provider and cascade enabled state to linked protocols."""
++        # Collect linked protocol IDs to cascade the enable/disable to.
++        # Without this, a disabled native parent leaves its linked protocols
++        # registered after restart; they then fail to find their parent and
++        # get wrapped in a fresh Universal Player.
++        cascade_protocol_ids: list[str] = []
++        parent_is_protocol = player.state.type == PlayerType.PROTOCOL if player else False
++        if not parent_is_protocol:
++            if player and player.linked_output_protocols:
++                cascade_protocol_ids = [
++                    link.output_protocol_id for link in player.linked_output_protocols
++                ]
++            else:
++                cascade_protocol_ids = self._get_cached_protocol_ids(config.player_id)
++        if not enabled:
++            player_provider.on_player_disabled(config.player_id)
++        else:
++            player_provider.on_player_enabled(config.player_id)
++        for protocol_id in cascade_protocol_ids:
++            protocol_raw = self.mass.config.get(f"{CONF_PLAYERS}/{protocol_id}")
++            if not protocol_raw:
++                continue
++            if bool(protocol_raw.get("enabled", True)) == bool(enabled):
++                continue
++            self.mass.create_task(
++                self.mass.config.save_player_config(protocol_id, {ATTR_ENABLED: bool(enabled)})
++            )
++
+     async def _resolve_mac_addresses(self, player: Player) -> None:
+         """
+         Resolve and persist the MAC addresses used to match the player against protocols.
+diff --git a/music_assistant/providers/msx_bridge/audio_stream.py b/music_assistant/providers/msx_bridge/audio_stream.py
+index 2231f3c..f26b9df 100644
+--- a/music_assistant/providers/msx_bridge/audio_stream.py
++++ b/music_assistant/providers/msx_bridge/audio_stream.py
+@@ -69,9 +69,13 @@ class AudioPipeline:
+     ) -> web.StreamResponse:
+         """Serve this player's current media on this request."""
+         player_id = player.player_id
++        if not player.config.enabled:
++            raise web.HTTPNotFound(text="Player not found")
+
+         if self.provider.is_redirect_stream_mode():
+             redirect_url = await self.provider.get_ma_stream_url(player_id, media)
++            if not player.config.enabled:
++                raise web.HTTPNotFound(text="Player not found")
+             if redirect_url:
+                 redirect_url = rewrite_stream_host(request, redirect_url)
+                 logger.info(
+@@ -349,9 +353,9 @@ async def _collect_prebuffer(
+
+ def build_audio_params(
+     output_format_str: str,
+-    duration: int,
++    duration: int,  # noqa: ARG001 - retained public helper contract
+     *,
+-    include_content_length: bool = True,
++    include_content_length: bool = False,  # noqa: ARG001 - legacy config compatibility
+ ) -> tuple[AudioFormat, AudioFormat, dict[str, str]]:
+     """Build PCM input format, encoded output format, and HTTP headers."""
+     pcm_format = AudioFormat(
+@@ -372,16 +376,14 @@ def build_audio_params(
+         bit_depth=16,
+         channels=2,
+     )
+-    bitrate_map = {"mp3": 40_000, "aac": 32_000}
+-    bytes_per_sec = bitrate_map.get(output_format_str, 0)
+     headers: dict[str, str] = {
+         "Content-Type": mime_type,
+         "Cache-Control": "no-cache",
+         "Connection": "keep-alive",
+         "Accept-Ranges": "none",
+     }
+-    if include_content_length and duration and bytes_per_sec:
+-        headers["Content-Length"] = str(duration * bytes_per_sec)
++    # Streaming encoders add headers/padding and AAC may use variable bitrate.
++    # Keep the legacy argument for config compatibility, never advertise an estimate.
+     return pcm_format, out_format, headers
+
+
+diff --git a/music_assistant/providers/msx_bridge/constants.py b/music_assistant/providers/msx_bridge/constants.py
+index 514cc8e..1627e05 100644
+--- a/music_assistant/providers/msx_bridge/constants.py
++++ b/music_assistant/providers/msx_bridge/constants.py
+@@ -16,7 +16,7 @@ DEFAULT_HTTP_PORT = 8099
+ DEFAULT_OUTPUT_FORMAT = "mp3"
+ DEFAULT_PLAYER_IDLE_TIMEOUT = 30  # minutes
+ DEFAULT_SHOW_STOP_NOTIFICATION = False
+-DEFAULT_INCLUDE_CONTENT_LENGTH = True
++DEFAULT_INCLUDE_CONTENT_LENGTH = False
+
+ # Stream delivery modes
+ GROUP_STREAM_MODE_INDEPENDENT = "independent"  # Local compatibility proxy
+diff --git a/music_assistant/providers/msx_bridge/http_server.py b/music_assistant/providers/msx_bridge/http_server.py
+index 6f5fa49..d640a86 100644
+--- a/music_assistant/providers/msx_bridge/http_server.py
++++ b/music_assistant/providers/msx_bridge/http_server.py
+@@ -14,7 +14,7 @@ from urllib.parse import quote
+
+ import aiohttp
+ from aiohttp import WSMsgType, web
+-from music_assistant_models.enums import QueueOption, RepeatMode
++from music_assistant_models.enums import PlaybackState, QueueOption, RepeatMode
+ from music_assistant_models.errors import (
+     InvalidDataError,
+     MusicAssistantError,
+@@ -231,6 +231,9 @@ class MSXHTTPServer:
+             payload["next_action"] = next_action
+         if prev_action:
+             payload["prev_action"] = prev_action
++        player = self._get_msx_player(player_id)
++        if player:
++            payload.update(player.clock_context())
+         msg = json.dumps(payload)
+         for ws in list(clients):
+             if not ws.closed:
+@@ -257,6 +260,9 @@ class MSXHTTPServer:
+             "url": playlist_url,
+             "player_id": player_id,
+         }
++        player = self._get_msx_player(player_id)
++        if player:
++            payload.update(player.clock_context())
+         msg = json.dumps(payload)
+         for ws in list(clients):
+             if not ws.closed:
+@@ -285,7 +291,9 @@ class MSXHTTPServer:
+
+     def broadcast_clock_reset(self, player_id: str) -> None:
+         """Notify native playback of a new item without changing the TV playlist."""
+-        msg = json.dumps({"type": "clock_reset"})
++        player = self._get_msx_player(player_id)
++        context = player.clock_context() if player else {}
++        msg = json.dumps({"type": "clock_reset", **context})
+         for ws in list(self._ws_clients.get(player_id, set())):
+             if not ws.closed:
+                 self.provider.mass.create_task(self._ws_send(ws, msg, player_id))
+@@ -456,6 +464,7 @@ class MSXHTTPServer:
+             ("/api/quick-stop/{player_id}", self._handle_quick_stop),
+             ("/api/play-context/{player_id}", self._handle_play_context),
+             ("/api/next/{player_id}", self._handle_next),
++            ("/api/complete/{player_id}", self._handle_complete),
+             ("/api/previous/{player_id}", self._handle_previous),
+         ):
+             self.app.router.add_get(path, handler)
+@@ -931,12 +940,19 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
+             # PNG, not SVG: MSX image slots on older TV engines cannot decode SVG
+             item = MsxItem(
+                 image=f"{prefix}/api/party/qr.png",
+-                label=party.qr_text or "Scan to join the party",
++                layout="0,0,4,4",
+             )
+         content = MsxContent(
+             headline=(party.name if party else None) or "Party",
+             template=MsxTemplate(type="separate", layout="0,0,4,4"),
+-            items=[item],
++            items=[
++                item,
++                MsxItem(
++                    type="default", layout="4,0,8,4", text=party.qr_text or "Scan to join the party"
++                ),
++            ]
++            if party
++            else [item],
+         )
+         return web.json_response(dump_msx(content))
+
+@@ -1212,6 +1228,7 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
+             self.provider.mass.player_queues.items(queue_id, limit=queue.items) if queue else []
+         )
+         tracks = queue_items_to_tracks(queue_items)
++        player = self._get_msx_player(player_id)
+
+         playlist = map_tracks_to_msx_playlist(
+             tracks,
+@@ -1221,6 +1238,8 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
+             self.provider,
+             device_param,
+             qr_cover_base=await self._qr_cover_base(prefix),
++            current_media=player.current_media if player else None,
++            playback_generation=player.playback_generation if player else None,
+         )
+         return web.json_response(dump_msx(playlist))
+
+@@ -1238,7 +1257,7 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
+         requested_queue_item_id = request.query.get("queue_item_id")
+
+         player = self.provider.mass.players.get_player(player_id)
+-        if not player or not isinstance(player, MSXPlayer):
++        if not player or not isinstance(player, MSXPlayer) or not player.config.enabled:
+             return web.Response(status=404, text="Player not found")
+         if rejected := self._reject_invalid_stream_token(request, player_id):
+             return rejected
+@@ -1249,6 +1268,7 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
+                 uri,
+                 from_playlist=from_playlist,
+                 queue_item_id=requested_queue_item_id,
++                expected_generation=request.query.get("playback_generation"),
+             )
+         except InvalidDataError as err:
+             return web.Response(status=400, text=str(err))
+@@ -1258,6 +1278,7 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
+             logger.exception("Unable to prepare audio for MSX player %s", player_id)
+             return web.Response(status=503, text="Unable to prepare audio")
+
++        player.bind_native_completion(request.query.get("playback_id", ""), prepared)
+         return await self._serve_audio_stream(
+             request,
+             player,
+@@ -1319,6 +1340,14 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
+         )
+         if player and isinstance(player, MSXPlayer):
+             player.on_ws_connected()
++            await ws.send_json(
++                {
++                    "type": "state_sync",
++                    "enabled": player.config.enabled,
++                    "state": player.playback_state.value,
++                    **player.clock_context(),
++                }
++            )
+
+         try:
+             async for msg in ws:
+@@ -1364,6 +1393,24 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
+         with player.suppress_ws_notify():
+             await self.provider.mass.players.cmd_play(player_id)
+
++    async def _cmd_seek_for_generation(
++        self,
++        player_id: str,
++        queue_id: str,
++        position: int,
++        generation: str | None,
++    ) -> None:
++        """Reject a queued native seek after playback was replaced or stopped."""
++        player = self._get_msx_player(player_id)
++        if (
++            player is None
++            or player.current_media is None
++            or player.playback_generation != generation
++            or player.current_media.source_id != queue_id
++        ):
++            return
++        await self.provider.mass.player_queues.seek(queue_id, position)
++
+     def _handle_ws_message(self, player_id: str, data: str) -> None:
+         """Process an inbound WebSocket message from MSX."""
+         try:
+@@ -1376,6 +1423,29 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
+             return
+
+         msg_type = msg.get("type")
++        if msg_type in {"position", "pause", "resume", "seek", "seek_request"}:
++            msx_player = self._get_msx_player(player_id)
++            if msx_player is None:
++                return
++            if "playback_id" in msg and msg["playback_id"] != msx_player.playback_generation:
++                return
++        if msg_type == "seek_request":
++            seek_player = self._get_msx_player(player_id)
++            if seek_player is None:
++                return
++            position = msg.get("position")
++            if _is_finite_position(position):
++                queue = self.provider.mass.player_queues.get_active_queue(player_id)
++                if queue and queue.active:
++                    self.provider.mass.create_task(
++                        self._cmd_seek_for_generation(
++                            player_id,
++                            queue.queue_id,
++                            int(position),
++                            seek_player.playback_generation,
++                        )
++                    )
++            return
+         if msg_type == "position":
+             position = msg.get("position")
+             if _is_finite_position(position):
+@@ -1412,7 +1482,7 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
+         player_id = _strip_known_extension(request.match_info["player_id"])
+
+         player = self.provider.mass.players.get_player(player_id)
+-        if not player or not isinstance(player, MSXPlayer):
++        if not player or not isinstance(player, MSXPlayer) or not player.config.enabled:
+             return web.Response(status=404, text="Player not found")
+         if rejected := self._reject_invalid_stream_token(request, player_id):
+             return rejected
+@@ -1775,6 +1845,41 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
+             return _msx_execute_ok()
+         return _msx_execute_ok(self._queue_playlist_action(request, player_id))
+
++    async def _handle_complete(self, request: web.Request) -> web.Response:
++        """Complete one native decoder generation using natural MA queue selection."""
++        if rejected := self._reject_cross_site(request):
++            return rejected
++        player_id = _strip_known_extension(request.match_info["player_id"])
++        player = self._get_msx_player(player_id)
++        if player is None:
++            return web.json_response({"error": "Unknown MSX player"}, status=404)
++        async with player._prepare_lock:
++            media = player.current_media
++            queue = self.provider.mass.player_queues.get_active_queue(player_id)
++            if (
++                media is None
++                or queue is None
++                or media.source_id != queue.queue_id
++                or queue.current_item is None
++                or media.queue_item_id != queue.current_item.queue_item_id
++                or not player.claim_native_completion(request.query.get("playback_id", ""))
++            ):
++                return _msx_execute_ok()
++            next_item = self.provider.mass.player_queues.get_next_item(
++                queue.queue_id, media.queue_item_id
++            )
++            if next_item is None:
++                await self.provider.mass.player_queues.stop(queue.queue_id)
++                self.provider.mass.player_queues.mark_ended(queue.queue_id)
++                return _msx_execute_ok("[player:eject|player:hide]")
++            with player.suppress_ws_notify():
++                await self.provider.mass.player_queues.play_index(
++                    queue.queue_id, next_item.queue_item_id
++                )
++            if not player.config.enabled or player.playback_state != PlaybackState.PLAYING:
++                return _msx_execute_ok()
++            return _msx_execute_ok(self._queue_playlist_action(request, player_id))
++
+     async def _handle_previous(self, request: web.Request) -> web.Response:
+         """Skip to previous track."""
+         if rejected := self._reject_cross_site(request):
+@@ -1852,7 +1957,11 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
+     def _get_msx_player(self, player_id: str) -> MSXPlayer | None:
+         """Return the MSXPlayer for player_id if it belongs to this provider, else None."""
+         player = self.provider.mass.players.get_player(player_id, raise_unavailable=False)
+-        if isinstance(player, MSXPlayer) and player.provider == self.provider:
++        if (
++            isinstance(player, MSXPlayer)
++            and player.provider == self.provider
++            and player.config.enabled
++        ):
+             return player
+         return None
+
+diff --git a/music_assistant/providers/msx_bridge/mappers.py b/music_assistant/providers/msx_bridge/mappers.py
+index eab18c1..d5a9324 100644
+--- a/music_assistant/providers/msx_bridge/mappers.py
++++ b/music_assistant/providers/msx_bridge/mappers.py
+@@ -6,6 +6,7 @@ import logging
+ from dataclasses import dataclass
+ from typing import TYPE_CHECKING, Any
+ from urllib.parse import quote
++from uuid import uuid4
+
+ from music_assistant_models.errors import MusicAssistantError
+ from music_assistant_models.media_items import (
+@@ -26,6 +27,7 @@ if TYPE_CHECKING:
+         MediaItemImage,
+         PlayableMediaItemType,
+     )
++    from music_assistant_models.player import PlayerMedia
+
+     from .provider import MSXBridgeProvider
+
+@@ -73,7 +75,7 @@ def queue_nav_properties(player_id: str, prefix: str = "") -> dict[str, str]:
+         "button:next:action": next_action,
+         "button:prev:icon": "default",
+         "button:prev:action": prev_action,
+-        "trigger:complete": next_action,
++        "trigger:complete": "[]",
+     }
+
+
+@@ -310,6 +312,9 @@ def map_tracks_to_msx_playlist(
+     provider: MSXBridgeProvider,
+     device_param: str = "",
+     qr_cover_base: str | None = None,
++    *,
++    current_media: PlayerMedia | None = None,
++    playback_generation: str | None = None,
+ ) -> MsxContent:
+     """
+     Map tracks to an MSX playlist content page.
+@@ -350,6 +355,24 @@ def map_tracks_to_msx_playlist(
+             queue_item_id=track.queue_item_id,
+         )
+         nav = queue_nav_properties(player_id, prefix)
++        served_duration = duration
++        if current_media and track.queue_item_id == current_media.queue_item_id:
++            served_duration = current_media.stream_duration or duration
++        if served_duration > 0:
++            nav["video:duration"] = str(served_duration)
++        nav["button:rewind:icon"] = "default"
++        nav["button:rewind:action"] = "interaction:commit:message:seek:-10"
++        nav["button:forward:icon"] = "default"
++        nav["button:forward:action"] = "interaction:commit:message:seek:+10"
++        # Chunked transcodes do not provide arbitrary HTTP Range seeking.
++        nav["progress:marker:enable"] = "false"
++        playback_id = uuid4().hex
++        action += f"&playback_id={playback_id}"
++        if playback_generation:
++            action += f"&playback_generation={quote(playback_generation, safe='')}"
++        nav["trigger:complete"] = (
++            f"execute:{prefix}/api/complete/{player_id}?playback_id={playback_id}"
++        )
+
+         msx_items.append(
+             MsxItem(
+diff --git a/music_assistant/providers/msx_bridge/models.py b/music_assistant/providers/msx_bridge/models.py
+index deab47e..4e15ddc 100644
+--- a/music_assistant/providers/msx_bridge/models.py
++++ b/music_assistant/providers/msx_bridge/models.py
+@@ -29,6 +29,8 @@ class MsxTemplate(BaseModel):
+ class MsxItem(BaseModel):
+     """MSX Content Item model."""
+
++    layout: str | None = None
++    text: str | None = None
+     title: str | None = None
+     title_header: str | None = Field(default=None, serialization_alias="titleHeader")
+     label: str | None = None
+diff --git a/music_assistant/providers/msx_bridge/player.py b/music_assistant/providers/msx_bridge/player.py
+index 16ca5b7..8845ced 100644
+--- a/music_assistant/providers/msx_bridge/player.py
++++ b/music_assistant/providers/msx_bridge/player.py
+@@ -6,14 +6,15 @@ import asyncio
+ import time
+ from collections.abc import Iterator
+ from contextlib import contextmanager
+-from typing import TYPE_CHECKING, cast
++from typing import TYPE_CHECKING, Any, cast
++from uuid import uuid4
+
+ from music_assistant_models.enums import PlaybackState, PlayerFeature, PlayerType
+ from music_assistant_models.errors import MusicAssistantError, PlayerUnavailableError
+ from music_assistant_models.player import DeviceInfo
+
+ from music_assistant.constants import (
+-    CONF_ENTRY_HTTP_PROFILE_DEFAULT_3,
++    CONF_ENTRY_HTTP_PROFILE_DEFAULT_1,
+     CONF_ENTRY_OUTPUT_CODEC_DEFAULT_MP3,
+ )
+ from music_assistant.models.player import Player, PlayerMedia
+@@ -41,6 +42,8 @@ class MSXPlayer(Player):
+     _last_ws_position: float | None = None
+     _ws_ever_connected: bool = False
+     _track_started_at: float = 0.0
++    _native_completion_token: str | None = None
++    playback_generation: str | None = None
+
+     def __init__(
+         self,
+@@ -98,7 +101,7 @@ class MSXPlayer(Player):
+
+     async def get_config_entries(self) -> list[ConfigEntry]:
+         """Return per-player config entries — codec is configurable per TV."""
+-        return [CONF_ENTRY_OUTPUT_CODEC_DEFAULT_MP3, CONF_ENTRY_HTTP_PROFILE_DEFAULT_3]
++        return [CONF_ENTRY_OUTPUT_CODEC_DEFAULT_MP3, CONF_ENTRY_HTTP_PROFILE_DEFAULT_1]
+
+     def mark_available(self) -> None:
+         """Mark the player available after proof of life from the TV."""
+@@ -119,7 +122,11 @@ class MSXPlayer(Player):
+
+     async def play_media(self, media: PlayerMedia) -> None:
+         """Handle PLAY MEDIA command — store stream URL for the TV to fetch."""
++        if not self.config.enabled:
++            raise PlayerUnavailableError("Player is disabled")
+         self.logger.info("play_media on %s: uri=%s", self.display_name, media.uri)
++        self._native_completion_token = None
++        self.playback_generation = uuid4().hex
+         self.current_stream_url = media.uri
+         self._attr_current_media = media
+         self._media_ready.set()
+@@ -138,6 +145,8 @@ class MSXPlayer(Player):
+
+     async def play(self) -> None:
+         """Handle PLAY (resume) command."""
++        if not self.config.enabled:
++            raise PlayerUnavailableError("Player is disabled")
+         self.logger.info("play (resume) on %s", self.display_name)
+         if self._attr_playback_state == PlaybackState.PAUSED:
+             await self._resume_from_pause()
+@@ -162,6 +171,8 @@ class MSXPlayer(Player):
+         """Handle STOP command."""
+         self.logger.info("stop on %s", self.display_name)
+         self._attr_playback_state = PlaybackState.IDLE
++        self._native_completion_token = None
++        self.playback_generation = None
+         self._attr_current_media = None
+         self._attr_elapsed_time = None
+         self._attr_elapsed_time_last_updated = None
+@@ -175,6 +186,38 @@ class MSXPlayer(Player):
+         provider = cast("MSXBridgeProvider", self.provider)
+         provider.notify_play_stopped(self.player_id)
+
++    def clock_context(self) -> dict[str, Any]:
++        """Return source metadata separately from the decoder's stream-time clock."""
++        media = self.current_media
++        offset = 0.0
++        if media and media.source_id and media.queue_item_id:
++            item = self.mass.player_queues.get_item(media.source_id, media.queue_item_id)
++            if item and item.streamdetails:
++                offset = item.streamdetails.seek_position
++        return {
++            "playback_id": self.playback_generation,
++            "source_offset": offset,
++            "source_duration": media.duration if media else None,
++            "served_duration": self._served_duration(),
++        }
++
++    def bind_native_completion(self, token: str, media: PlayerMedia | None) -> None:
++        """Bind one native decoder request to its current media generation."""
++        if media is not None and self.current_media is media and self.config.enabled:
++            self._native_completion_token = token
++
++    def claim_native_completion(self, token: str) -> bool:
++        """Consume a decoder's completion once, rejecting stopped or replaced playback."""
++        if (
++            not token
++            or token != self._native_completion_token
++            or self.playback_state != PlaybackState.PLAYING
++            or not self.config.enabled
++        ):
++            return False
++        self._native_completion_token = None
++        return True
++
+     async def volume_set(self, volume_level: int) -> None:
+         """Handle VOLUME_SET command."""
+         self._attr_volume_level = volume_level
+diff --git a/music_assistant/providers/msx_bridge/provider.py b/music_assistant/providers/msx_bridge/provider.py
+index 19c0d1b..6212020 100644
+--- a/music_assistant/providers/msx_bridge/provider.py
++++ b/music_assistant/providers/msx_bridge/provider.py
+@@ -112,6 +112,7 @@ class MSXBridgeProvider(PlayerProvider):
+             ConfigEntry(
+                 key=CONF_INCLUDE_CONTENT_LENGTH,
+                 type=ConfigEntryType.BOOLEAN,
++                hidden=True,
+                 required=False,
+                 default_value=DEFAULT_INCLUDE_CONTENT_LENGTH,
+                 advanced=True,
+diff --git a/music_assistant/providers/msx_bridge/queue_handshake.py b/music_assistant/providers/msx_bridge/queue_handshake.py
+index 2d75286..fbb8ccb 100644
+--- a/music_assistant/providers/msx_bridge/queue_handshake.py
++++ b/music_assistant/providers/msx_bridge/queue_handshake.py
+@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
+ from music_assistant_models.errors import (
+     InvalidDataError,
+     InvalidProviderURI,
++    PlayerUnavailableError,
+     ResourceTemporarilyUnavailable,
+ )
+ from music_assistant_models.media_items import Track
+@@ -98,12 +99,19 @@ async def prepare_msx_audio(
+     *,
+     from_playlist: bool,
+     queue_item_id: str | None,
++    expected_generation: str | None = None,
+ ) -> PlayerMedia:
+     """Return the PlayerMedia MSX should stream for this URI."""
+     # Selects a queued item (or reuses current media) so MA-driven play
+     # and MSX-driven /msx/audio share one implementation.
++    if not player.config.enabled:
++        raise PlayerUnavailableError("Player is disabled")
+     provider.on_player_activity(player.player_id)
+     async with player._prepare_lock:
++        if not player.config.enabled:
++            raise PlayerUnavailableError("Player is disabled")
++        if expected_generation is not None and expected_generation != player.playback_generation:
++            raise InvalidDataError("Playback generation is no longer current")
+         return await _prepare_msx_audio_locked(
+             provider,
+             player,
+@@ -142,6 +150,8 @@ async def _prepare_msx_audio_locked(
+         await provider.mass.player_queues.play_index(*queue_item)
+
+     media = await player.wait_for_media(timeout=10.0)
++    if not player.config.enabled:
++        raise PlayerUnavailableError("Player is disabled")
+     if not media:
+         raise ResourceTemporarilyUnavailable("Playback setup timeout")
+     if media.source_id:
+diff --git a/music_assistant/providers/msx_bridge/static/input.js b/music_assistant/providers/msx_bridge/static/input.js
+index b2b5680..6dc6494 100644
+--- a/music_assistant/providers/msx_bridge/static/input.js
++++ b/music_assistant/providers/msx_bridge/static/input.js
+@@ -1,7 +1,8 @@
+ /******************************************************************************/
+ // Input Interaction Plugin v0.0.20
+ // (c) 2025 Benjamin Zachey
+-// Source: https://msx.benzac.de/interaction/input.js
++// Source: https://msx.benzac.de/interaction/js/input.js
++// Local patch: cancel/supersession generations and bounded submit loading.
+ // License: MIT (Media Station X SDK)
+ // Bundled copy — served locally to avoid external CDN dependency.
+ /******************************************************************************/
+@@ -529,6 +530,8 @@ function InputHandler() {
+     var submittedUrl = null;
+     var submittedInput = null;
+     var submitting = false;
++    var submitGeneration = 0;
++    var submitTimer = null;
+     var extending = false;
+
+     //--------------------------------------------------------------------------
+@@ -989,15 +992,18 @@ function InputHandler() {
+         return TVXTools.isFullStr(input) && input.length >= submitLength;
+     };
+     var startSubmit = function(url, input) {
++        ++submitGeneration;
+         TVXInteractionPlugin.startLoading();
+         submittedUrl = url;
+         submittedInput = input;
+         submitting = true;
+     };
+-    var processSubmit = function(url, input) {
+-        return submitting && url == submittedUrl && input == submittedInput;
++    var processSubmit = function(url, input, generation) {
++        return submitting && generation === submitGeneration && url == submittedUrl && input == submittedInput;
+     };
+     var completeSubmit = function() {
++        ++submitGeneration;
++        if (submitTimer !== null) { clearTimeout(submitTimer); submitTimer = null; }
+         TVXInteractionPlugin.stopLoading();
+         submittedUrl = null;
+         submittedInput = null;
+@@ -1085,9 +1091,17 @@ function InputHandler() {
+             TVXInteractionPlugin.executeAction("invalidate:content");
+             autoSubmit.stop();
+             startSubmit(url, input);
++            var generation = submitGeneration;
++            submitTimer = setTimeout(function() {
++                if (processSubmit(url, input, generation)) {
++                    completeSubmit();
++                    TVXInteractionPlugin.error("Search timed out. Please try again.");
++                    reloadInputContent();
++                }
++            }, 30000);
+             dataService.loadData("temp:data", createInputUrl(url, input, lang, 0, limit), {
+                 success: function(entry) {
+-                    if (processSubmit(url, input)) {
++                    if (processSubmit(url, input, generation)) {
+                         if (!handleInputResultData(url, input, entry.data, limit)) {
+                             TVXInteractionPlugin.warn("Input result data is invalid.");
+                             reloadInputContent();
+@@ -1095,13 +1109,13 @@ function InputHandler() {
+                     }
+                 },
+                 error: function(entry) {
+-                    if (processSubmit(url, input)) {
++                    if (processSubmit(url, input, generation)) {
+                         TVXInteractionPlugin.error("Input result data could not be loaded. " + completeError(entry.error));
+                         reloadInputContent();
+                     }
+                 },
+                 completed: function() {
+-                    if (processSubmit(url, input)) {
++                    if (processSubmit(url, input, generation)) {
+                         completeSubmit();
+                     }
+                 }
+@@ -1146,6 +1160,7 @@ function InputHandler() {
+                 autoSubmit.stop();
+             }
+         } else {
++            completeSubmit();
+             clearCache();
+             autoSubmit.stop();
+         }
+diff --git a/music_assistant/providers/msx_bridge/static/plugin.html b/music_assistant/providers/msx_bridge/static/plugin.html
+index cd3d9db..ff0eb69 100644
+--- a/music_assistant/providers/msx_bridge/static/plugin.html
++++ b/music_assistant/providers/msx_bridge/static/plugin.html
+@@ -64,6 +64,9 @@
+
+     var wsRetryDelay = 1000;
+     var wsConnection = null;
++    var wsRetryTimer = null;
++    var wsGeneration = 0;
++    var pluginActive = true;
+     var positionTimer = null;
+     var positionStartTime = 0;
+     var positionStartValue = 0;
+@@ -74,6 +77,10 @@
+     var pausedAtPosition = 0;
+     var monitoredElement = null;
+     var mediaObserver = null;
++    var playbackId = null;
++    var sourceOffset = 0;
++    var sourceDuration = 0;
++    var servedDuration = 0;
+
+     function stopPositionTimer() {
+         if (positionTimer) {
+@@ -96,6 +103,29 @@
+         startPositionTimer(0);
+     }
+
++    function applyClockContext(msg) {
++        playbackId = msg.playback_id || null;
++        sourceOffset = msg.source_offset || 0;
++        sourceDuration = msg.source_duration || 0;
++        servedDuration = msg.served_duration || 0;
++    }
++
++    function displaySourcePosition(position) {
++        if (typeof tvx.InteractionPlugin.executeAction !== "function") return;
++        var sourcePosition = Math.max(0, position + sourceOffset);
++        if (sourceDuration > 0) sourcePosition = Math.min(sourcePosition, sourceDuration);
++        tvx.InteractionPlugin.executeAction("player:label:position:" + (formatDuration(sourcePosition) || "0:00"));
++        if (sourceDuration > 0) {
++            tvx.InteractionPlugin.executeAction("player:label:duration:" + formatDuration(sourceDuration));
++            tvx.InteractionPlugin.executeAction("player:progress:duration:" + sourceDuration);
++            tvx.InteractionPlugin.executeAction("player:progress:position:" + sourcePosition);
++        } else {
++            tvx.InteractionPlugin.executeAction("player:label:duration:default");
++            tvx.InteractionPlugin.executeAction("player:progress:duration:-1");
++            tvx.InteractionPlugin.executeAction("player:progress:position:-1");
++        }
++    }
++
+     function startPositionTimer(startPosition) {
+         stopPositionTimer();
+         positionStartValue = startPosition || 0;
+@@ -111,32 +141,53 @@
+                     }
+                 }
+                 try {
+-                    wsConnection.send(JSON.stringify({ type: "position", position: position }));
++                    if (servedDuration > 0) position = Math.min(position, servedDuration);
++                    displaySourcePosition(position);
++                    wsConnection.send(JSON.stringify({ type: "position", position: position, playback_id: playbackId }));
+                 } catch (e) {
+                     if (typeof console !== "undefined" && console.warn) {
+                         console.warn("WebSocket position send failed", e);
+                     }
+                 }
+             }
+-        }, 3000);
++        }, 1000);
+     }
+
+     function connectPushWebSocket(deviceId) {
+         if (typeof WebSocket === "undefined") return null;
++        if (!pluginActive) return null;
++        if (wsRetryTimer !== null) { clearTimeout(wsRetryTimer); wsRetryTimer = null; }
++        var generation = ++wsGeneration;
++        var previous = wsConnection;
++        wsConnection = null;
++        if (previous && typeof previous.close === "function") previous.close();
+         var url = deviceId ? WS_URL + "?device_id=" + encodeURIComponent(deviceId) : WS_URL;
+         var ws = new WebSocket(url);
+         var thisConnection = ws;
+         wsConnection = ws;
+-        ws.onopen = function() { wsRetryDelay = 1000; };
++        ws.onopen = function() {
++            if (wsConnection !== thisConnection || !pluginActive) return;
++            wsRetryDelay = 1000;
++        };
+         ws.onmessage = function(ev) {
++            if (wsConnection !== thisConnection || !pluginActive) return;
+             try {
+                 var msg = JSON.parse(ev.data);
+-                if (msg.type === "clock_reset") {
++                if (msg.type === "state_sync") {
++                    var samePlayback = playbackId && playbackId === msg.playback_id;
++                    if (!msg.enabled || (!samePlayback && playbackId)) {
++                        stopPositionTimer();
++                        tvx.InteractionPlugin.executeAction("[player:eject|player:hide]");
++                    }
++                    applyClockContext(msg);
++                    if (samePlayback && msg.state === "playing") startPositionTimer(getCurrentPosition());
++                } else if (msg.type === "clock_reset") {
++                    applyClockContext(msg);
+                     resetPlaybackClock();
+                 } else if (msg.type === "stop" && typeof tvx.InteractionPlugin.executeAction === "function") {
+                     stopPositionTimer();
+                     clearPendingServerSeek();
+-                    var action = msg.showNotification ? "eject" : "[player:eject|player:hide]";
++                    var action = msg.showNotification ? "[player:eject|player:hide|info:Playback stopped.]" : "[player:eject|player:hide]";
+                     tvx.InteractionPlugin.executeAction(action);
+                 } else if (msg.type === "pause" && typeof tvx.InteractionPlugin.executeAction === "function") {
+                     pausedAtPosition = monitoredElement ? monitoredElement.currentTime : getCurrentPosition();
+@@ -162,12 +213,14 @@
+                     if (msg.prev_action) data.prevAction = resolveAction(msg.prev_action);
+                     resetPlaybackClock();
+
++                    applyClockContext(msg);
+                     var audioUrl = BRIDGE + msg.path;
+                     var audioAction = "audio:" + audioUrl;
+                     tvx.InteractionPlugin.executeAction(audioAction, data);
+                     scanForMediaElements();
+                 } else if (msg.type === "playlist" && msg.url && typeof tvx.InteractionPlugin.executeAction === "function") {
+                     var playlistUrl = BRIDGE + addDeviceParam(msg.url, deviceId);
++                    applyClockContext(msg);
+                     resetPlaybackClock();
+                     tvx.InteractionPlugin.executeAction("playlist:" + playlistUrl);
+                     scanForMediaElements();
+@@ -214,15 +267,30 @@
+             if (wsConnection !== thisConnection) return; // stale connection
+             stopPositionTimer();
+             wsConnection = null;
+-            if (event.code !== 1000 && event.code !== 1001) {
++            if (pluginActive) {
+                 var jitter = Math.random() * 1000;
+-                setTimeout(function() { connectPushWebSocket(deviceId); }, wsRetryDelay + jitter);
++                wsRetryTimer = setTimeout(function() {
++                    wsRetryTimer = null;
++                    if (pluginActive && generation === wsGeneration) connectPushWebSocket(deviceId);
++                }, wsRetryDelay + jitter);
+                 wsRetryDelay = Math.min(wsRetryDelay * 2, 10000);
+             }
+         };
+         return ws;
+     }
+
++    if (typeof window.addEventListener === "function") {
++        window.addEventListener("pagehide", function() {
++            pluginActive = false;
++            ++wsGeneration;
++            if (wsRetryTimer !== null) { clearTimeout(wsRetryTimer); wsRetryTimer = null; }
++            stopPositionTimer();
++            var connection = wsConnection;
++            wsConnection = null;
++            if (connection && typeof connection.close === "function") connection.close();
++        });
++    }
++
+     function MAHandler() {}
+
+     function getCurrentPosition() {
+@@ -230,6 +298,7 @@
+     }
+
+     function sendWsMessage(msg) {
++        msg.playback_id = playbackId;
+         if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
+             try {
+                 wsConnection.send(JSON.stringify(msg));
+@@ -485,8 +554,11 @@
+                 if (ws) {
+                     var origOnOpen = ws.onopen;
+                     ws.onopen = function() {
++                        if (wsConnection !== ws || !pluginActive) return;
+                         if (origOnOpen) origOnOpen.apply(this, arguments);
+-                        setTimeout(function() { sendDebugInfoToServer(ws); }, 500);
++                        setTimeout(function() {
++                            if (wsConnection === ws && pluginActive) sendDebugInfoToServer(ws);
++                        }, 500);
+                     };
+                 }
+                 startMediaObserver();
+@@ -515,6 +587,19 @@
+         }
+     };
+
++    MAHandler.prototype.handleData = function(data) {
++        if (!data || typeof data.message !== "string") return;
++        if (data.message.indexOf("seek:") === 0) {
++            var delta = Number(data.message.substring(5));
++            if (!isFinite(delta)) return;
++            var position = (positionTimer ? getCurrentPosition() : pausedAtPosition) + sourceOffset + delta;
++            position = Math.max(0, position);
++            if (sourceDuration > 0) position = Math.min(position, Math.max(0, sourceDuration - 1));
++            // MA recreates the stream at the source offset; do not fake a decoder seek.
++            sendWsMessage({ type: "seek_request", position: position });
++        }
++    };
++
+     MAHandler.prototype.handleEvent = function(data) {
+         // Native MSX playback lives outside this plugin's DOM, so its media
+         // events arrive here rather than on a local audio/video element.
+diff --git a/tests/controllers/player_queues/test_stream_feeder.py b/tests/controllers/player_queues/test_stream_feeder.py
+index 667dda5..1588fa3 100644
+--- a/tests/controllers/player_queues/test_stream_feeder.py
++++ b/tests/controllers/player_queues/test_stream_feeder.py
+@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any, cast
+ from unittest.mock import AsyncMock, MagicMock
+
+ import pytest
+-from music_assistant_models.enums import MediaType, PlaybackState, RepeatMode
++from music_assistant_models.enums import MediaType, PlaybackState, PlayerFeature, RepeatMode
+ from music_assistant_models.errors import QueueEmpty
+ from music_assistant_models.player_queue import PlayerQueue
+ from music_assistant_models.queue_item import QueueItem
+@@ -19,6 +19,7 @@ from music_assistant.controllers.player_queues import PlayerQueuesController
+ from music_assistant.controllers.player_queues.state import PlayerQueueData
+ from music_assistant.controllers.streams.constants import STREAM_SLOT_WAIT_TIMEOUT
+ from music_assistant.models.music_provider import MusicProvider, ProviderStreamLimitError
++from tests.common import MockPlayer, MockProvider
+
+ if TYPE_CHECKING:
+     from music_assistant.mass import MusicAssistant
+@@ -43,13 +44,12 @@ async def test_enqueue_next_item_waits_for_playing_player_update(index_in_buffer
+         await release_wait.wait()
+         yield
+
+-    player_state = SimpleNamespace(
+-        playback_state=PlaybackState.IDLE,
+-        active_source="q1",
+-    )
+-    player = SimpleNamespace(state=player_state)
+-
+     mass = MagicMock()
++    player = MockPlayer(MockProvider("test", mass=mass), "q1", "Enqueue capable")
++    player._attr_supported_features.add(PlayerFeature.ENQUEUE)
++    player._cache.clear()
++    player_state = player.state
++    player_state.active_source = "q1"
+     mass.players = MagicMock()
+     mass.players.wait_for_player_update = MagicMock(side_effect=wait_for_player_update)
+     mass.players.get_player = MagicMock(return_value=player)
+@@ -105,6 +105,55 @@ async def test_enqueue_next_item_waits_for_playing_player_update(index_in_buffer
+     assert controller._queue_data["q1"].next_item_id_enqueued == next_item.queue_item_id
+
+
++@pytest.mark.parametrize("change", ["session", "capability", "next_item", "queue_replaced"])
++async def test_enqueue_does_not_publish_a_stale_handover(change: str) -> None:
++    """A replaced session during enqueue never claims a next item for the new queue."""
++    controller = PlayerQueuesController.__new__(PlayerQueuesController)
++    controller.logger = MagicMock()
++    current, next_item = _make_queue_item("q1", "current"), _make_queue_item("q1", "next")
++    queue = PlayerQueue(
++        queue_id="q1",
++        active=True,
++        display_name="Q1",
++        available=True,
++        items=2,
++        current_index=0,
++        current_item=current,
++    )
++    data = PlayerQueueData(queue=queue, items=[current, next_item], session_id="old")
++    controller._queue_data = {"q1": data}
++    player = SimpleNamespace(
++        supports_enqueue=True,
++        state=SimpleNamespace(playback_state=PlaybackState.PLAYING, active_source="q1"),
++    )
++    mass = MagicMock()
++    controller.mass = mass
++    mass.players.get_player.return_value = player
++
++    @asynccontextmanager
++    async def ready(*_args: object, **_kwargs: object) -> AsyncIterator[None]:
++        yield
++
++    mass.players.wait_for_player_update.side_effect = ready
++    controller.player_media_from_queue_item = AsyncMock(return_value=MagicMock())  # type: ignore[method-assign]
++
++    async def enqueue(**_kwargs: object) -> None:
++        if change == "session":
++            data.session_id = "new"
++        elif change == "capability":
++            player.supports_enqueue = False
++        elif change == "next_item":
++            data.items = [current, _make_queue_item("q1", "different")]
++        else:
++            controller._queue_data["q1"] = PlayerQueueData(queue=queue, items=[current, next_item])
++
++    mass.players.enqueue_next_media = AsyncMock(side_effect=enqueue)
++    controller._enqueue_next_item("q1", next_item)
++    await mass.call_later.call_args.args[1](next_item)
++    assert data.next_item_id_enqueued is None
++    assert controller._queue_data["q1"].next_item_id_enqueued is None
++
++
+ def _make_queue_item(queue_id: str, item_id: str) -> QueueItem:
+     """Build a minimal playable queue item."""
+     return QueueItem(
+@@ -702,3 +751,16 @@ async def test_a_repeated_prepare_joins_a_preparation_that_skipped_ahead() -> No
+     preparation.cancel()
+     with pytest.raises(asyncio.CancelledError):
+         await preparation
++
++
++def test_non_enqueue_player_does_not_schedule_handover() -> None:
++    """Non-enqueue output protocols must not receive delayed enqueue commands."""
++    controller, next_item, mass = _controller_with_next_item()
++    controller._queue_data["queue-1"].queue.flow_mode = False
++    mass.players.get_player.return_value = MockPlayer(
++        MockProvider("test_provider", mass=mass), "queue-1", "Non-enqueue player"
++    )
++
++    controller._enqueue_next_item("queue-1", cast("QueueItem", next_item))
++
++    mass.call_later.assert_not_called()
+diff --git a/tests/controllers/players/test_player_controller.py b/tests/controllers/players/test_player_controller.py
+index 3c719d1..d5d4750 100644
+--- a/tests/controllers/players/test_player_controller.py
++++ b/tests/controllers/players/test_player_controller.py
+@@ -49,6 +49,7 @@ from music_assistant_models.player_queue import PlayerQueue
+
+ from music_assistant.constants import (
+     ANNOUNCE_ALERT_FILE,
++    ATTR_ENABLED,
+     ATTR_FAKE_MUTE,
+     ATTR_MUTE_LOCK,
+     ATTR_POWER_OFF_IN_PROGRESS,
+@@ -7426,3 +7427,88 @@ class TestAddCurrentlyPlayingToFavorites:
+
+ if __name__ == "__main__":
+     pytest.main([__file__, "-v"])
++
++
++class TestRetainedPlayerEnabledState:
++    """Retained players must use the saved enabled setting for command admission."""
++
++    @pytest.mark.parametrize("enabled", [False, True])
++    async def test_saved_enabled_setting_updates_retained_player(
++        self, mock_mass: MagicMock, enabled: bool
++    ) -> None:
++        """Disable blocks commands; enable admits them without rediscovering the player."""
++        controller = PlayerController(mock_mass)
++        mock_mass.players = controller
++        mock_mass.player_queues.get.return_value = None
++        provider = MockProvider("test_provider", instance_id="test_prov", mass=mock_mass)
++        player = MockPlayer(provider, "player_1", "Retained player")
++        player.set_config(
++            PlayerConfig(provider="test_prov", player_id="player_1", values={}, enabled=not enabled)
++        )
++        controller._players[player.player_id] = player
++        hooks = MagicMock(spec=PlayerProvider)
++        mock_mass.get_provider.return_value = hooks
++        config = PlayerConfig(
++            provider="test_prov", player_id="player_1", values={}, enabled=enabled
++        )
++
++        await controller.on_player_config_change(config, {ATTR_ENABLED})
++
++        assert player.config.enabled is enabled
++        assert player.state.enabled is enabled
++        if enabled:
++            assert controller.get_player("player_1", raise_unavailable=True) is player
++            hooks.on_player_enabled.assert_called_once_with("player_1")
++        else:
++            with pytest.raises(PlayerUnavailableError):
++                controller.get_player("player_1", raise_unavailable=True)
++            hooks.on_player_disabled.assert_called_once_with("player_1")
++
++
++async def test_disabling_an_unregistering_provider_updates_before_its_hook(
++    mock_mass: MagicMock,
++) -> None:
++    """A provider may unregister its player after observing the updated disabled config."""
++    controller = PlayerController(mock_mass)
++    mock_mass.players = controller
++    mock_mass.player_queues.get.return_value = None
++    player = MockPlayer(MockProvider("test_provider", mass=mock_mass), "player_1", "Player")
++    player.set_config(
++        PlayerConfig(provider="test_prov", player_id="player_1", values={}, enabled=True)
++    )
++    controller._players[player.player_id] = player
++    hooks = MagicMock(spec=PlayerProvider)
++    mock_mass.get_provider.return_value = hooks
++
++    def unregister(player_id: str) -> None:
++        assert player.config.enabled is False
++        controller._players.pop(player_id)
++
++    hooks.on_player_disabled.side_effect = unregister
++    await controller.on_player_config_change(
++        PlayerConfig(provider="test_prov", player_id="player_1", values={}, enabled=False),
++        {ATTR_ENABLED},
++    )
++    assert controller.get_player("player_1") is None
++
++
++async def test_failed_disable_keeps_the_previous_runtime_config(mock_mass: MagicMock) -> None:
++    """A rejected config save must not leave the retained player disabled in memory."""
++    controller = PlayerController(mock_mass)
++    mock_mass.players = controller
++    mock_mass.player_queues.get.return_value = None
++    player = MockPlayer(MockProvider("test_provider", mass=mock_mass), "player_1", "Player")
++    original = PlayerConfig(provider="test_prov", player_id="player_1", values={}, enabled=True)
++    player.set_config(original)
++    controller._players[player.player_id] = player
++    hooks = MagicMock(spec=PlayerProvider)
++    hooks.on_player_disabled.side_effect = RuntimeError("Provider rejected disable")
++    mock_mass.get_provider.return_value = hooks
++
++    with pytest.raises(RuntimeError, match="Provider rejected disable"):
++        await controller.on_player_config_change(
++            PlayerConfig(provider="test_prov", player_id="player_1", values={}, enabled=False),
++            {ATTR_ENABLED},
++        )
++    assert player.config is original
++    assert player.state.enabled is True
+diff --git a/tests/providers/msx_bridge/input_runtime.cjs b/tests/providers/msx_bridge/input_runtime.cjs
+new file mode 100644
+index 0000000..4d01043
+--- /dev/null
++++ b/tests/providers/msx_bridge/input_runtime.cjs
+@@ -0,0 +1,65 @@
++// Exercise the shipped TVX URL/service/delay implementation at its transport boundary.
++const fs = require('fs'), vm = require('vm');
++const input = JSON.parse(fs.readFileSync(0, 'utf8'));
++let handler, busy = false, result = null;
++const pending = [], timers = new Map(); let sequence = 0;
++const context = {
++    console: {log() {}, warn() {}}, navigator: {userAgent: 'MSX test'}, document: {},
++    location: {protocol: 'http:', href: 'http://ma:8099/msx/input.html', search: ''},
++    addEventListener() {}, parent: {postMessage() {}}, frames: [],
++    setTimeout: (fn, delay) => {let id = ++sequence; timers.set(id, {fn, delay}); return id;},
++    clearTimeout: id => timers.delete(id), setInterval: () => 1, clearInterval() {},
++};
++context.window = context;
++vm.createContext(context);
++vm.runInContext(input.library, context);
++context.TVXPluginTools.onReady = fn => fn();
++context.TVXInteractionPlugin.setupHandler = h => {handler = h;};
++context.TVXInteractionPlugin.init = () => {};
++context.TVXInteractionPlugin.requestData = (id, cb) => cb({info: {id: 'pixel', application: {name: 'Media Station X', version: '0.1.165'}}});
++context.TVXInteractionPlugin.executeAction = () => {};
++context.TVXInteractionPlugin.startLoading = () => {busy = true;};
++context.TVXInteractionPlugin.stopLoading = () => {busy = false;};
++context.TVXInteractionPlugin.warn = context.TVXInteractionPlugin.error = () => {};
++context.TVXAjaxService = {executeRequest(method, url, data, callbacks) {pending.push({url, callbacks}); return true;}};
++vm.runInContext(input.script, context);
++handler.ready();
++const dataId = 'http://ma:8099/msx/search-input.json?q={INPUT}|search:3|en|Search';
++handler.handleRequest(dataId, null, () => {});
++function flush() {for (const [id, timer] of [...timers]) {if (timer.delay === 3000) {timers.delete(id); timer.fn();}}}
++function type(text) {for (const c of text) handler.handleData({message: 'input:' + c}); flush();}
++function response(index, title) {pending[index].callbacks.success({template: {type: 'list'}, items: [{title}], compress: true});}
++if (input.scenario === 'cancel') {
++    type('abc');
++    handler.handleData({message: 'control:back'});
++    if (busy) throw new Error('Cancelled short query left native loading active');
++} else if (input.scenario === 'stale') {
++    type('abc');
++    handler.handleData({message: 'control:back'});
++    type('c');
++    response(0, 'old');
++    if (!busy) throw new Error('Old same-query response completed the new request');
++    response(1, 'new');
++    handler.handleRequest(dataId, null, data => {result = data;});
++    if (busy || !JSON.stringify(result).includes('new')) throw new Error('Current search result not displayed');
++} else if (input.scenario === 'timeout') {
++    type('abc');
++    for (const [id, timer] of [...timers]) {timers.delete(id); timer.fn();}
++    if (busy) throw new Error('Timeout left loading active');
++    response(0, 'old');
++    if (busy) throw new Error('Late timeout response revived loading');
++} else if (input.scenario === 'error') {
++    type('abc');
++    pending[0].callbacks.error('Network failure');
++    if (busy) throw new Error('Error left loading active');
++    type('d');
++    response(1, 'retry');
++    if (busy) throw new Error('Retry left loading active');
++} else {
++    type(input.query);
++    if (pending.length !== 1) throw new Error('Debounce failed');
++    if (new URL(pending[0].url).searchParams.get('q') !== input.query) throw new Error('Query encoding changed');
++    response(0, 'found');
++    if (busy) throw new Error('Success did not finish loading');
++}
++process.stdout.write('ok');
+diff --git a/tests/providers/msx_bridge/test_audio_stream.py b/tests/providers/msx_bridge/test_audio_stream.py
+new file mode 100644
+index 0000000..7085f9e
+--- /dev/null
++++ b/tests/providers/msx_bridge/test_audio_stream.py
+@@ -0,0 +1,82 @@
++"""HTTP framing must agree with the output of the actual MA encoder."""
++
++from __future__ import annotations
++
++from collections.abc import AsyncGenerator
++from types import SimpleNamespace
++from typing import TYPE_CHECKING, Any
++from unittest.mock import Mock
++
++import pytest
++from aiohttp import web
++from aiohttp.test_utils import TestClient, TestServer
++from music_assistant_models.player import PlayerMedia
++
++from music_assistant.helpers.ffmpeg import get_ffmpeg_stream
++from music_assistant.providers.msx_bridge.audio_stream import build_audio_params
++from music_assistant.providers.msx_bridge.http_server import MSXHTTPServer
++
++if TYPE_CHECKING:
++    from music_assistant.providers.msx_bridge.player import MSXPlayer
++    from music_assistant.providers.msx_bridge.provider import MSXBridgeProvider
++
++
++@pytest.mark.parametrize("codec", ["mp3", "aac", "flac"])
++@pytest.mark.parametrize("include_length", [False, True])
++async def test_encoded_output_never_advertises_an_estimated_size(
++    codec: str, include_length: bool
++) -> None:
++    """One second of PCM has a variable encoded size, including codec headers and padding."""
++    pcm, encoded, headers = build_audio_params(codec, 1, include_content_length=include_length)
++
++    async def source() -> AsyncGenerator[bytes]:
++        yield bytes(44100 * 2 * 2)
++
++    body = b"".join(
++        [
++            chunk
++            async for chunk in get_ffmpeg_stream(
++                audio_input=source(),
++                input_format=pcm,
++                output_format=encoded,
++            )
++        ]
++    )
++    assert len(body) > 0
++    if "Content-Length" in headers:
++        assert int(headers["Content-Length"]) == len(body)
++
++
++@pytest.mark.parametrize("codec", ["mp3", "aac", "flac"])
++async def test_independent_http_body_reaches_real_encoder_eof(
++    provider: MSXBridgeProvider,
++    player: MSXPlayer,
++    mass_mock: Mock,
++    codec: str,
++) -> None:
++    """The product HTTP producer delivers the entire encoded body without a guessed size."""
++    server = MSXHTTPServer(provider, 0)
++    media = PlayerMedia(uri="http://synthetic", duration=1)
++    await player.play_media(media)
++
++    async def source(*_args: Any, **_kwargs: Any) -> AsyncGenerator[bytes]:
++        yield bytes(44100 * 2 * 2)
++
++    mass_mock.streams.get_stream = source
++    mass_mock.streams.audio.get_player_output_plan.return_value = SimpleNamespace(filter_params=[])
++    pcm, encoded, headers = build_audio_params(codec, 1, include_content_length=True)
++
++    async def serve(request: web.Request) -> web.StreamResponse:
++        return await server.audio.serve_independent(request, player, media, pcm, encoded, headers)
++
++    app = web.Application()
++    app.router.add_get("/synthetic", serve)
++    async with TestClient(TestServer(app)) as client:
++        response = await client.get("/synthetic")
++        body = await response.read()
++        assert response.status == 200
++        assert response.headers.get("Transfer-Encoding") == "chunked"
++        assert "Content-Length" not in response.headers
++        assert len(body) > 0
++    assert not server.audio.active_stream_tasks
++    assert not server.audio.active_stream_transports
+diff --git a/tests/providers/msx_bridge/test_http_server.py b/tests/providers/msx_bridge/test_http_server.py
+index b54644e..4e4a10b 100644
+--- a/tests/providers/msx_bridge/test_http_server.py
++++ b/tests/providers/msx_bridge/test_http_server.py
+@@ -11,6 +11,7 @@ from urllib.parse import parse_qs, quote, urlsplit
+
+ import aiohttp
+ import pytest
++from aiohttp import web
+ from aiohttp.test_utils import TestClient as AiohttpTestClient
+ from aiohttp.test_utils import TestServer
+ from music_assistant_models.enums import (
+@@ -2367,18 +2368,17 @@ async def test_msx_audio_arms_wait_before_enqueue(
+ # --- Served audio length (Content-Length) ---
+
+
+-@pytest.mark.parametrize(("codec", "expected"), [("mp3", "1872000000"), ("aac", "1497600000")])
+-def test_long_audio_content_length_covers_the_full_item(codec: str, expected: str) -> None:
+-    """A thirteen-hour item must not be truncated to twelve hours by its headers."""
++@pytest.mark.parametrize("codec", ["mp3", "aac", "flac"])
++def test_long_audio_never_advertises_an_estimated_length(codec: str) -> None:
++    """Unknown encoded size remains chunked even for thirteen-hour items."""
+     _pcm, _out, headers = build_audio_params(codec, 46800)
+-    assert headers["Content-Length"] == expected
++    assert "Content-Length" not in headers
+
+
+-def test_audio_params_include_content_length_by_default() -> None:
+-    """The compatibility header remains enabled by default."""
++def test_audio_params_omit_content_length_by_default() -> None:
++    """Native playback must receive the encoder's actual EOF."""
+     _pcm, _out, headers = build_audio_params("mp3", 180)
+-
+-    assert headers["Content-Length"] == str(180 * 40_000)
++    assert "Content-Length" not in headers
+
+
+ def test_audio_params_can_omit_content_length() -> None:
+@@ -3121,3 +3121,122 @@ async def test_native_queue_advances_without_authentication(
+         await client.close()
+         current_user.reset(user_context)
+         impersonated_user.reset(owner_context)
++
++
++@pytest.mark.parametrize("path", ["/msx/audio/msx_test?uri=library://track/1", "/stream/msx_test"])
++async def test_disabled_native_stream_is_rejected(
++    http_client: TestClient[Any, Any],
++    mass_mock: Mock,
++    player: MSXPlayer,
++    player_config_mock: Mock,
++    provider: MSXBridgeProvider,
++    path: str,
++) -> None:
++    """A disabled player cannot fetch or prepare native audio."""
++    player_config_mock.enabled = False
++    mass_mock.players.get_player.return_value = player
++    separator = "&" if "?" in path else "?"
++    response = await http_client.get(
++        path + separator + "token=" + provider.get_stream_token("msx_test")
++    )
++    assert response.status == 404
++    mass_mock.player_queues.play_index.assert_not_awaited()
++
++
++async def test_stale_decoder_position_cannot_move_replacement_track(
++    provider: MSXBridgeProvider,
++    mass_mock: Mock,
++    player: MSXPlayer,
++) -> None:
++    """A late frame from an earlier decoder cannot change the new item's clock."""
++    server = MSXHTTPServer(provider, 0)
++    mass_mock.players.get_player.return_value = player
++    await player.play_media(PlayerMedia(uri="http://ma/old", duration=180))
++    old = player.clock_context()["playback_id"]
++    await player.play_media(PlayerMedia(uri="http://ma/new", duration=180))
++    server._handle_ws_message(
++        player.player_id, json.dumps({"type": "position", "position": 1, "playback_id": old})
++    )
++    assert player.elapsed_time == 0
++
++
++async def test_queued_native_seek_cannot_retarget_replacement_playback(
++    provider: MSXBridgeProvider,
++    mass_mock: Mock,
++    player: MSXPlayer,
++) -> None:
++    """A seek waiting to run belongs to the decoder which requested it."""
++    server = MSXHTTPServer(provider, 0)
++    mass_mock.players.get_player.return_value = player
++    mass_mock.player_queues.seek = AsyncMock()
++    await player.play_media(
++        PlayerMedia(uri="http://ma/old", source_id="msx_test", queue_item_id="old")
++    )
++    queue = PlayerQueue(
++        queue_id="msx_test", active=True, display_name="Queue", available=True, items=1
++    )
++    mass_mock.player_queues.get_active_queue.return_value = queue
++    old = player.playback_generation
++    server._handle_ws_message(
++        player.player_id, json.dumps({"type": "seek_request", "position": 120, "playback_id": old})
++    )
++    pending = mass_mock.create_task.call_args.args[0]
++    await player.play_media(
++        PlayerMedia(uri="http://ma/new", source_id="msx_test", queue_item_id="new")
++    )
++    await pending
++    mass_mock.player_queues.seek.assert_not_awaited()
++
++
++async def test_disable_during_redirect_resolution_rejects_the_resolved_stream(
++    provider: MSXBridgeProvider,
++    player: MSXPlayer,
++) -> None:
++    """A URL resolved after disable cannot start an independent or redirected decoder."""
++    server = MSXHTTPServer(provider, 0)
++    provider.is_redirect_stream_mode = Mock(return_value=True)  # type: ignore[method-assign]
++
++    async def resolve(*_args: object) -> str:
++        player.config.enabled = False
++        return "http://ma/audio"
++
++    provider.get_ma_stream_url = AsyncMock(side_effect=resolve)  # type: ignore[method-assign]
++    with pytest.raises(web.HTTPNotFound):
++        await server.audio.serve(Mock(), player, PlayerMedia(uri="http://ma/track"))
++    assert not server._active_stream_tasks
++
++
++async def test_old_playlist_generation_cannot_rebind_a_repeat_decoder(
++    http_client: TestClient[Any, Any],
++    provider: MSXBridgeProvider,
++    player: MSXPlayer,
++    mass_mock: Mock,
++) -> None:
++    """Even the same occurrence must reject audio from the previous repeat generation."""
++    media = PlayerMedia(uri="http://ma/track", source_id=player.player_id, queue_item_id="same")
++    await player.play_media(media)
++    old = player.playback_generation
++    assert old is not None
++    await player.play_media(media)
++    mass_mock.players.get_player.return_value = player
++    item = Mock(uri="library://track/1", queue_item_id="same", streamdetails=None, duration=180)
++    mass_mock.player_queues.get_active_queue.return_value = Mock(queue_id=player.player_id, items=1)
++    mass_mock.player_queues.items.return_value = [item]
++    mass_mock.player_queues.get_item.return_value = item
++    provider.get_ma_stream_url = AsyncMock(return_value="http://ma/encoded")  # type: ignore[method-assign]
++    token = provider.get_stream_token(player.player_id)
++    response = await http_client.get(
++        "/msx/audio/msx_test",
++        params={
++            "uri": "library://track/1",
++            "token": token,
++            "from_playlist": "1",
++            "queue_item_id": "same",
++            "playback_id": "old-decoder",
++            "playback_generation": old,
++        },
++        allow_redirects=False,
++    )
++    assert response.status == 400
++    mass_mock.player_queues.play_index.assert_not_awaited()
++    assert not player.claim_native_completion("old-decoder")
+diff --git a/tests/providers/msx_bridge/test_input_runtime.py b/tests/providers/msx_bridge/test_input_runtime.py
+new file mode 100644
+index 0000000..e0b6792
+--- /dev/null
++++ b/tests/providers/msx_bridge/test_input_runtime.py
+@@ -0,0 +1,49 @@
++"""Native search regressions through the real shipped TVX Input Plugin."""
++
++from __future__ import annotations
++
++import json
++import shutil
++import subprocess
++from pathlib import Path
++
++import pytest
++
++from music_assistant.providers.msx_bridge import http_server
++
++
++@pytest.mark.parametrize(
++    ("scenario", "query"),
++    [
++        ("cancel", ""),
++        ("stale", ""),
++        ("timeout", ""),
++        ("error", ""),
++        ("success", "trooper"),
++        ("success", "ЧайФ & | @"),
++        ("success", "no hits"),
++    ],
++)
++def test_native_input_completion_and_cancellation(scenario: str, query: str) -> None:
++    """Cancelled or superseded requests never leave busy or replace a newer result."""
++    node = shutil.which("node")
++    if not node:
++        pytest.skip("Native input runtime tests require Node.js")
++    static = Path(http_server.__file__).parent / "static"
++    runner = Path(__file__).with_name("input_runtime.cjs")
++    result = subprocess.run(  # noqa: S603 - fixed runtime and shipped code
++        [node, str(runner)],
++        input=json.dumps(
++            {
++                "library": (static / "tvx-plugin.min.js").read_text(),
++                "script": (static / "input.js").read_text(),
++                "scenario": scenario,
++                "query": query,
++            }
++        ),
++        text=True,
++        capture_output=True,
++        check=False,
++    )
++    assert result.returncode == 0, result.stderr
++    assert result.stdout == "ok"
+diff --git a/tests/providers/msx_bridge/test_mappers.py b/tests/providers/msx_bridge/test_mappers.py
+index e06f3a4..93af957 100644
+--- a/tests/providers/msx_bridge/test_mappers.py
++++ b/tests/providers/msx_bridge/test_mappers.py
+@@ -102,7 +102,7 @@ def test_map_track_to_msx() -> None:
+     assert "uri=library%3A%2F%2Ftrack%2F1" in item.action
+     assert "device_id=abc" in item.action
+     assert item.properties is not None
+-    assert item.properties["trigger:complete"] == "execute:http://localhost/api/next/msx_123"
++    assert item.properties["trigger:complete"] == "[]"
+
+
+ def test_map_track_to_msx_play_context() -> None:
+diff --git a/tests/providers/msx_bridge/test_native_completion.py b/tests/providers/msx_bridge/test_native_completion.py
+new file mode 100644
+index 0000000..7cb594b
+--- /dev/null
++++ b/tests/providers/msx_bridge/test_native_completion.py
+@@ -0,0 +1,93 @@
++"""Natural completion uses MA repeat semantics and rejects stale decoder callbacks."""
++
++from __future__ import annotations
++
++from typing import TYPE_CHECKING, Any
++from unittest.mock import AsyncMock, Mock
++
++import pytest
++from music_assistant_models.enums import PlaybackState, RepeatMode
++from music_assistant_models.player import PlayerMedia
++from music_assistant_models.player_queue import PlayerQueue
++from music_assistant_models.queue_item import QueueItem
++
++from music_assistant.controllers.player_queues import PlayerQueuesController
++from music_assistant.controllers.player_queues.state import PlayerQueueData
++from music_assistant.providers.msx_bridge.player import MSXPlayer
++
++if TYPE_CHECKING:
++    from aiohttp.test_utils import TestClient
++
++
++@pytest.mark.parametrize(
++    ("repeat", "index", "expected"),
++    [
++        (RepeatMode.OFF, 0, 1),
++        (RepeatMode.OFF, 1, None),
++        (RepeatMode.ONE, 0, 0),
++        (RepeatMode.ONE, 1, 1),
++        (RepeatMode.ALL, 0, 1),
++        (RepeatMode.ALL, 1, 0),
++    ],
++)
++async def test_natural_completion_uses_real_queue_repeat_selection(
++    http_client: TestClient[Any, Any],
++    mass_mock: Mock,
++    player: MSXPlayer,
++    repeat: RepeatMode,
++    index: int,
++    expected: int | None,
++) -> None:
++    """Duplicate callbacks never repeat a transition, including repeat-one cycles."""
++    items = [
++        QueueItem(queue_id=player.player_id, queue_item_id=str(i), name="duplicate", duration=8)
++        for i in range(2)
++    ]
++    queue = PlayerQueue(
++        queue_id=player.player_id,
++        active=True,
++        display_name="Queue",
++        available=True,
++        items=2,
++        current_index=index,
++        current_item=items[index],
++        repeat_mode=repeat,
++        state=PlaybackState.PLAYING,
++    )
++    controller = PlayerQueuesController.__new__(PlayerQueuesController)
++    controller._queue_data = {player.player_id: PlayerQueueData(queue=queue, items=items)}
++    mass_mock.players.get_player.return_value = player
++    mass_mock.player_queues.get_next_item = controller.get_next_item
++    mass_mock.player_queues.get_active_queue.return_value = queue
++    mass_mock.player_queues.get.return_value = queue
++    mass_mock.player_queues.mark_ended = Mock(side_effect=lambda _: setattr(queue, "ended", True))
++
++    async def stop(_id: str) -> None:
++        await player.stop()
++
++    mass_mock.player_queues.stop = AsyncMock(side_effect=stop)
++
++    async def select(_id: str, item_id: str) -> None:
++        queue.current_index = int(item_id)
++        queue.current_item = items[int(item_id)]
++        await player.play_media(
++            PlayerMedia(uri="http://ma/track", source_id=player.player_id, queue_item_id=item_id)
++        )
++
++    mass_mock.player_queues.play_index.side_effect = select
++    await select(player.player_id, str(index))
++    player.bind_native_completion("decoder-1", player.current_media)
++    response = await http_client.get("/api/complete/msx_test?playback_id=decoder-1")
++    assert response.status == 200
++    if expected is None:
++        assert player.playback_state == PlaybackState.IDLE
++        mass_mock.player_queues.stop.assert_awaited_once()
++        mass_mock.player_queues.mark_ended.assert_called_once_with(player.player_id)
++        assert queue.ended
++    else:
++        assert queue.current_index == expected
++        mass_mock.player_queues.play_index.assert_awaited_once_with(player.player_id, str(expected))
++    count = mass_mock.player_queues.play_index.await_count
++    response = await http_client.get("/api/complete/msx_test?playback_id=decoder-1")
++    assert response.status == 200
++    assert mass_mock.player_queues.play_index.await_count == count
+diff --git a/tests/providers/msx_bridge/test_party.py b/tests/providers/msx_bridge/test_party.py
+index 97ee7db..ba93d3a 100644
+--- a/tests/providers/msx_bridge/test_party.py
++++ b/tests/providers/msx_bridge/test_party.py
+@@ -325,3 +325,19 @@ async def test_tv_plugin_menu_has_party_entry(http_client: TestClient[Any, Any])
+     assert resp.status == 200
+     body = await resp.text()
+     assert "/msx/party.json" in body
++
++
++async def test_party_caption_is_outside_qr_image(
++    http_client: TestClient[Any, Any], mass_mock: Mock
++) -> None:
++    """A caption must never obscure the QR quiet zone on native MSX."""
++    mass_mock.get_provider = Mock(return_value=_party_mock(qr_text="Scan this screen " * 20))
++    response = await http_client.get("/msx/party.json")
++    items = (await response.json())["items"]
++    qr_item = next(item for item in items if item.get("image"))
++    assert not qr_item.get("label")
++    assert any(
++        item.get("text", "").startswith("Scan this screen")
++        for item in items
++        if not item.get("image")
++    )
+diff --git a/tests/providers/msx_bridge/test_player.py b/tests/providers/msx_bridge/test_player.py
+index 7f944a9..d1d8b40 100644
+--- a/tests/providers/msx_bridge/test_player.py
++++ b/tests/providers/msx_bridge/test_player.py
+@@ -8,6 +8,7 @@ from unittest.mock import Mock, patch
+
+ import pytest
+ from music_assistant_models.enums import PlaybackState, PlayerFeature, PlayerType
++from music_assistant_models.errors import PlayerUnavailableError
+ from music_assistant_models.player import PlayerMedia
+ from music_assistant_models.player_queue import PlayerQueue
+
+@@ -51,12 +52,12 @@ def test_init_custom_params(provider: Any) -> None:
+     assert p.output_format == "flac"
+
+
+-async def test_http_profile_defaults_to_forced_content_length(player: MSXPlayer) -> None:
+-    """Redirected MA streams must expose a finite length for MSX progress."""
++async def test_http_profile_defaults_to_chunked(player: MSXPlayer) -> None:
++    """Redirected streams must receive EOF without an estimated body length."""
+     entries = await player.get_config_entries()
+
+     http_profile = next(entry for entry in entries if entry.key == CONF_HTTP_PROFILE)
+-    assert http_profile.default_value == "forced_content_length"
++    assert http_profile.default_value == "chunked"
+
+
+ def test_needs_poll_always_true(player: MSXPlayer) -> None:
+@@ -730,3 +731,15 @@ async def test_pause_skips_ws_when_skip_notify(player: MSXPlayer) -> None:
+
+     assert player._attr_playback_state == PlaybackState.PAUSED
+     mock_notify.assert_not_called()
++
++
++async def test_disabled_player_rejects_direct_media_and_resume(
++    player: MSXPlayer, player_config_mock: Mock
++) -> None:
++    """Native and delayed core commands cannot start a disabled player."""
++    player_config_mock.enabled = False
++    with pytest.raises(PlayerUnavailableError):
++        await player.play_media(PlayerMedia(uri="http://ma/track"))
++    with pytest.raises(PlayerUnavailableError):
++        await player.play()
++    assert player.current_media is None
+diff --git a/tests/providers/msx_bridge/test_playlist.py b/tests/providers/msx_bridge/test_playlist.py
+index 6a1ae9b..07e720f 100644
+--- a/tests/providers/msx_bridge/test_playlist.py
++++ b/tests/providers/msx_bridge/test_playlist.py
+@@ -58,7 +58,11 @@ def test_map_tracks_to_msx_playlist_basic() -> None:
+     assert "&from_playlist=1" in item0.action
+     assert item0.properties is not None
+     assert item0.properties["button:next:action"] == "execute:http://localhost/api/next/msx_1"
+-    assert item0.properties["trigger:complete"] == "execute:http://localhost/api/next/msx_1"
++    assert item0.properties["trigger:complete"].startswith(
++        "execute:http://localhost/api/complete/msx_1?playback_id="
++    )
++    playback_id = item0.properties["trigger:complete"].split("playback_id=", 1)[1]
++    assert "&playback_id=" + playback_id in item0.action
+     assert item0.player_label == "Track 2"
+     assert item0.duration == 200
+     assert item0.label is not None
+@@ -140,3 +144,13 @@ def test_map_tracks_to_msx_playlist_serialization() -> None:
+     assert len(data["items"]) == 1
+     assert data["items"][0]["playerLabel"] == "Track 1"
+     assert data["items"][0]["action"].startswith("audio:")
++
++
++def test_known_duration_is_exposed_to_native_decoder() -> None:
++    """Chunked audio still has a known duration in the native MSX controls."""
++    content = map_tracks_to_msx_playlist(
++        [_make_track(1, "Track", "Artist", 180)], 0, "http://ma", "msx_1", _mock_provider()
++    )
++    assert content.items is not None
++    assert content.items[0].properties is not None
++    assert content.items[0].properties["video:duration"] == "180"
+diff --git a/tests/providers/msx_bridge/test_plugin_runtime.py b/tests/providers/msx_bridge/test_plugin_runtime.py
+index 2cc0860..938d9f8 100644
+--- a/tests/providers/msx_bridge/test_plugin_runtime.py
++++ b/tests/providers/msx_bridge/test_plugin_runtime.py
+@@ -107,3 +107,108 @@ async def test_native_next_from_pause_starts_new_item_at_zero(
+ def test_native_same_item_resume_preserves_paused_position() -> None:
+     """A pause/resume or no-op navigation with no item transition retains twenty seconds."""
+     assert plugin_position_after_resume([]) == 20
++
++
++@pytest.mark.parametrize("close_code", [1000, 1001, 1006])
++def test_server_close_reconnects_without_reopening_msx(close_code: int) -> None:
++    """Even a clean server shutdown is temporary while the plugin session is active."""
++    node = shutil.which("node")
++    if not node:
++        pytest.skip("Native plugin runtime tests require Node.js")
++    html = (Path(http_server.__file__).parent / "static/plugin.html").read_text()
++    script = html.split("<script>", 1)[1].split("</script>", 1)[0]
++    runner = NODE_RUNNER.split("vm.runInNewContext", 1)[0]
++    runner += """
++const retries = new Map(); let sequence = 0; const sockets = [];
++context.setTimeout = fn => { const id = ++sequence; retries.set(id, fn); return id; };
++context.clearTimeout = id => retries.delete(id);
++context.WebSocket = class extends Socket {
++    constructor(url) { super(); this.url = url; sockets.push(this); }
++    close() { this.readyState = 3; if (this.onclose) this.onclose({code: 1000}); }
++};
++vm.runInNewContext(input.script, context);
++handler.handleRequest('init', null, () => {});
++ws.onopen();
++// Flush debug timers; the device ID timeout is cancelled by its callback.
++for (const [id, callback] of [...retries]) { retries.delete(id); callback(); }
++const original = ws;
++original.readyState = 3; original.onclose({code: input.code});
++if (retries.size !== 1) throw new Error('Expected exactly one reconnect timer');
++for (const [id, callback] of [...retries]) { retries.delete(id); callback(); }
++if (sockets.length !== 2 || ws.url !== original.url) throw new Error('Device did not reconnect');
++handler.handleRequest('init', null, () => {});
++if (sockets.filter(s => s.readyState === 1).length !== 1) throw new Error('Repeated init leaked sockets');
++process.stdout.write('ok');
++"""
++    result = subprocess.run(  # noqa: S603 - fixed local runtime and shipped plugin
++        [node, "-e", runner],
++        input=json.dumps({"script": script, "code": close_code}),
++        capture_output=True,
++        text=True,
++        check=True,
++    )
++    assert result.stdout == "ok"
++
++
++def test_stop_notification_stops_decoder_before_showing_notice() -> None:
++    """Stop must not offer Continue on an already stopped MA queue."""
++    node = shutil.which("node")
++    if not node:
++        pytest.skip("Native plugin runtime tests require Node.js")
++    html = (Path(http_server.__file__).parent / "static/plugin.html").read_text()
++    script = html.split("<script>", 1)[1].split("</script>", 1)[0]
++    runner = (
++        NODE_RUNNER.split("vm.runInNewContext", 1)[0]
++        + """
++const actions=[];
++context.tvx.InteractionPlugin.executeAction=action=>actions.push(action);
++vm.runInNewContext(input.script, context);
++handler.handleRequest('init',null,()=>{});
++ws.onmessage({data:JSON.stringify({type:'stop',showNotification:true})});
++process.stdout.write(JSON.stringify(actions));
++"""
++    )
++    result = subprocess.run(  # noqa: S603 - fixed runtime and shipped plugin
++        [node, "-e", runner],
++        input=json.dumps({"script": script}),
++        capture_output=True,
++        text=True,
++        check=True,
++    )
++    assert json.loads(result.stdout) == ["[player:eject|player:hide|info:Playback stopped.]"]
++
++
++def test_native_seek_requests_source_position_without_faking_decoder_seek() -> None:
++    """A source offset belongs in the MA seek request, not in decoder telemetry."""
++    node = shutil.which("node")
++    if not node:
++        pytest.skip("Native plugin runtime tests require Node.js")
++    html = (Path(http_server.__file__).parent / "static/plugin.html").read_text()
++    script = html.split("<script>", 1)[1].split("</script>", 1)[0]
++    runner = (
++        NODE_RUNNER.split("vm.runInNewContext", 1)[0]
++        + """
++const actions=[];
++context.tvx.InteractionPlugin.executeAction=action=>actions.push(action);
++vm.runInNewContext(input.script,context);
++handler.handleRequest('init',null,()=>{});
++ws.onmessage({data:JSON.stringify({type:'clock_reset',playback_id:'generation',source_offset:120,source_duration:180,served_duration:60})});
++handler.handleEvent({event:'video:play'});
++handler.handleData({message:'seek:+10'});
++timer();
++process.stdout.write(JSON.stringify({sent,actions}));
++"""
++    )
++    result = subprocess.run(  # noqa: S603 - fixed runtime and shipped plugin
++        [node, "-e", runner],
++        input=json.dumps({"script": script}),
++        capture_output=True,
++        text=True,
++        check=True,
++    )
++    data = json.loads(result.stdout)
++    assert {"type": "seek_request", "position": 130, "playback_id": "generation"} in data["sent"]
++    assert {"type": "position", "position": 0, "playback_id": "generation"} in data["sent"]
++    assert "player:label:position:2:00" in data["actions"]
++    assert "player:label:duration:3:00" in data["actions"]
++    assert not any(action.startswith("player:seek:") for action in data["actions"])
