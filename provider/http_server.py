@@ -14,6 +14,7 @@ from urllib.parse import quote
 
 import aiohttp
 from aiohttp import WSMsgType, web
+<<<<<<< provider
 from music_assistant_models.enums import (
     PlaybackState,
     QueueOption,
@@ -27,6 +28,30 @@ from music_assistant_models.errors import (
     ResourceTemporarilyUnavailable,
 )
 from music_assistant_models.media_items import Album, Track
+||||||| upstream-base
+from music_assistant_models.enums import ContentType, SortDirection, SortField
+from music_assistant_models.errors import InvalidProviderURI
+from music_assistant_models.media_items import AudioFormat, Track
+
+from music_assistant.constants import SENDSPIN_SERVER_PORT
+from music_assistant.controllers.streams.audio_processing import get_media_session_id
+from music_assistant.controllers.streams.constants import output_pacing_args
+from music_assistant.controllers.webserver.helpers.auth_middleware import ImpersonatedUser
+from music_assistant.helpers.ffmpeg import get_ffmpeg_stream
+from music_assistant.helpers.uri import parse_uri
+from music_assistant.helpers.util import join_task
+=======
+from music_assistant_models.enums import ContentType, SortDirection, SortField
+from music_assistant_models.errors import InvalidProviderURI
+from music_assistant_models.media_items import AudioFormat, Track
+
+from music_assistant.constants import SENDSPIN_SERVER_PORT
+from music_assistant.controllers.streams.audio_processing import get_media_session_id
+from music_assistant.controllers.streams.constants import output_pacing_args
+from music_assistant.helpers.ffmpeg import get_ffmpeg_stream
+from music_assistant.helpers.uri import parse_uri
+from music_assistant.helpers.util import join_task
+>>>>>>> upstream-head
 
 from .audio_stream import AudioPipeline
 from .constants import (
@@ -1269,9 +1294,404 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
             return web.Response(status=404, text="Player not found")
         if rejected := self._reject_invalid_stream_token(request, player_id):
             return rejected
+<<<<<<< provider
         try:
             prepared = await prepare_msx_audio(
                 self.provider,
+||||||| upstream-base
+        self.provider.on_player_activity(player_id)
+
+        # When MA is driving the queue (next/prev from MA UI), current_media is
+        # already set by player.play_media() before the WS goto_index reaches MSX.
+        # Re-enqueuing would recreate the queue from the track URI, destroying it.
+        # We verify by checking that current_media's queue item URI matches the
+        # requested track URI — if not, MSX auto-advanced and we must re-enqueue.
+        if (
+            from_playlist
+            and player._playing_from_queue
+            and self._current_media_matches_uri(player, uri)
+        ):
+            logger.debug("Queue-driven: using current_media for %s", uri)
+            media = player.current_media
+        else:
+            # Suppress WS broadcast when called from MSX playlist to avoid conflicts
+            if from_playlist:
+                player._skip_ws_notify = True
+
+            # Arm BEFORE enqueuing so wait_for_media() waits for the new track's
+            # play_media() instead of returning the previous track's media.
+            player.expect_new_media()
+            try:
+                async with ImpersonatedUser(
+                    self.provider.mass, await self.provider.get_owner_username()
+                ):
+                    await self.provider.mass.player_queues.play_media(player_id, uri)
+            finally:
+                if from_playlist:
+                    player._skip_ws_notify = False
+
+            # Wait for play_media() to signal media is ready (replaces 10s polling loop)
+            media = await player.wait_for_media(timeout=10.0)
+
+        if not media:
+            return web.Response(status=504, text="Playback setup timeout")
+
+        return await self._serve_audio_stream(
+            request,
+            player,
+            media,
+            duration=self._resolve_served_duration(media),
+        )
+
+    # --- Audio Streaming Infrastructure ---
+
+    def _resolve_served_duration(self, media: PlayerMedia) -> int:
+        """
+        Return the length in seconds of the audio served for the given media, or 0 if unknown.
+
+        This is what the Content-Length header is derived from, so it describes
+        the audio we actually serve rather than the media item: starting
+        playback at a seek position yields a shorter stream.
+
+        :param media: The media being served.
+        """
+        duration = media.stream_duration or media.duration or 0
+        if not duration and media.source_id and media.queue_item_id:
+            queue_item = self.provider.mass.player_queues.get_item(
+                media.source_id, media.queue_item_id
+            )
+            if queue_item:
+                if queue_item.media_item:
+                    duration = getattr(queue_item.media_item, "duration", None) or duration
+                if not duration and queue_item.duration:
+                    duration = queue_item.duration
+        return int(duration)
+
+    @staticmethod
+    def _build_audio_params(
+        output_format_str: str, duration: int
+    ) -> tuple[AudioFormat, AudioFormat, dict[str, str]]:
+        """Build PCM input format, encoded output format, and HTTP headers."""
+        pcm_format = AudioFormat(
+            content_type=ContentType.PCM_S16LE,
+            sample_rate=44100,
+            bit_depth=16,
+            channels=2,
+        )
+        content_type_map: dict[str, tuple[ContentType, str]] = {
+            "mp3": (ContentType.MP3, "audio/mpeg"),
+            "aac": (ContentType.AAC, "audio/aac"),
+            "flac": (ContentType.FLAC, "audio/flac"),
+        }
+        codec, mime_type = content_type_map.get(output_format_str, (ContentType.MP3, "audio/mpeg"))
+        out_format = AudioFormat(
+            content_type=codec,
+            sample_rate=44100,
+            bit_depth=16,
+            channels=2,
+        )
+        bitrate_map = {"mp3": 40_000, "aac": 32_000}
+        bytes_per_sec = bitrate_map.get(output_format_str, 0)
+        headers: dict[str, str] = {
+            "Content-Type": mime_type,
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "Accept-Ranges": "none",
+        }
+        if duration and bytes_per_sec:
+            capped_duration = min(float(duration), 43200)  # cap at 12h
+            headers["Content-Length"] = str(int(capped_duration * bytes_per_sec))
+        return pcm_format, out_format, headers
+
+    async def _serve_audio_stream(
+        self,
+        request: web.Request,
+        player: MSXPlayer,
+        media: Any,
+        duration: int = 0,
+    ) -> web.StreamResponse:
+        """
+        Unified method to stream audio from MA to MSX via ffmpeg.
+
+        Supports three modes based on provider configuration:
+        1. Independent (default): Each player gets its own ffmpeg stream
+        2. Shared Buffer: Group members share one ffmpeg process via SharedGroupStream
+        3. MA Redirect: 302 redirect to MA Streamserver (requires MA 2.6+)
+
+        Pre-buffers audio data before sending HTTP headers so MSX receives
+        the response and initial audio burst simultaneously, preventing
+        stutter/restart from an empty initial buffer.
+        """
+        player_id = player.player_id
+
+        # --- Mode 1: MA Redirect ---
+        if self.provider.is_redirect_stream_mode():
+            redirect_url = await self.provider.get_ma_stream_url(player_id, media)
+            if redirect_url:
+                redirect_url = self._rewrite_stream_host(request, redirect_url)
+                logger.info(
+                    "[StreamMode:redirect] Player %s -> MA Streamserver: %s",
+                    player_id,
+                    redirect_url,
+                )
+                raise web.HTTPFound(location=redirect_url)
+            # Fallback to independent mode if redirect fails
+            logger.warning(
+                "[StreamMode:redirect] Failed to get MA URL for %s, "
+                "falling back to independent mode",
+                player_id,
+            )
+
+        # Resolve effective output format: per-player config overrides provider default.
+        # CONF_ENTRY_OUTPUT_CODEC_DEFAULT_MP3 uses key "output_codec"; fall back to
+        # player.output_format (set from provider-level config during registration).
+        # Only the proxy paths below need this — in redirect mode the MA streamserver
+        # applies the same per-player codec config itself.
+        effective_format = cast(
+            "str",
+            player.config.get_value("output_codec", player.output_format),
+        )
+
+        pcm_format, out_format, headers = self._build_audio_params(
+            effective_format,
+            duration,
+        )
+
+        # --- Mode 2: Shared Buffer (for groups) ---
+        group_id = self.provider.get_group_id_for_player(player)
+        if group_id and self.provider.is_shared_stream_mode():
+            logger.info(
+                "[StreamMode:shared] Player %s in group %s, using shared stream",
+                player_id,
+                group_id,
+            )
+            return await self._serve_shared_stream(
+                request, player, media, group_id, pcm_format, out_format, headers
+            )
+
+        # --- Mode 3: Independent (default) ---
+        logger.debug(
+            "[StreamMode:independent] Serving audio %s: format=%s, duration=%s",
+            player_id,
+            effective_format,
+            duration,
+        )
+
+        audio_source = self.provider.mass.streams.get_stream(
+            media,
+            pcm_format,
+            force_flow_mode=False,
+        )
+        output_plan = self.provider.mass.streams.audio.get_player_output_plan(
+            player_id,
+            pcm_format,
+            out_format,
+            queue_id=getattr(media, "source_id", None),
+            session_id=get_media_session_id(media),
+            queue_item_id=getattr(media, "queue_item_id", None),
+        )
+
+        response = web.StreamResponse(status=200, headers=headers)
+        stream_task: asyncio.Task[None] = asyncio.create_task(
+            self._stream_with_prebuffer(
+                request,
+                response,
+=======
+        self.provider.on_player_activity(player_id)
+
+        # When MA is driving the queue (next/prev from MA UI), current_media is
+        # already set by player.play_media() before the WS goto_index reaches MSX.
+        # Re-enqueuing would recreate the queue from the track URI, destroying it.
+        # We verify by checking that current_media's queue item URI matches the
+        # requested track URI — if not, MSX auto-advanced and we must re-enqueue.
+        if (
+            from_playlist
+            and player._playing_from_queue
+            and self._current_media_matches_uri(player, uri)
+        ):
+            logger.debug("Queue-driven: using current_media for %s", uri)
+            media = player.current_media
+        else:
+            # Suppress WS broadcast when called from MSX playlist to avoid conflicts
+            if from_playlist:
+                player._skip_ws_notify = True
+
+            # Arm BEFORE enqueuing so wait_for_media() waits for the new track's
+            # play_media() instead of returning the previous track's media.
+            player.expect_new_media()
+            try:
+                await self.provider.mass.player_queues.play_media(player_id, uri)
+            finally:
+                if from_playlist:
+                    player._skip_ws_notify = False
+
+            # Wait for play_media() to signal media is ready (replaces 10s polling loop)
+            media = await player.wait_for_media(timeout=10.0)
+
+        if not media:
+            return web.Response(status=504, text="Playback setup timeout")
+
+        return await self._serve_audio_stream(
+            request,
+            player,
+            media,
+            duration=self._resolve_served_duration(media),
+        )
+
+    # --- Audio Streaming Infrastructure ---
+
+    def _resolve_served_duration(self, media: PlayerMedia) -> int:
+        """
+        Return the length in seconds of the audio served for the given media, or 0 if unknown.
+
+        This is what the Content-Length header is derived from, so it describes
+        the audio we actually serve rather than the media item: starting
+        playback at a seek position yields a shorter stream.
+
+        :param media: The media being served.
+        """
+        duration = media.stream_duration or media.duration or 0
+        if not duration and media.source_id and media.queue_item_id:
+            queue_item = self.provider.mass.player_queues.get_item(
+                media.source_id, media.queue_item_id
+            )
+            if queue_item:
+                if queue_item.media_item:
+                    duration = getattr(queue_item.media_item, "duration", None) or duration
+                if not duration and queue_item.duration:
+                    duration = queue_item.duration
+        return int(duration)
+
+    @staticmethod
+    def _build_audio_params(
+        output_format_str: str, duration: int
+    ) -> tuple[AudioFormat, AudioFormat, dict[str, str]]:
+        """Build PCM input format, encoded output format, and HTTP headers."""
+        pcm_format = AudioFormat(
+            content_type=ContentType.PCM_S16LE,
+            sample_rate=44100,
+            bit_depth=16,
+            channels=2,
+        )
+        content_type_map: dict[str, tuple[ContentType, str]] = {
+            "mp3": (ContentType.MP3, "audio/mpeg"),
+            "aac": (ContentType.AAC, "audio/aac"),
+            "flac": (ContentType.FLAC, "audio/flac"),
+        }
+        codec, mime_type = content_type_map.get(output_format_str, (ContentType.MP3, "audio/mpeg"))
+        out_format = AudioFormat(
+            content_type=codec,
+            sample_rate=44100,
+            bit_depth=16,
+            channels=2,
+        )
+        bitrate_map = {"mp3": 40_000, "aac": 32_000}
+        bytes_per_sec = bitrate_map.get(output_format_str, 0)
+        headers: dict[str, str] = {
+            "Content-Type": mime_type,
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "Accept-Ranges": "none",
+        }
+        if duration and bytes_per_sec:
+            capped_duration = min(float(duration), 43200)  # cap at 12h
+            headers["Content-Length"] = str(int(capped_duration * bytes_per_sec))
+        return pcm_format, out_format, headers
+
+    async def _serve_audio_stream(
+        self,
+        request: web.Request,
+        player: MSXPlayer,
+        media: Any,
+        duration: int = 0,
+    ) -> web.StreamResponse:
+        """
+        Unified method to stream audio from MA to MSX via ffmpeg.
+
+        Supports three modes based on provider configuration:
+        1. Independent (default): Each player gets its own ffmpeg stream
+        2. Shared Buffer: Group members share one ffmpeg process via SharedGroupStream
+        3. MA Redirect: 302 redirect to MA Streamserver (requires MA 2.6+)
+
+        Pre-buffers audio data before sending HTTP headers so MSX receives
+        the response and initial audio burst simultaneously, preventing
+        stutter/restart from an empty initial buffer.
+        """
+        player_id = player.player_id
+
+        # --- Mode 1: MA Redirect ---
+        if self.provider.is_redirect_stream_mode():
+            redirect_url = await self.provider.get_ma_stream_url(player_id, media)
+            if redirect_url:
+                redirect_url = self._rewrite_stream_host(request, redirect_url)
+                logger.info(
+                    "[StreamMode:redirect] Player %s -> MA Streamserver: %s",
+                    player_id,
+                    redirect_url,
+                )
+                raise web.HTTPFound(location=redirect_url)
+            # Fallback to independent mode if redirect fails
+            logger.warning(
+                "[StreamMode:redirect] Failed to get MA URL for %s, "
+                "falling back to independent mode",
+                player_id,
+            )
+
+        # Resolve effective output format: per-player config overrides provider default.
+        # CONF_ENTRY_OUTPUT_CODEC_DEFAULT_MP3 uses key "output_codec"; fall back to
+        # player.output_format (set from provider-level config during registration).
+        # Only the proxy paths below need this — in redirect mode the MA streamserver
+        # applies the same per-player codec config itself.
+        effective_format = cast(
+            "str",
+            player.config.get_value("output_codec", player.output_format),
+        )
+
+        pcm_format, out_format, headers = self._build_audio_params(
+            effective_format,
+            duration,
+        )
+
+        # --- Mode 2: Shared Buffer (for groups) ---
+        group_id = self.provider.get_group_id_for_player(player)
+        if group_id and self.provider.is_shared_stream_mode():
+            logger.info(
+                "[StreamMode:shared] Player %s in group %s, using shared stream",
+                player_id,
+                group_id,
+            )
+            return await self._serve_shared_stream(
+                request, player, media, group_id, pcm_format, out_format, headers
+            )
+
+        # --- Mode 3: Independent (default) ---
+        logger.debug(
+            "[StreamMode:independent] Serving audio %s: format=%s, duration=%s",
+            player_id,
+            effective_format,
+            duration,
+        )
+
+        audio_source = self.provider.mass.streams.get_stream(
+            media,
+            pcm_format,
+            force_flow_mode=False,
+        )
+        output_plan = self.provider.mass.streams.audio.get_player_output_plan(
+            player_id,
+            pcm_format,
+            out_format,
+            queue_id=getattr(media, "source_id", None),
+            session_id=get_media_session_id(media),
+            queue_item_id=getattr(media, "queue_item_id", None),
+        )
+
+        response = web.StreamResponse(status=200, headers=headers)
+        stream_task: asyncio.Task[None] = asyncio.create_task(
+            self._stream_with_prebuffer(
+                request,
+                response,
+>>>>>>> upstream-head
                 player,
                 uri,
                 from_playlist=from_playlist,
