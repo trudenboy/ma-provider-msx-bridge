@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.2] - 2026-10-10
+
+### Removed
+
+- The deprecated provider-level Content-Length switch; independent streams always use chunked delivery.
+
+### Fixed
+
+- Natural queue completion lets Music Assistant refill Endless Mix and radio instead of stopping them from the TV bridge.
+- Cancelling an independent stream closes its ffmpeg generator and releases the encoder.
+
+- Recently played pages use the current Music Assistant sorting API while retaining their existing ordering.
+
 ## [1.6.1] - 2026-10-10
 
 ### Added

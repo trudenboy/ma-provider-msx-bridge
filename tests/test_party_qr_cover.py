@@ -66,6 +66,7 @@ def _http_session_mock(body: bytes, status: int = 200) -> Mock:
 
     resp = AsyncMock()
     resp.status = status
+    resp.headers = {}
     resp.content.iter_chunked = Mock(side_effect=_chunks)
     cm = MagicMock()
     cm.__aenter__ = AsyncMock(return_value=resp)
@@ -86,6 +87,7 @@ def _failing_http_session_mock(release: asyncio.Event) -> Mock:
 
     resp = AsyncMock()
     resp.status = 200
+    resp.headers = {}
     resp.content.iter_chunked = Mock(side_effect=_gated_chunks)
     cm = MagicMock()
     cm.__aenter__ = AsyncMock(return_value=resp)
@@ -104,6 +106,7 @@ def _slow_http_session_mock(body: bytes, release: asyncio.Event) -> Mock:
 
     resp = AsyncMock()
     resp.status = 200
+    resp.headers = {}
     resp.content.iter_chunked = Mock(side_effect=_gated_chunks)
     cm = MagicMock()
     cm.__aenter__ = AsyncMock(return_value=resp)
@@ -222,6 +225,17 @@ async def test_qr_cover_concurrent_misses_coalesce(
 
     monkeypatch.setattr(party_module, "stamp_qr_on_cover", _tracking_stamp)
     server = MSXHTTPServer(provider, 0)
+    all_joined = asyncio.Event()
+    joined: list[int] = []
+    qr_cover_task = server.party.qr_cover_task
+
+    def _counting_qr_cover_task(*args: Any) -> asyncio.Task[bytes]:
+        joined.append(1)
+        if len(joined) == 5:
+            all_joined.set()
+        return qr_cover_task(*args)
+
+    monkeypatch.setattr(server.party, "qr_cover_task", _counting_qr_cover_task)
     client = AiohttpTestClient(TestServer(server.app))
     await client.start_server()
     try:
@@ -233,7 +247,7 @@ async def test_qr_cover_concurrent_misses_coalesce(
             )
             for _ in range(5)
         ]
-        await asyncio.sleep(0.05)
+        await asyncio.wait_for(all_joined.wait(), timeout=5)
         release.set()
         responses = await asyncio.gather(*requests)
         assert all(r.status == 200 for r in responses)
