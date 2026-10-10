@@ -13,6 +13,7 @@ import aiohttp
 import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient as AiohttpTestClient
+<<<<<<< provider
 from aiohttp.test_utils import TestServer, make_mocked_request
 from music_assistant_models.enums import (
     ContentType,
@@ -27,6 +28,14 @@ from music_assistant_models.errors import (
     PlayerUnavailableError,
 )
 from music_assistant_models.media_items import Album, Artist, AudioFormat, Playlist, Track
+||||||| upstream-base
+from aiohttp.test_utils import TestServer
+from music_assistant_models.enums import PlaybackState
+=======
+from aiohttp.test_utils import TestServer
+from music_assistant_models.auth import User, UserRole
+from music_assistant_models.enums import PlaybackState
+>>>>>>> upstream-head
 from music_assistant_models.player import PlayerMedia
 from music_assistant_models.player_queue import PlayerQueue
 from music_assistant_models.queue_item import QueueItem
@@ -2263,7 +2272,77 @@ async def test_msx_audio_arms_wait_before_enqueue(
         await client.close()
 
 
+<<<<<<< provider
 # --- Audio params ---
+||||||| upstream-base
+# --- Served audio length (Content-Length) ---
+
+
+def test_served_duration_uses_media_duration(provider: MSXBridgeProvider) -> None:
+    """Without a seek the served audio is the whole media item."""
+    server = MSXHTTPServer(provider, 0)
+    media = PlayerMedia(uri="library://track/1", duration=180)
+
+    assert server._resolve_served_duration(media) == 180
+
+
+def test_served_duration_prefers_stream_duration(provider: MSXBridgeProvider) -> None:
+    """Starting mid-track serves less audio than the media item is long."""
+    server = MSXHTTPServer(provider, 0)
+    media = PlayerMedia(uri="library://track/1", duration=180, stream_duration=60)
+
+    assert server._resolve_served_duration(media) == 60
+=======
+async def test_msx_audio_auto_advance_plays_without_authenticated_user(
+    provider: MSXBridgeProvider, mass_mock: Mock
+) -> None:
+    """GET /msx/audio re-enqueues the TV's next track without an authenticated caller."""
+    mass_mock.webserver.auth.list_users = AsyncMock(
+        return_value=[User(user_id="admin", username="admin", role=UserRole.ADMIN)]
+    )
+    server = MSXHTTPServer(provider, 0)
+    client = AiohttpTestClient(TestServer(server.app))
+    await client.start_server()
+    try:
+        _make_audio_player(mass_mock)
+        token = provider.get_stream_token("msx_test")
+
+        mass_mock.streams = Mock()
+        mass_mock.streams.get_stream = Mock(return_value=_async_iter([b"pcm"]))
+        mass_mock.player_queues.play_media = AsyncMock()
+
+        with patch(
+            "provider.http_server.get_ffmpeg_stream",
+            return_value=_async_iter([b"encoded-chunk-1"]),
+        ):
+            resp = await client.get(
+                f"/msx/audio/msx_test?uri=library://track/2&from_playlist=1&token={token}"
+            )
+            assert resp.status == 200
+
+        mass_mock.player_queues.play_media.assert_awaited_once_with("msx_test", "library://track/2")
+    finally:
+        await client.close()
+
+
+# --- Served audio length (Content-Length) ---
+
+
+def test_served_duration_uses_media_duration(provider: MSXBridgeProvider) -> None:
+    """Without a seek the served audio is the whole media item."""
+    server = MSXHTTPServer(provider, 0)
+    media = PlayerMedia(uri="library://track/1", duration=180)
+
+    assert server._resolve_served_duration(media) == 180
+
+
+def test_served_duration_prefers_stream_duration(provider: MSXBridgeProvider) -> None:
+    """Starting mid-track serves less audio than the media item is long."""
+    server = MSXHTTPServer(provider, 0)
+    media = PlayerMedia(uri="library://track/1", duration=180, stream_duration=60)
+
+    assert server._resolve_served_duration(media) == 60
+>>>>>>> upstream-head
 
 
 @pytest.mark.parametrize("codec", ["mp3", "aac", "flac"])
