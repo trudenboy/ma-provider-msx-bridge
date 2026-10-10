@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Avoid unsupported progress override actions on MSX 0.1.145: detect the host framework version and keep native progress with source-time labels on older clients.
+- Native progress and time labels agree after seeking: MSX 0.1.146+ shows the position within the full track, while older clients use the current stream clock without unsupported actions. Compatibility detection uses the Media Station X application version independently of the TVX Framework version.
 
 - Disabled retained MSX players reject new playback, including requests that finish preparing after disable. The accompanying MA core fix applies runtime configuration before provider hooks and rolls it back on failure.
 - MP3/AAC/FLAC streaming no longer advertises an estimated encoded size. New MSX players use chunked HTTP; explicit existing player profiles remain unchanged.
