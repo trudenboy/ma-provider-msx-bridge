@@ -7,7 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.1] - 2026-10-10
+
+### Added
+
+- A strict native-device E2E runner with synthetic fixtures, decoder telemetry, sanitized snapshots, and optional Unix-only diagnostics that restore the isolated server and phone settings in `finally`.
+
 ### Fixed
+
+- Native progress and time labels agree after seeking: MSX 0.1.146+ shows the position within the full track, while older clients use the current stream clock without unsupported actions. Compatibility detection uses the Media Station X application version independently of the TVX Framework version.
 
 - Disabled retained MSX players reject new playback, including requests that finish preparing after disable. The accompanying MA core fix applies runtime configuration before provider hooks and rolls it back on failure.
 - MP3/AAC/FLAC streaming no longer advertises an estimated encoded size. New MSX players use chunked HTTP; explicit existing player profiles remain unchanged.
@@ -18,13 +26,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Party captions no longer overlap QR images. Stop ejects immediately before showing an optional informational notice.
 - The accompanying MA enqueue fix checks active-protocol capability and revalidates queue/player/session after asynchronous handovers.
 
-### Added
-
-- A strict native-device E2E runner with synthetic fixtures, decoder telemetry, sanitized snapshots, and optional Unix-only diagnostics that restore the isolated server and phone settings in `finally`.
-
-## [1.6.1] - 2026-10-08
-
-### Fixed
 
 - Selecting an album or playlist replaces the queue regardless of its default enqueue mode, preserving the selected duplicate occurrence without waiting for a playback notification.
 - Overlapping native playback commands retain WebSocket notification suppression until every command has finished.
