@@ -103,9 +103,8 @@ cd ma-server && python -m music_assistant --log-level debug
 | `player_idle_timeout` | `30` | Таймаут неактивности плеера (минуты) |
 | `show_stop_notification` | `false` | Показывать уведомление при остановке из MA |
 | `group_stream_mode` | `redirect` | Расширенная настройка: MA Streamserver или локальный `independent` proxy |
-| `include_content_length` | `true` | Добавлять расчётный Content-Length в локальные MP3/AAC потоки |
 
-Для каждого MSX-плеера HTTP profile в MA по умолчанию установлен в `forced_content_length`. Благодаря этому в режиме `redirect` обычные конечные треки получают расчётную длину и MSX отображает прогресс. Непрерывные потоки Universal Group не имеют конечной длины отдельного трека.
+Для новых MSX-плееров HTTP profile в MA по умолчанию установлен в `chunked`; явно сохранённые профили существующих плееров сохраняются. Локальные MP3/AAC/FLAC потоки не объявляют расчётный Content-Length. В режиме `redirect` заголовками управляет MA Streamserver. Непрерывные потоки Universal Group не имеют конечной длины отдельного трека.
 
 ### Stop, Pause и Resume
 
