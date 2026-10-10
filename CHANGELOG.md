@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.2] - 2026-10-10
+
+### Fixed
+
+- Recently played pages use the current Music Assistant sorting API while retaining their existing ordering.
+
 ## [1.6.1] - 2026-10-10
 
 ### Added
@@ -609,4 +615,3 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - feat: add MSX Bridge Player Provider
 - fix: release stale live source sessions before group playback
-- Reverse-synced upstream PR #5498 (WIP)

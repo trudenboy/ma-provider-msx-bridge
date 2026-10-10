@@ -14,23 +14,19 @@ from urllib.parse import quote
 
 import aiohttp
 from aiohttp import WSMsgType, web
-<<<<<<< provider
-from music_assistant_models.enums import PlaybackState, QueueOption, RepeatMode
+from music_assistant_models.enums import (
+    PlaybackState,
+    QueueOption,
+    RepeatMode,
+    SortDirection,
+    SortField,
+)
 from music_assistant_models.errors import (
     InvalidDataError,
     MusicAssistantError,
     ResourceTemporarilyUnavailable,
 )
 from music_assistant_models.media_items import Album, Track
-||||||| upstream-base
-from music_assistant_models.enums import ContentType
-from music_assistant_models.errors import InvalidProviderURI
-from music_assistant_models.media_items import AudioFormat, Track
-=======
-from music_assistant_models.enums import ContentType, SortDirection, SortField
-from music_assistant_models.errors import InvalidProviderURI
-from music_assistant_models.media_items import AudioFormat, Track
->>>>>>> upstream-head
 
 from music_assistant.controllers.webserver.helpers.auth_middleware import ImpersonatedUser
 
