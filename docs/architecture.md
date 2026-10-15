@@ -120,7 +120,7 @@ Search retains the playback connection and forwards native media events through 
 | `seek` | `{position}` | Decoder seek notification |
 | `volume` | `{level}` | Set native MSX volume (0–100) |
 | `clock_reset` | `{playback_id, source_offset, source_duration, served_duration}` | Reset stream clock for new playback |
-| `state_sync` | `{enabled, state, playback_id, source_offset, source_duration, served_duration}` | Synchronize a reconnected plugin |
+| `state_sync` | `{enabled, state, position, playback_id, source_offset, source_duration, served_duration}` | Synchronize a reconnected or newly opened plugin page; `position` is the current decoder position (`null` when idle) |
 
 **TV → MA messages:**
 
