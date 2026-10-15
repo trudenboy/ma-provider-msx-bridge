@@ -85,6 +85,14 @@ configured Python selection and manifest-based Docker dependency installation.
 Their source changes are prepared in ma-provider-tools; provider wrappers were
 rendered from those templates.
 
+The cleanup advances the reviewed sync baseline to official MA
+`15003cae786a704959ce4f3933aea30329545cf0`. Before cleanup, all 19 provider files
+matched that immutable tree byte-for-byte; the HTTP test file differed only in
+equivalent helper import paths. The old baseline flagged the intentional removal
+of library playlist handlers and their old success tests. The updated baseline
+records this reviewed snapshot; the sync guard and its default refusal of future
+unreviewed upstream edits remain enabled.
+
 Validation of the cleanup against the same official MA dev revision:
 
 - `scripts/test-upstream.sh all`: 349 provider tests and 18 standalone tests,
