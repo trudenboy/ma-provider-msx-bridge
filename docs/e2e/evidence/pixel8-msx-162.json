@@ -1,0 +1,212 @@
+{
+  "provider_version": "1.6.2",
+  "provider_tag_commit": "44600db39cbb063fddf75ab0f0cacb9391edbbcc",
+  "ma_pr_head": "ad6649e3a1172c23b82b6930845cf051912d76b4",
+  "device": "Pixel 8",
+  "android": "17",
+  "msx": "0.1.165",
+  "audibility_confirmed_by_user": true,
+  "repeat_cases": [
+    {
+      "round": 1,
+      "mode": "off",
+      "samples": 29,
+      "final_state": "idle",
+      "socket_always_one": true
+    },
+    {
+      "round": 1,
+      "mode": "one",
+      "samples": 24,
+      "final_state": "playing",
+      "socket_always_one": true
+    },
+    {
+      "round": 1,
+      "mode": "all",
+      "samples": 49,
+      "final_state": "playing",
+      "socket_always_one": true
+    },
+    {
+      "round": 2,
+      "mode": "off",
+      "samples": 29,
+      "final_state": "idle",
+      "socket_always_one": true
+    },
+    {
+      "round": 2,
+      "mode": "one",
+      "samples": 24,
+      "final_state": "playing",
+      "socket_always_one": true
+    },
+    {
+      "round": 2,
+      "mode": "all",
+      "samples": 49,
+      "final_state": "playing",
+      "socket_always_one": true
+    }
+  ],
+  "accepted_device_cases": [
+    {
+      "name": "redirect-mp3-natural-completion",
+      "passed": true
+    },
+    {
+      "name": "redirect-aac-natural-completion",
+      "passed": true
+    },
+    {
+      "name": "redirect-flac-natural-completion",
+      "passed": true
+    },
+    {
+      "name": "independent-mp3-natural-completion",
+      "passed": true,
+      "served_formats": [
+        "mp3",
+        "mp3",
+        "mp3"
+      ]
+    },
+    {
+      "name": "independent-aac-natural-completion",
+      "passed": true,
+      "served_formats": [
+        "aac",
+        "aac",
+        "aac"
+      ]
+    },
+    {
+      "name": "independent-flac-natural-completion",
+      "passed": true,
+      "served_formats": [
+        "flac",
+        "flac",
+        "flac"
+      ]
+    },
+    {
+      "name": "duplicate-occurrence-selection",
+      "passed": true
+    },
+    {
+      "name": "ma-stop-notification-False",
+      "passed": true
+    },
+    {
+      "name": "ma-stop-notification-True",
+      "passed": true
+    },
+    {
+      "name": "independent-ffmpeg-cancellation-five-times",
+      "passed": true
+    },
+    {
+      "name": "endless-mix-natural-terminal-refill",
+      "passed": true
+    },
+    {
+      "name": "cancel-throttled-in-flight-stream-1",
+      "passed": true
+    },
+    {
+      "name": "cancel-throttled-in-flight-stream-2",
+      "passed": true
+    },
+    {
+      "name": "cancel-throttled-in-flight-stream-3",
+      "passed": true
+    },
+    {
+      "name": "native-next-previous-queue-identity",
+      "passed": true
+    },
+    {
+      "name": "native-forward-rewind-source-clock-pause-resume",
+      "passed": true
+    }
+  ],
+  "http": {
+    "passed": 52,
+    "total": 52
+  },
+  "endless_mix": {
+    "observed_states": [
+      "idle",
+      "playing"
+    ],
+    "queue_sizes": [
+      1,
+      26
+    ],
+    "final_index": 1,
+    "final_state": "playing",
+    "native_decoder_active": true
+  },
+  "native_seek": {
+    "forward": {
+      "expected_offset": 59.09,
+      "actual_offset": 59
+    },
+    "rewind": {
+      "expected_offset": 54.97,
+      "actual_offset": 55
+    }
+  },
+  "paused_position": 58.535398721694946,
+  "paused_position_later": 58.535398721694946,
+  "paused_ui": {
+    "appPlayerPosition": "0:58",
+    "appPlayerDuration": "3:00"
+  },
+  "in_flight_encoder_cancellations": [
+    {
+      "before": 1,
+      "after": 0
+    },
+    {
+      "before": 1,
+      "after": 0
+    },
+    {
+      "before": 1,
+      "after": 0
+    }
+  ],
+  "known_defect": {
+    "component": "MA core queue stream feeder",
+    "exception": "UnsupportedFeaturedException",
+    "repeat_run_tracebacks": 26,
+    "impact": "Native playback continues; unsupported enqueue errors in logs.",
+    "core_changed_during_tests": false
+  },
+  "cleanup": {
+    "normal_runtime": true,
+    "observer_removed": true,
+    "phone_timeout_restored_ms": "30000",
+    "android": "17",
+    "health": {
+      "status": "ok",
+      "provider": "msx_bridge",
+      "players": 1
+    }
+  },
+  "limitations": [
+    "Physical Samsung/Xbox run not repeated",
+    "Radio not separately tested",
+    "Continuous 30-minute soak not performed",
+    "Seek while paused and acoustic source-marker accuracy not acceptance targets"
+  ],
+  "harness_adjustments": [
+    "Local model cache to avoid network-delayed observer startup",
+    "Sequential container recreation",
+    "Required provider_domain API parameter",
+    "Wait for a new provider identity and stable native WebSocket after scheduled reload",
+    "Native tap timing and hidden-control clock dumps"
+  ]
+}

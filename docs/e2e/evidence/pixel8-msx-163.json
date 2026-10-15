@@ -1,0 +1,127 @@
+{
+  "candidate_commit": "980d3109629b2967c4407a7b71f13ba1294d0e41",
+  "initial_ma_dev": "15003cae786a704959ce4f3933aea30329545cf0",
+  "final_ma_dev": "70c555ccb1461e4fc62a399e2eca4f62e17a32c8",
+  "device": {
+    "model": "Pixel 8",
+    "android": "17",
+    "msx": "0.1.165"
+  },
+  "http": {
+    "passed": 57,
+    "total": 57
+  },
+  "tests": {
+    "canonical": 351,
+    "standalone": 18
+  },
+  "checks": [
+    {
+      "scenario": "MA forward/backward/paused seek",
+      "pass": true
+    },
+    {
+      "scenario": "MA next/previous/duplicate selection/shuffle",
+      "pass": true
+    },
+    {
+      "scenario": "redirect mp3",
+      "pass": true
+    },
+    {
+      "scenario": "redirect aac",
+      "pass": true
+    },
+    {
+      "scenario": "redirect flac",
+      "pass": true
+    },
+    {
+      "scenario": "independent mp3",
+      "pass": true
+    },
+    {
+      "scenario": "independent aac",
+      "pass": true
+    },
+    {
+      "scenario": "independent flac",
+      "pass": true
+    },
+    {
+      "scenario": "Repeat off",
+      "pass": true
+    },
+    {
+      "scenario": "Repeat one",
+      "pass": true
+    },
+    {
+      "scenario": "Repeat all",
+      "pass": true
+    },
+    {
+      "scenario": "MSX-started Infinite Mix refill",
+      "pass": true,
+      "pool_before": 25,
+      "pool_after": 50,
+      "new_queue_items": 25,
+      "reordered": null,
+      "observed_transitions": 0
+    },
+    {
+      "scenario": "MA My Wave strict refill repeat off",
+      "pass": true,
+      "pool_before": 25,
+      "pool_after": 44,
+      "new_queue_items": 19,
+      "reordered": null,
+      "observed_transitions": 0
+    },
+    {
+      "scenario": "MA radio_mode track seed",
+      "pass": true,
+      "pool_before": 15,
+      "pool_after": 34,
+      "new_queue_items": 19,
+      "reordered": null,
+      "observed_transitions": 0
+    },
+    {
+      "scenario": "Static playlist shuffle and natural transitions",
+      "pass": true,
+      "pool_before": null,
+      "pool_after": null,
+      "new_queue_items": null,
+      "reordered": true,
+      "observed_transitions": 2
+    }
+  ],
+  "search_controls_after_fix": {
+    "states": [
+      "playing",
+      "paused",
+      "playing",
+      "paused",
+      "playing"
+    ],
+    "one_socket": true
+  },
+  "native_static_start": {
+    "shuffle": true,
+    "dynamic": false,
+    "items": 4
+  },
+  "long_soak": "cancelled_by_user_before_start",
+  "ma_web_ui": "browser_access_denied",
+  "known_core_observations": [
+    "UnsupportedFeaturedException: stream feeder requests ENQUEUE on MSX",
+    "My Wave boundary with inherited Repeat All returned to old first item; Repeat Off strict refill passed"
+  ],
+  "cleanup": {
+    "playback_stopped": true,
+    "test_playlist_deleted": true,
+    "screen_timeout_restored": true,
+    "diagnostic_socket_removed": true
+  }
+}
