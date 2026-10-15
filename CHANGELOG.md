@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.5] - 2026-10-15
+
+### Fixed
+
+- Opening Search while a track that was started from a seek position is paused, or while it plays, now shows the track's real position on the progress bar right away.
+
 ## [1.6.4] - 2026-10-15
 
 ### Fixed

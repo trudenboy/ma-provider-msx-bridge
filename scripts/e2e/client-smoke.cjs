@@ -94,7 +94,7 @@ assert.equal(timeouts.size, 0);
 // Opening Search loads a new page, so its bridge starts without any playback clock
 // and must adopt the running or paused decoder position from state_sync.
 function freshBridge() {
-  const page = {now: 1700000000000, sockets: [], window: {location: browserWindow.location, addEventListener() {}}};
+  const page = {now: 1700000000000, sockets: [], actions: [], window: {location: browserWindow.location, addEventListener() {}}};
   class PageSocket extends WebSocket {
     constructor(url) { super(url); page.sockets.push(this); }
   }
@@ -103,7 +103,17 @@ function freshBridge() {
     window: page.window,
     WebSocket: PageSocket,
     Date: {now: () => page.now},
-    tvx: {...context.tvx, InteractionPlugin: {...context.tvx.InteractionPlugin, setupHandler() {}}}
+    tvx: {
+      ...context.tvx,
+      PluginTools: {...context.tvx.PluginTools, checkApplication: () => true},
+      InteractionPlugin: {
+        ...context.tvx.InteractionPlugin,
+        setupHandler() {},
+        // Media Station X answers the capability request before the WebSocket syncs.
+        requestData: (dataId, callback) => callback({}),
+        executeAction: (...args) => page.actions.push(args)
+      }
+    }
   };
   page.window.tvx = pageContext.tvx;
   vm.runInNewContext(source, pageContext, {filename: process.argv[2]});
@@ -116,6 +126,7 @@ function freshBridge() {
 const clock = {playback_id: 'p2', enabled: true, source_offset: 0, source_duration: 300, served_duration: 300};
 const playing = freshBridge();
 playing.ws.onmessage({data: JSON.stringify({type: 'state_sync', state: 'playing', position: 120, ...clock})});
+assert.equal(playing.actions.map(([action]) => action).filter(action => action.startsWith('player:progress:position:')).at(-1), 'player:progress:position:120');
 playing.handler.handleData({message: 'seek:10'});
 const seekRequest = playing.ws.sent.find(message => message.type === 'seek_request');
 assert(Math.abs(seekRequest.position - 130) < 2, `seek after Search handoff must start from 120s, got ${seekRequest.position}`);
@@ -130,6 +141,10 @@ assert.equal(paused.ws.sent.find(message => message.type === 'seek_request').pos
 paused.now += 30000;
 paused.handler.handleEvent({event: 'video:pause'});
 assert.equal(paused.ws.sent.find(message => message.type === 'pause').position, 75);
+const pausedSeeked = freshBridge();
+pausedSeeked.ws.onmessage({data: JSON.stringify({type: 'state_sync', state: 'paused', position: 120, ...clock, source_offset: 60})});
+const progress = pausedSeeked.actions.map(([action]) => action).filter(action => action.startsWith('player:progress:position:')).at(-1);
+assert.equal(progress, 'player:progress:position:180', 'paused handoff must redraw progress on the source clock');
 const idle = freshBridge();
 idle.ws.onmessage({data: JSON.stringify({type: 'state_sync', state: 'idle', position: null, ...clock, playback_id: null})});
 idle.handler.handleEvent({event: 'video:pause'});
