@@ -206,6 +206,7 @@ class MSXPlayer(Player):
         """Handle VOLUME_SET command."""
         self._attr_volume_level = volume_level
         self.update_state()
+        cast("MSXBridgeProvider", self.provider).notify_volume(self.player_id, volume_level)
 
     async def seek(self, position_seconds: int) -> None:
         """Handle SEEK command — send seek action to MSX player via WebSocket."""

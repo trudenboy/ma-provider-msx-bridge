@@ -130,6 +130,11 @@ async def test_plugin_html(http_client: TestClient[Any, Any]) -> None:
     assert "text/html" in resp.headers["Content-Type"]
     body = await resp.text()
     assert "tvx.InteractionPlugin" in body
+    assert "/msx/bridge.js" in body
+    assert resp.headers.get("Cache-Control") == "no-cache, no-store, must-revalidate"
+    resp = await http_client.get("/msx/bridge.js")
+    assert resp.status == 200
+    body = await resp.text()
     assert "handleRequest" in body
     assert "MAHandler.prototype.handleEvent" in body
     assert 'data.event === "video:pause"' in body

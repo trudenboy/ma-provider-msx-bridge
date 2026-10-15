@@ -47,6 +47,15 @@ Run the provider suite against the mounted upstream Music Assistant checkout:
 ./scripts/test-upstream.sh test
 ```
 
+For playback-client changes, run the Node.js smoke check from the provider root:
+
+```bash
+node scripts/e2e/client-smoke.cjs provider/static/plugin.html
+```
+
+It checks the shared client, native media feedback, search-handler composition,
+volume actions, repeated initialization, and connection cleanup without a device.
+
 ### Test Structure
 
 | File | Covers |

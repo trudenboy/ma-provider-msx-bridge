@@ -349,6 +349,13 @@ class MSXHTTPServer:
             if not ws.closed:
                 self.provider.mass.create_task(self._ws_send(ws, msg, player_id))
 
+    def broadcast_volume(self, player_id: str, volume_level: int) -> None:
+        """Send a volume level to the player's connected native clients."""
+        msg = json.dumps({"type": "volume", "level": volume_level})
+        for ws in list(self._ws_clients.get(player_id, set())):
+            if not ws.closed:
+                self.provider.mass.create_task(self._ws_send(ws, msg, player_id))
+
     def _setup_routes(self) -> None:
         """Register all HTTP routes."""
         self._setup_msx_routes()
@@ -361,6 +368,7 @@ class MSXHTTPServer:
         self.app.router.add_get("/msx/start.json", self._handle_start_json)
         self.app.router.add_get("/msx/launcher.json", self._handle_launcher_json)
         self.app.router.add_get("/msx/plugin.html", self._handle_msx_plugin_html)
+        self.app.router.add_get("/msx/bridge.js", self._handle_msx_bridge_js)
         self.app.router.add_get(
             "/msx/tvx-plugin-module.min.js",
             self._serve_static("tvx-plugin-module.min.js"),
@@ -572,10 +580,20 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
         response.headers["Expires"] = "0"
         return response
 
+    async def _handle_msx_bridge_js(self, _request: web.Request) -> web.FileResponse:
+        """Serve the playback client shared by browsing and search."""
+        return web.FileResponse(
+            STATIC_DIR / "bridge.js",
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+        )
+
     async def _handle_msx_input_html(self, request: web.Request) -> web.FileResponse:
         """Serve input.html and ensure player is registered when Search is opened."""
         await self._ensure_player_for_request(request)
-        return web.FileResponse(STATIC_DIR / "input.html")
+        return web.FileResponse(
+            STATIC_DIR / "input.html",
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+        )
 
     # --- MSX Content Pages (native MSX JSON) ---
 
@@ -682,7 +700,7 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
 
     async def _handle_msx_playlists(self, request: web.Request) -> web.Response:
         """Return playlists as an MSX content page."""
-        _, device_param, _ = await self._ensure_player_for_request(request)
+        player_id, device_param, _ = await self._ensure_player_for_request(request)
         prefix = self._get_prefix(request)
         limit = _int_param(request.query, "limit", 50)
         offset = _int_param(request.query, "offset", 0)
@@ -697,7 +715,10 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
             logger.exception("Failed to fetch playlists")
             playlists = []
 
-        items = [map_playlist_to_msx(p, prefix, self.provider, device_param) for p in playlists]
+        items = [
+            map_playlist_to_msx(p, prefix, self.provider, player_id, device_param)
+            for p in playlists
+        ]
         content = MsxContent(
             headline="Playlists",
             template=MsxTemplate(
@@ -802,7 +823,7 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
             f"content:request:interaction:"
             f"{search_url}"
             f"|search:3|en|Search Music||||Search..."
-            f"@{prefix}/msx/input.html"
+            f"@{prefix}/msx/input.html?v=22"
         )
         content = MsxContent(
             headline="Search",
