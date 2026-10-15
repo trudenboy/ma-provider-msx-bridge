@@ -627,3 +627,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Reverse-synced upstream PR #6848 (WIP)
 - Reverse-synced upstream PR #6935 (WIP)
 - Reverse-synced upstream PR #6997 (WIP)
+- Reverse-synced upstream PR #7003 (WIP)
