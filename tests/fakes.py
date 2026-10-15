@@ -52,7 +52,7 @@ class FakeMass:
             playlists=SimpleNamespace(
                 library_items=AsyncMock(return_value=[]),
                 tracks=AsyncMock(return_value=[]),
-                iter_tracks=Mock(side_effect=empty_async_generator),
+                iter_tracks=Mock(side_effect=lambda *_a, **_k: empty_async_generator()),
             ),
             tracks=SimpleNamespace(library_items=AsyncMock(return_value=[])),
             search=AsyncMock(
