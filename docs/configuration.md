@@ -9,12 +9,13 @@ The provider exposes these settings in the Music Assistant UI under **Settings â
 | Key | Default | Description |
 |-----|---------|-------------|
 | `http_port` | `8099` | Port for the embedded HTTP server |
-| `output_format` | `mp3` | Audio format sent to TVs: `mp3`, `aac`, or `flac` |
 | `player_idle_timeout` | `30` | Minutes before an idle (unconnected) TV player is unregistered |
 | `show_stop_notification` | `false` | Show an informational notice after MSX playback is stopped |
 | `group_stream_mode` | `redirect` | Advanced: how audio is delivered to TVs (see Stream Delivery Mode below) |
 
 ## Output Format
+
+Select **Output codec** for each television in **Settings â†’ Players**. New TVs default to MP3; existing saved codec choices are preserved. Both stream delivery modes use this per-player setting. The former provider-level `output_format` setting has been removed because it was overridden by the player's codec configuration.
 
 | Format | Independent delivery | Notes |
 |--------|----------------------|-------|

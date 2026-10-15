@@ -40,16 +40,14 @@ def test_init_defaults(player: MSXPlayer) -> None:
     assert player._attr_available is True
     assert player._attr_powered is True
     assert player._attr_volume_level == 100
-    assert player.output_format == "mp3"
     assert player.requires_flow_mode is False
 
 
 def test_init_custom_params(provider: Any) -> None:
-    """MSXPlayer should accept custom name and output_format."""
-    p = MSXPlayer(provider, "msx_custom", name="Living Room TV", output_format="flac")
+    """MSXPlayer should accept a custom name."""
+    p = MSXPlayer(provider, "msx_custom", name="Living Room TV")
     cast("Any", p).update_state = Mock()
     assert p._attr_name == "Living Room TV"
-    assert p.output_format == "flac"
 
 
 async def test_http_profile_defaults_to_chunked(player: MSXPlayer) -> None:

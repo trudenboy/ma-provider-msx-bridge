@@ -54,12 +54,9 @@ These return MSX native playlist JSON. MSX auto-starts playback when loaded via 
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/msx/playlist/album/{id}.json?start=N&device_id=...` | Album tracks as playlist (rotated to start at index `N`) |
-| GET | `/msx/playlist/playlist/{id}.json?start=N&device_id=...` | Playlist tracks as playlist |
-| GET | `/msx/playlist/tracks.json?device_id=...` | All library tracks as playlist |
-| GET | `/msx/playlist/recently-played.json?device_id=...` | Recently played as playlist |
-| GET | `/msx/playlist/search.json?q=...&device_id=...` | Search results as playlist |
 | GET | `/msx/queue-playlist/{player_id}.json` | Current MA queue as MSX native playlist |
+
+Library selections first enqueue a context through `/api/play`, then the bridge pushes the native playlist for that MA queue. The former `/msx/playlist/album/`, `/msx/playlist/playlist/`, `/msx/playlist/tracks.json`, `/msx/playlist/recently-played.json` and `/msx/playlist/search.json` endpoints have been removed and return 404. External clients should use `/api/play`; library browsing REST endpoints remain available.
 
 ## Audio & Stream
 

@@ -21,12 +21,12 @@ including `shared` to `independent`, disabled providers and retired settings.
 This validation targets current MA; it does not establish compatibility with
 older core versions lacking that migration or the current listing APIs.
 
-## Validation
+## Initial reconciliation validation (before cleanup)
 
 Official MA revision: `15003cae786a704959ce4f3933aea30329545cf0`.
 
-- All 19 provider files match the upstream Git blobs, excluding the generated
-  upstream VERSION file. No provider-specific source divergence remains.
+- At the initial reconciliation snapshot, all 19 provider files matched the
+  upstream Git blobs, excluding the generated upstream VERSION file.
 - Nine new HTTP/mapper regressions use the real MA controllers. Against the
   old provider source they all fail: playlist HTTP 500, 500/501-item truncation,
   and missing late cover. After reconciliation all nine pass.
@@ -62,3 +62,37 @@ The current provider VERSION stays at 1.6.2. The 1.6.3 changelog entry describes
 the pending fixes; merge, a maintainer-owned version bump, release and delivery
 remain separate steps. The source PRs should be retired after the consolidated
 PR lands, then stale CI incidents can be closed against fresh evidence.
+## Whole-codebase cleanup follow-up
+
+The reconciled runtime was subsequently audited as a complete codebase, beyond
+the six PR diffs. The maintainer selected per-TV codec configuration and removal
+of the five obsolete library playlist endpoints. The current revision therefore
+intentionally differs from the initial byte-identical upstream reconciliation
+snapshot described above.
+
+Library selections continue through `/api/play` and the active MA queue playlist.
+The retired `/msx/playlist/...` routes return 404; library browsing REST routes
+remain available. Global output format has been removed, while saved per-player
+codec choices remain authoritative for both stream delivery modes.
+
+Unused WS metadata/debug branches, the old stream-debug CLI and private wrappers
+were removed. Test initialization requires the real MA framework and propagates
+provider import errors. Older MSX client capability detection, device identity
+fallbacks, native seek and generation/cleanup guards remain in use.
+
+Shared template corrections cover the root VERSION guard, official MA dev setup,
+configured Python selection and manifest-based Docker dependency installation.
+Their source changes are prepared in ma-provider-tools; provider wrappers were
+rendered from those templates.
+
+Validation of the cleanup against the same official MA dev revision:
+
+- `scripts/test-upstream.sh all`: 349 provider tests and 18 standalone tests,
+  upstream pre-commit, structural checks and mypy pass.
+- Repository pre-commit and 367 local tests pass. The lower count reflects
+  removed endpoint cases; retirement and saved/default codec cases are covered.
+- New configuration/route regressions were red before implementation and green
+  after it. The remaining real-controller library pagination cases stay enabled.
+- A Node smoke harness exercises initialization/menu, WS connection, MA queue
+  playlist actions, native pause/resume/seek, seek echo suppression and pagehide
+  cleanup. This is not new physical TV or audible playback evidence.

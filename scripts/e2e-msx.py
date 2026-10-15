@@ -29,7 +29,6 @@ from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from xml.etree import ElementTree as ET
 
 
 class Stand:
@@ -143,30 +142,6 @@ def fixture_server(host: str, port: int) -> Iterator[list[str]]:
             server.shutdown()
             server.server_close()
             worker.join(timeout=5)
-
-
-def tap_text(text: str) -> None:
-    """Tap bounds from one dump, only while the foreground application is MSX."""
-    window = subprocess.check_output(["adb", "shell", "dumpsys", "activity", "activities"]).decode()
-    focus = next((line for line in window.splitlines() if "topResumedActivity=" in line), "")
-    if "de.benzac.msx" not in focus:
-        raise RuntimeError("MSX is not the foreground application")
-    subprocess.run(
-        ["adb", "shell", "uiautomator", "dump", "/sdcard/msx-e2e.xml"],
-        check=True,
-        stdout=subprocess.DEVNULL,
-    )
-    xml = subprocess.check_output(["adb", "shell", "cat", "/sdcard/msx-e2e.xml"])
-    root = ET.fromstring(xml)  # noqa: S314 - trusted local ADB-generated XML
-    matches = [
-        n for n in root.iter("node") if n.get("text") == text and n.get("bounds") != "[0,0][0,0]"
-    ]
-    if len(matches) != 1:
-        raise RuntimeError("Expected exactly one visible native control")
-    x1, y1, x2, y2 = map(int, re.findall(r"\d+", matches[0].get("bounds", "")))
-    subprocess.run(
-        ["adb", "shell", "input", "tap", str((x1 + x2) // 2), str((y1 + y2) // 2)], check=True
-    )
 
 
 @contextmanager

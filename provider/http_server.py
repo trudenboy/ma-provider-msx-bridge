@@ -46,7 +46,6 @@ from .mappers import (
     map_track_to_msx,
     map_tracks_to_msx_playlist,
     msx_list_page,
-    playlist_tracks_from_media_items,
     sort_album_tracks,
 )
 from .models import MsxContent, MsxItem, MsxTemplate
@@ -69,7 +68,6 @@ if TYPE_CHECKING:
 __all__ = [
     "STATIC_DIR",
     "MSXHTTPServer",
-    "PartyInfo",
 ]
 
 logger = logging.getLogger(__name__)
@@ -395,20 +393,6 @@ class MSXHTTPServer:
         # MSX queue playlist (MA queue → MSX native playlist)
         self.app.router.add_get("/msx/queue-playlist/{player_id}.json", self._handle_queue_playlist)
 
-        # MSX playlist endpoints (native MSX playlist JSON)
-        self.app.router.add_get(
-            "/msx/playlist/album/{item_id}.json", self._handle_msx_album_playlist
-        )
-        self.app.router.add_get(
-            "/msx/playlist/playlist/{item_id}.json", self._handle_msx_playlist_playlist
-        )
-        self.app.router.add_get("/msx/playlist/tracks.json", self._handle_msx_tracks_playlist)
-        self.app.router.add_get(
-            "/msx/playlist/recently-played.json",
-            self._handle_msx_recently_played_playlist,
-        )
-        self.app.router.add_get("/msx/playlist/search.json", self._handle_msx_search_playlist)
-
         # MSX audio playback
         self.app.router.add_get("/msx/audio/{player_id}", self._handle_msx_audio)
         self.app.router.add_get("/msx/audio/{player_id}.mp3", self._handle_msx_audio)
@@ -476,7 +460,7 @@ class MSXHTTPServer:
                     "Access-Control-Allow-Headers": "*",
                 }
             )
-        if request.path.startswith(("/msx/playlist/", "/msx/queue-playlist/")) and (
+        if request.path.startswith("/msx/queue-playlist/") and (
             rejected := self._reject_cross_site(request)
         ):
             response: web.StreamResponse = rejected
@@ -1085,121 +1069,6 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
         )
         return web.json_response(dump_msx(content))
 
-    # --- MSX Playlist Endpoints ---
-
-    async def _handle_msx_album_playlist(self, request: web.Request) -> web.Response:
-        """Return album tracks as an MSX playlist JSON."""
-        player_id, device_param, _ = await self._ensure_player_for_request(request)
-        prefix = self._get_prefix(request)
-        item_id = request.match_info["item_id"]
-        provider_name = request.query.get("provider", "library")
-        start = _int_param(request.query, "start", 0)
-        try:
-            tracks = sort_album_tracks(
-                await self.provider.mass.music.albums.tracks(item_id, provider_name, limit=None)
-            )
-        except MusicAssistantError, TimeoutError:
-            logger.exception("Failed to fetch tracks for album playlist %s", item_id)
-            tracks = []
-        playlist = map_tracks_to_msx_playlist(
-            playlist_tracks_from_media_items(tracks),
-            start,
-            prefix,
-            player_id,
-            self.provider,
-            device_param,
-            qr_cover_base=await self._qr_cover_base(prefix),
-        )
-        return web.json_response(dump_msx(playlist))
-
-    async def _handle_msx_playlist_playlist(self, request: web.Request) -> web.Response:
-        """Return playlist tracks as an MSX playlist JSON."""
-        player_id, device_param, _ = await self._ensure_player_for_request(request)
-        prefix = self._get_prefix(request)
-        item_id = request.match_info["item_id"]
-        start = _int_param(request.query, "start", 0)
-        try:
-            tracks = [
-                t async for t in self.provider.mass.music.playlists.iter_tracks(item_id, "library")
-            ]
-        except MusicAssistantError, TimeoutError:
-            logger.exception("Failed to fetch tracks for playlist playlist %s", item_id)
-            tracks = []
-        playlist = map_tracks_to_msx_playlist(
-            playlist_tracks_from_media_items(tracks),
-            start,
-            prefix,
-            player_id,
-            self.provider,
-            device_param,
-            qr_cover_base=await self._qr_cover_base(prefix),
-        )
-        return web.json_response(dump_msx(playlist))
-
-    async def _handle_msx_tracks_playlist(self, request: web.Request) -> web.Response:
-        """Return library tracks as an MSX playlist JSON."""
-        player_id, device_param, _ = await self._ensure_player_for_request(request)
-        prefix = self._get_prefix(request)
-        limit = _int_param(request.query, "limit", 50)
-        offset = _int_param(request.query, "offset", 0)
-        start = _int_param(request.query, "start", 0)
-        tracks = await self.provider.mass.music.tracks.library_items(
-            limit=limit, offset=offset, summary=False
-        )
-        playlist = map_tracks_to_msx_playlist(
-            playlist_tracks_from_media_items(tracks),
-            start,
-            prefix,
-            player_id,
-            self.provider,
-            device_param,
-            qr_cover_base=await self._qr_cover_base(prefix),
-        )
-        return web.json_response(dump_msx(playlist))
-
-    async def _handle_msx_recently_played_playlist(self, request: web.Request) -> web.Response:
-        """Return recently played tracks as an MSX playlist JSON."""
-        player_id, device_param, _ = await self._ensure_player_for_request(request)
-        prefix = self._get_prefix(request)
-        start = _int_param(request.query, "start", 0)
-        tracks = await self.provider.mass.music.tracks.library_items(
-            limit=50,
-            sort_field=SortField.LAST_PLAYED,
-            sort_direction=SortDirection.ASC,
-            summary=False,
-        )
-        playlist = map_tracks_to_msx_playlist(
-            playlist_tracks_from_media_items(tracks),
-            start,
-            prefix,
-            player_id,
-            self.provider,
-            device_param,
-            qr_cover_base=await self._qr_cover_base(prefix),
-        )
-        return web.json_response(dump_msx(playlist))
-
-    async def _handle_msx_search_playlist(self, request: web.Request) -> web.Response:
-        """Return search track results as an MSX playlist JSON."""
-        player_id, device_param, _ = await self._ensure_player_for_request(request)
-        prefix = self._get_prefix(request)
-        query = request.query.get("q", "")
-        start = _int_param(request.query, "start", 0)
-        if not query:
-            return web.json_response(dump_msx(MsxContent(items=[])))
-        limit = _int_param(request.query, "limit", 20)
-        results = await self.provider.mass.music.search(query, limit=limit)
-        playlist = map_tracks_to_msx_playlist(
-            playlist_tracks_from_media_items(results.tracks),
-            start,
-            prefix,
-            player_id,
-            self.provider,
-            device_param,
-            qr_cover_base=await self._qr_cover_base(prefix),
-        )
-        return web.json_response(dump_msx(playlist))
-
     # --- MSX Queue Playlist ---
 
     async def _handle_queue_playlist(self, request: web.Request) -> web.Response:
@@ -1319,16 +1188,15 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
             len(self._ws_clients[player_id]),
             list(self._ws_clients.keys()),
         )
-        if player and isinstance(player, MSXPlayer):
-            player.on_ws_connected()
-            await ws.send_json(
-                {
-                    "type": "state_sync",
-                    "enabled": player.config.enabled,
-                    "state": player.playback_state.value,
-                    **player.clock_context(),
-                }
-            )
+        player.on_ws_connected()
+        await ws.send_json(
+            {
+                "type": "state_sync",
+                "enabled": player.config.enabled,
+                "state": player.playback_state.value,
+                **player.clock_context(),
+            }
+        )
 
         try:
             async for msg in ws:
@@ -1347,16 +1215,13 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
 
         return ws
 
-    async def _ws_send(
-        self, ws: web.WebSocketResponse, text: str, player_id: str | None = None
-    ) -> None:
+    async def _ws_send(self, ws: web.WebSocketResponse, text: str, player_id: str) -> None:
         """Send text to WebSocket; on failure warn and remove the stale client."""
         try:
             await ws.send_str(text)
         except (aiohttp.ClientConnectionError, RuntimeError) as exc:
             logger.warning("WebSocket send failed (player=%s): %s", player_id, exc)
-            if player_id:
-                self._ws_clients.get(player_id, set()).discard(ws)
+            self._ws_clients.get(player_id, set()).discard(ws)
 
     async def _cmd_pause_no_echo(self, player_id: str) -> None:
         """Pause player without echoing back to MSX."""
@@ -1656,10 +1521,6 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
         )
 
     # --- Party Mode ---
-
-    def _cached_party(self) -> PartyInfo | None:
-        """Return the last cached party state without refreshing (sync contexts)."""
-        return self.party.cached_party()
 
     async def _qr_cover_base(self, prefix: str) -> str | None:
         """Return the QR-cover endpoint base when a party is active, else None."""
@@ -1980,10 +1841,8 @@ code {{ background: #f5f5f5; padding: 2px 6px; border-radius: 3px; word-break: b
             )
         return player_id, param
 
-    async def _ensure_player_for_request(
-        self, request: web.Request
-    ) -> tuple[str, str, MSXPlayer | None]:
-        """Return the player ID, device query parameter, and registered player, if available."""
+    async def _ensure_player_for_request(self, request: web.Request) -> tuple[str, str, MSXPlayer]:
+        """Return the player ID, device query parameter, and registered player."""
         player_id, device_param = self._get_player_id_and_device_param(request)
         remote_ip = request.remote
         # Web player clients pass source=web to distinguish from MSX TV players

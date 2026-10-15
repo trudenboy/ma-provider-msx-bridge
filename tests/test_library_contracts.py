@@ -25,7 +25,6 @@ if TYPE_CHECKING:
     "route",
     [
         "/msx/playlists/playlist-1/tracks.json",
-        "/msx/playlist/playlist/playlist-1.json?start=500",
         "/api/playlists/playlist-1/tracks",
     ],
 )
@@ -50,8 +49,6 @@ async def test_playlist_routes_walk_real_controller_pages(
         data = await response.json()
 
     assert len(data["items"]) == 501
-    if "start=500" in route:
-        assert data["items"][0]["title"] == "Track 500"
     assert [call.kwargs["page"] for call in fetch_page.await_args_list] == [0, 1, 2]
 
 
@@ -59,7 +56,6 @@ async def test_playlist_routes_walk_real_controller_pages(
     "route",
     [
         "/msx/albums/album-1/tracks.json",
-        "/msx/playlist/album/album-1.json?start=500",
         "/api/albums/album-1/tracks",
     ],
 )
@@ -85,8 +81,6 @@ async def test_album_routes_keep_items_after_default_listing_limit(
         data = await response.json()
 
     assert len(data["items"]) == 501
-    if "start=500" in route:
-        assert data["items"][0]["title"] == "Track 500"
 
 
 @pytest.mark.parametrize(

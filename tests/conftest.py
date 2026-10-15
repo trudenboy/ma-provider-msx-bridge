@@ -63,7 +63,6 @@ def config_mock() -> Mock:
     config.get_value = Mock(
         side_effect=lambda key, default=None: {
             "http_port": 8099,
-            "output_format": "mp3",
             "log_level": "GLOBAL",
         }.get(key, default)
     )
@@ -81,7 +80,7 @@ def provider(mass_mock: Mock, manifest_mock: Mock, config_mock: Mock) -> MSXBrid
 @pytest.fixture
 def player(provider: MSXBridgeProvider) -> MSXPlayer:
     """Return an MSXPlayer with update_state mocked."""
-    p = MSXPlayer(provider, "msx_test", name="Test TV", output_format="mp3")
+    p = MSXPlayer(provider, "msx_test", name="Test TV")
     p.update_state = Mock()  # type: ignore[misc,method-assign]
     return p
 

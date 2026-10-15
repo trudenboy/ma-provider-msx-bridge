@@ -47,7 +47,7 @@ msx-music-assistant/
 │   ├── setup.sh                  # Setup venv, MA checkout, dependencies, and provider symlink
 │   ├── test-upstream.sh          # Official MA compatibility gate
 │   ├── test-server.sh            # Start/stop/status/log for local MA dev server
-│   └── debug-stream-stop.py      # Debug utility for stream lifecycle
+│   └── e2e-msx.py                # Device acceptance runner for the isolated MA stand
 │
 ├── docs/                         # Documentation and planning
 │   ├── FEATURES.md               # Feature descriptions (EN)

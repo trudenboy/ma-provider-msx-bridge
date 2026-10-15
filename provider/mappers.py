@@ -21,7 +21,7 @@ from music_assistant_models.media_items import (
 from .models import MsxContent, MsxItem, MsxTemplate
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Sequence
+    from collections.abc import Sequence
 
     from music_assistant_models.media_items import (
         MediaItemImage,
@@ -44,26 +44,6 @@ class PlaylistTrack:
     artist: str
     image: MediaItemImage | None
     queue_item_id: str | None = None
-
-
-def playlist_tracks_from_media_items(
-    items: Iterable[PlayableMediaItemType | ItemMapping],
-) -> list[PlaylistTrack]:
-    """Adapt playable MA media items for MSX native playlist rendering."""
-    tracks: list[PlaylistTrack] = []
-    for item in items:
-        if item.uri is None:
-            continue
-        tracks.append(
-            PlaylistTrack(
-                name=item.name,
-                uri=item.uri,
-                duration=0 if isinstance(item, ItemMapping) else item.duration or 0,
-                artist=item.artist_str if isinstance(item, Track) else "",
-                image=item.image,
-            )
-        )
-    return tracks
 
 
 def queue_nav_properties(player_id: str, prefix: str = "") -> dict[str, str]:
@@ -331,7 +311,6 @@ def map_tracks_to_msx_playlist(
             track_uri=track.uri,
             token=token,
             device_param=device_param,
-            from_playlist=True,
             queue_item_id=track.queue_item_id,
         )
         nav = queue_nav_properties(player_id, prefix)
@@ -393,14 +372,12 @@ def _build_audio_action(
     track_uri: str,
     token: str,
     device_param: str = "",
-    from_playlist: bool = False,
     queue_item_id: str | None = None,
 ) -> str:
     """Build audio action URL for MSX playback."""
     # Standard HTTP streaming mode
     audio_url = f"{prefix}/msx/audio/{player_id}?uri={quote(track_uri, safe='')}&token={token}"
-    if from_playlist:
-        audio_url += "&from_playlist=1"
+    audio_url += "&from_playlist=1"
     if queue_item_id is not None:
         audio_url += f"&queue_item_id={quote(queue_item_id, safe='')}"
     audio_url = append_device_param(audio_url, device_param)
