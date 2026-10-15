@@ -17,6 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Volume commands from Music Assistant now change the native MSX volume instead of only updating the server state.
+- Opening Search retains the playback connection, so Music Assistant controls and native playback feedback continue to work while using the keyboard and after leaving it.
+- Dynamic playlists such as Infinite Mix and My Wave start their managed Music Assistant queue directly from MSX instead of opening an empty static track list.
 - Playlist pages and native playback use Music Assistant's current playlist API and retain tracks beyond the first page.
 - Album track lists, artist discographies and album cover lookup include items beyond Music Assistant's default listing limit.
 

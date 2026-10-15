@@ -203,6 +203,7 @@ def map_playlist_to_msx(
     playlist: Playlist | ItemMapping,
     prefix: str,
     provider: MSXBridgeProvider,
+    player_id: str,
     device_param: str = "",
 ) -> MsxItem:
     """Map a MA Playlist to an MSX Item."""
@@ -210,11 +211,22 @@ def map_playlist_to_msx(
     prov = playlist.provider
     footer: str | None = f"{owner} · {prov}" if owner and prov else (owner or prov or None)
     url = f"{prefix}/msx/playlists/{playlist.item_id}/tracks.json"
+    action = (
+        play_context_action(
+            prefix,
+            player_id,
+            container_uri("playlist", playlist.item_id, playlist.provider),
+            0,
+            device_param,
+        )
+        if isinstance(playlist, Playlist) and playlist.is_dynamic
+        else f"content:{append_device_param(url, device_param)}"
+    )
     return MsxItem(
         title=playlist.name,
         title_footer=footer,
         image=get_image_url(playlist, provider),
-        action=f"content:{append_device_param(url, device_param)}",
+        action=action,
     )
 
 

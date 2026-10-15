@@ -105,6 +105,9 @@ Native EOF calls `/api/complete/{player_id}` with the decoder identity. The hand
 
 Connection: `GET /ws?device_id=<id>`
 
+The main interaction plugin and the search input plugin share `static/bridge.js`.
+Search retains the playback connection and forwards native media events through it.
+
 **MA → TV messages:**
 
 | Type | Payload | Effect |
@@ -115,6 +118,7 @@ Connection: `GET /ws?device_id=<id>`
 | `resume` | — | Resume display |
 | `playlist` | `{url}` | Load the MA queue, rotated so the selected track is index 0; also used for later selections in the same queue |
 | `seek` | `{position}` | Decoder seek notification |
+| `volume` | `{level}` | Set native MSX volume (0–100) |
 | `clock_reset` | `{playback_id, source_offset, source_duration, served_duration}` | Reset stream clock for new playback |
 | `state_sync` | `{enabled, state, playback_id, source_offset, source_duration, served_duration}` | Synchronize a reconnected plugin |
 

@@ -29,7 +29,8 @@ msx-music-assistant/
 │   ├── mappers.py                # MA object → MSX model converters
 │   ├── manifest.json             # Provider metadata for MA
 │   └── static/                  # Static files served by aiohttp
-│       ├── plugin.html           # MSX interaction plugin (device ID detection, WebSocket client)
+│       ├── plugin.html           # MSX main interaction plugin entry point
+│       ├── bridge.js             # Shared playback connection and events for main UI and search
 │       ├── input.html / input.js # MSX Input Plugin (search keyboard)
 │       └── tvx-plugin*.min.js    # TVX plugin library
 │

@@ -73,6 +73,7 @@ for path in (
     "/msx/party.json",
     "/api/party",
     "/msx/plugin.html",
+    "/msx/bridge.js",
     "/msx/input.html",
     "/msx/input.js",
 ):
@@ -116,7 +117,11 @@ check(
 )
 check("/msx/audio/msx_e2e_missing?token=invalid", 400)
 check("/msx/audio/msx_192_168_10_229?token=invalid&uri=library%3A%2F%2Ftrack%2F1", 403)
-check("/msx/playlist/tracks.json", 403, headers={"Sec-Fetch-Site": "cross-site"})
+check("/msx/queue-playlist/msx_e2e_missing.json", 403, headers={"Sec-Fetch-Site": "cross-site"})
+for retired in (
+    "album/1", "playlist/1", "tracks", "recently-played", "search",
+):
+    check("/msx/playlist/" + retired + ".json", 404)
 check(
     "/ws",
     403,

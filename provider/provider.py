@@ -284,6 +284,11 @@ class MSXBridgeProvider(PlayerProvider):
         if self.http_server:
             self.http_server.broadcast_seek(player_id, position_seconds)
 
+    def notify_volume(self, player_id: str, volume_level: int) -> None:
+        """Notify the TV of a volume change requested through MA."""
+        if self.http_server:
+            self.http_server.broadcast_volume(player_id, volume_level)
+
     def is_redirect_stream_mode(self) -> bool:
         """Return whether direct MA Streamserver delivery is enabled."""
         # In redirect mode the TV is 302-redirected to the MA Streamserver
