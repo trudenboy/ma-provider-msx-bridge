@@ -110,8 +110,7 @@ Connection: `GET /ws?device_id=<id>`
 | `stop` | — | Close MSX player immediately (sent twice) |
 | `pause` | — | Pause display |
 | `resume` | — | Resume display |
-| `playlist` | `{url}` | Load MA queue as MSX native playlist |
-| `goto_index` | `{index}` | Jump to track N in current playlist |
+| `playlist` | `{url}` | Load the MA queue, rotated so the selected track is index 0; also used for later selections in the same queue |
 | `seek` | `{position}` | Legacy decoder seek notification |
 | `clock_reset` | `{playback_id, source_offset, source_duration, served_duration}` | Reset stream clock for new playback |
 | `state_sync` | `{enabled, state, playback_id, source_offset, source_duration, served_duration}` | Synchronize a reconnected plugin |

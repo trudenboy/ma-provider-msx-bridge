@@ -52,7 +52,7 @@ Controls how audio reaches the TVs (config key `group_stream_mode`):
 - Tracks that require a continuous queue stream (e.g. crossfade enabled) are served through the local proxy instead, preserving per-track progress on the TV.
 - Universal Group flow streams are passed through to each member TV.
 
-The removed legacy `shared` value is migrated to `independent`. Recreate any old native MSX groups as Music Assistant Universal Groups.
+Music Assistant core migrates the removed legacy `shared` value to `independent` before the provider loads. Recreate any old native MSX groups as Music Assistant Universal Groups.
 
 ## Stop and Pause Behavior
 

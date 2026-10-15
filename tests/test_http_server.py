@@ -43,11 +43,12 @@ from music_assistant.providers.msx_bridge.http_server import MSXHTTPServer
 from music_assistant.providers.msx_bridge.mappers import map_track_to_msx
 from music_assistant.providers.msx_bridge.player import MSXPlayer
 from music_assistant.providers.msx_bridge.provider import MSXBridgeProvider
-from tests.providers.msx_bridge.factories import album as make_album
-from tests.providers.msx_bridge.factories import artist as make_artist
-from tests.providers.msx_bridge.factories import player_queue
-from tests.providers.msx_bridge.factories import playlist as make_playlist
-from tests.providers.msx_bridge.factories import track as make_track
+
+from .factories import album as make_album
+from .factories import artist as make_artist
+from .factories import player_queue
+from .factories import playlist as make_playlist
+from .factories import track as make_track
 
 if TYPE_CHECKING:
     from aiohttp.test_utils import TestClient

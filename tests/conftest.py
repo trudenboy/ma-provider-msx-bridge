@@ -14,7 +14,8 @@ from music_assistant.providers.msx_bridge.http_server import MSXHTTPServer
 from music_assistant.providers.msx_bridge.party import render_qr
 from music_assistant.providers.msx_bridge.player import MSXPlayer
 from music_assistant.providers.msx_bridge.provider import MSXBridgeProvider
-from tests.providers.msx_bridge.fakes import FakeMass
+
+from .fakes import FakeMass
 
 
 @pytest.fixture(autouse=True)
