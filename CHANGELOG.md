@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.3] - 2026-10-15
+
+### Removed
+
+- Obsolete library-native playlist endpoints; library selections and external clients use the Music Assistant queue through the playback API.
+- The ineffective global output-format setting; select the output codec for each TV in Music Assistant player settings. Existing TV codec choices are preserved.
+- Unused client diagnostic messages and outdated stream-debug instructions; device acceptance uses the isolated E2E runner.
+
+### Fixed
+
+- Playlist pages and native playback use Music Assistant's current playlist API and retain tracks beyond the first page.
+- Album track lists, artist discographies and album cover lookup include items beyond Music Assistant's default listing limit.
+
 ## [1.6.2] - 2026-10-10
 
 ### Removed
@@ -622,4 +635,3 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - feat: add MSX Bridge Player Provider
 - fix: release stale live source sessions before group playback
-- Reverse-synced upstream PR #6886 (WIP)

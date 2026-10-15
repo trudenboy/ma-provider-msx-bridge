@@ -236,32 +236,6 @@
                     pendingServerSeek = seekSecs;
                     pendingServerSeekUntil = Date.now() + 2000;
                     tvx.InteractionPlugin.executeAction("player:seek:" + seekSecs);
-                } else if (msg.type === "goto_index" && msg.index != null && typeof tvx.InteractionPlugin.executeAction === "function") {
-                    resetPlaybackClock();
-                    tvx.InteractionPlugin.executeAction("player:goto:index:" + msg.index);
-                    scanForMediaElements();
-                } else if (msg.type === "play_update" && typeof tvx.InteractionPlugin.executeAction === "function") {
-                    // Update metadata of the currently playing item without restarting audio.
-                    // 'player:set-data' or 'player:update' is not supported on all MSX clients.
-                    // For now, we just log it. Real metadata updates happen on track change via 'play' event.
-                    /*
-                    var playerLabelUpdate = msg.title || "Music Assistant";
-                    var labelPartsUpdate = [];
-                    if (msg.artist) labelPartsUpdate.push(msg.artist);
-                    var durUpdate = formatDuration(msg.duration);
-                    if (durUpdate) labelPartsUpdate.push(durUpdate);
-                    var labelUpdate = labelPartsUpdate.join(" · ") || "";
-                    var updateData = { playerLabel: playerLabelUpdate };
-                    if (labelUpdate) updateData.label = labelUpdate;
-                    if (msg.image_url) updateData.background = msg.image_url;
-                    if (msg.duration != null && msg.duration > 0) updateData.duration = msg.duration;
-                    if (msg.next_action) updateData.nextAction = resolveAction(msg.next_action);
-                    if (msg.prev_action) updateData.prevAction = resolveAction(msg.prev_action);
-                    tvx.InteractionPlugin.executeAction("player:set-data", updateData);
-                    */
-                    if (typeof console !== "undefined" && console.log) {
-                        console.log("MSX play_update received", msg);
-                    }
                 }
             } catch (e) {
                 if (typeof console !== "undefined" && console.warn) {
@@ -493,54 +467,6 @@
         return newId;
     }
 
-    // Debug: collect all available TVX info and return as object
-    function collectTvxDebugInfo() {
-        var info = { tvx_available: typeof tvx !== "undefined" };
-        if (typeof tvx === "undefined") return info;
-
-        // tvx.Tools methods
-        if (tvx.Tools) {
-            info.tools_methods = Object.keys(tvx.Tools);
-            try { info.getHostDeviceId = tvx.Tools.getHostDeviceId(); } catch(e) { info.getHostDeviceId_error = String(e); }
-            try { info.getUniqueId = tvx.Tools.getUniqueId(); } catch(e) { info.getUniqueId_error = String(e); }
-            try { info.getHostInfo = tvx.Tools.getHostInfo(); } catch(e) { info.getHostInfo_error = String(e); }
-            try { info.getPlatformInfo = tvx.Tools.getPlatformInfo(); } catch(e) { info.getPlatformInfo_error = String(e); }
-        }
-
-        // tvx.Settings
-        if (tvx.Settings && typeof tvx.Settings.get === "function") {
-            try { info.settings_device = tvx.Settings.get("device"); } catch(e) { info.settings_device_error = String(e); }
-            try { info.settings_platform = tvx.Settings.get("platform"); } catch(e) { info.settings_platform_error = String(e); }
-            try { info.settings_info = tvx.Settings.get("info"); } catch(e) { info.settings_info_error = String(e); }
-            try { info.settings_id = tvx.Settings.get("id"); } catch(e) { info.settings_id_error = String(e); }
-        }
-
-        // tvx.VideoPlugin
-        if (tvx.VideoPlugin) {
-            info.videoPlugin_methods = Object.keys(tvx.VideoPlugin);
-            try { info.videoPlugin_getDeviceId = tvx.VideoPlugin.getDeviceId(); } catch(e) { info.videoPlugin_getDeviceId_error = String(e); }
-        }
-
-        // tvx.InteractionPlugin
-        if (tvx.InteractionPlugin && typeof tvx.InteractionPlugin.getInfo === "function") {
-            try { info.interactionPlugin_info = tvx.InteractionPlugin.getInfo(); } catch(e) {}
-        }
-
-        // User agent
-        info.userAgent = navigator.userAgent;
-
-        return info;
-    }
-
-    // Send debug info to server via WebSocket
-    function sendDebugInfoToServer(ws) {
-        if (!ws || ws.readyState !== WebSocket.OPEN) return;
-        try {
-            var debugInfo = collectTvxDebugInfo();
-            ws.send(JSON.stringify({ type: "debug_info", data: debugInfo }));
-        } catch(e) {}
-    }
-
     MAHandler.prototype.handleRequest = function(dataId, data, callback) {
         if (dataId === "init") {
             supportsProgressOverride = false;
@@ -570,18 +496,7 @@
                     menu: buildMenu(finalDeviceId)
                 });
 
-                var ws = connectPushWebSocket(finalDeviceId);
-                // Send debug info after connection opens
-                if (ws) {
-                    var origOnOpen = ws.onopen;
-                    ws.onopen = function() {
-                        if (wsConnection !== ws || !pluginActive) return;
-                        if (origOnOpen) origOnOpen.apply(this, arguments);
-                        setTimeout(function() {
-                            if (wsConnection === ws && pluginActive) sendDebugInfoToServer(ws);
-                        }, 500);
-                    };
-                }
+                connectPushWebSocket(finalDeviceId);
                 startMediaObserver();
             };
             // Try async method first (tvx.VideoPlugin.requestDeviceId)

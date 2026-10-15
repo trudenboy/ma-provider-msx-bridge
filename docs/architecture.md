@@ -80,16 +80,19 @@ Content page items carry `action` fields:
 ## Audio Playback Flow
 
 ```
-TV clicks album track (action: "playlist:/msx/playlist/album/{id}.json")
+TV clicks album track (execute action calls /api/play with album URI and start index)
     │
     ▼
-MSX loads playlist JSON
+MA replaces its queue and starts the selected occurrence
+    │ WebSocket playlist message points to /msx/queue-playlist/{player_id}.json
+    ▼
+MSX loads the MA queue playlist JSON
     │ tracks rotated so clicked track is index 0 (MSX always plays from index 0)
     ▼
 Each item: action: "audio:/msx/audio/{player_id}?uri=...&from_playlist=1"
     │
 GET /msx/audio/{player_id}?uri=<track_uri>
-    ├─► mass.player_queues.play_media() enqueues track
+    ├─► queue handshake selects the existing occurrence through play_index if needed
     ├─► wait for MSXPlayer.wait_for_media() (up to 10 s)
     └─► resolve MA Streamserver URL → redirect → TV speakers
             └─► on resolution failure: local PCM → ffmpeg proxy
@@ -110,9 +113,8 @@ Connection: `GET /ws?device_id=<id>`
 | `stop` | — | Close MSX player immediately (sent twice) |
 | `pause` | — | Pause display |
 | `resume` | — | Resume display |
-| `playlist` | `{url}` | Load MA queue as MSX native playlist |
-| `goto_index` | `{index}` | Jump to track N in current playlist |
-| `seek` | `{position}` | Legacy decoder seek notification |
+| `playlist` | `{url}` | Load the MA queue, rotated so the selected track is index 0; also used for later selections in the same queue |
+| `seek` | `{position}` | Decoder seek notification |
 | `clock_reset` | `{playback_id, source_offset, source_duration, served_duration}` | Reset stream clock for new playback |
 | `state_sync` | `{enabled, state, playback_id, source_offset, source_duration, served_duration}` | Synchronize a reconnected plugin |
 

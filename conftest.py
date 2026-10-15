@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import contextlib
 import importlib
 import importlib.util
 import sys
@@ -13,16 +12,9 @@ from pathlib import Path
 _provider_path = Path(__file__).parent / "provider"
 _repo_root = Path(__file__).resolve().parent
 
-# Reuse the real MA packages when installed so transitive imports can reach
-# other providers. Fall back to namespace shims for lightweight test setups.
+# Tests require the real MA framework and its transitive provider imports.
 for _pkg in ("music_assistant", "music_assistant.providers"):
-    try:
-        importlib.import_module(_pkg)
-    except ModuleNotFoundError:
-        _mod = types.ModuleType(_pkg)
-        _mod.__path__ = []  # type: ignore[attr-defined]
-        _mod.__package__ = _pkg
-        sys.modules[_pkg] = _mod
+    importlib.import_module(_pkg)
 
 # The reusable upstream workflow checks out MA Server inside this repository.
 # Add that deterministic location before executing the provider package, since
@@ -83,7 +75,5 @@ if _spec and "music_assistant.providers.msx_bridge" not in sys.modules:
     _pkg_mod.__path__ = [str(_provider_path)]  # type: ignore[attr-defined]
     _pkg_mod.__package__ = "music_assistant.providers.msx_bridge"
     sys.modules["music_assistant.providers.msx_bridge"] = _pkg_mod
-    with contextlib.suppress(
-        Exception
-    ):  # provider __init__ may have MA-specific imports; best-effort
-        _spec.loader.exec_module(_pkg_mod)  # type: ignore[union-attr]
+    assert _spec.loader is not None
+    _spec.loader.exec_module(_pkg_mod)

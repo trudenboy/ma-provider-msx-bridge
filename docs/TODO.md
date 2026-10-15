@@ -1,28 +1,30 @@
 # TODO
 
-Срез backlog: 2026-10-08. Выпущенная версия — 1.6.0; изменения в открытых PR
-не считаются доставленными пользователям Music Assistant.
+Срез backlog: 2026-10-15. Последний релиз — 1.6.2. Подготовленные изменения
+не считаются доставленными до merge, выпуска и проверки синхронизации.
 
 ## Приоритеты
 
-1. Завершить совместимость с актуальным MA: reverse-sync pacing #262,
-   полный upstream gate на записанном SHA и maintainer review перед merge.
-2. Доставить исправление unauthenticated playback пользователям stable:
-   support music-assistant/support#6624. В MA 2.10.5 остаётся старый
-   impersonation-путь; локальный fix уже есть с 1.5.10. Подготовленный
-   минимальный backport требует решения upstream maintainer и проверки Xbox.
-3. Завершить review music-assistant/server#5868: previous/no-op regression,
-   описание полного перехода 1.4.9 → 1.6.0, миграция удалённых режимов,
-   проверяемые пояснения к review threads. Держать согласованный scope.
-4. Согласовать закрытие неприменимого reverse-sync #264: owner attribution
-   удалён вместе с impersonation для native MSX; не возвращать этот код.
-5. После merge исправлений перепроверить wrapper sync #268 и закрывать
-   CI incidents только по свежим зелёным runs.
-6. Сопоставить upstream/provider snapshots перед sync: текущий preflight
-   остаётся fail-closed. Не применять историческое upstream-ahead override.
+1. Завершить единый PR для config sync #285 и reverse-sync #288, #289,
+   #290, #291, #294: текущие listing API MA, полные списки, удаление
+   неиспользуемого queue state и goto-index протокола.
+2. Согласовать Ruff config и inline S104 suppression: локальный autofix
+   должен сохранять разрешение LAN HTTP bind.
+3. Пройти compatibility gate на записанном актуальном MA SHA, включая
+   строгий mypy и canonical upstream layout.
+4. Перепроверить core enqueue для MSX без ENQUEUE. Старый Pixel-прогон
+   зафиксировал UnsupportedFeaturedException; capability провайдера нельзя
+   менять только для подавления ошибки.
+5. После maintainer review и разрешения merge подготовить отдельный release
+   PR. Перед sync сверить provider/test snapshots с upstream и integration
+   fork; upstream-ahead guard должен пройти без обхода защиты.
+6. Закрывать CI incidents по подтверждённым результатам. Для sync incident
+   #278 нужен новый успешный pipeline и проверка содержимого файлов.
 
 ## Реализовано
 
+- Upstream server PR #5868 и documentation PR #1112 влиты.
+- Xbox support issue #6624 и избыточный reverse-sync #282 закрыты.
 - Быстрая остановка: WebSocket stop, закрытие MSX player и отмена потоков.
 - Bidirectional pause/resume, position reports и native seek между MA и MSX.
 - Queue-backed native playback, поиск, библиотека и Party QR на MSX pages.
@@ -33,12 +35,15 @@
 
 ## Требует проверки на устройствах
 
-- Автоматический переход минимум между двумя треками на Xbox после доставки
-  auth fix: звук, stream response, позиция устройства и отсутствие ошибок.
+- Повторить актуальный playback на Samsung Tizen и Xbox: естественные
+  переходы, Repeat Off/One/All, next/previous и выбор одинаковых URI.
 - Pause/resume/seek и reconnect на поддерживаемых Smart TV/MSX версиях.
+- Seek во время паузы и непрерывный 30-минутный прогон.
 - Universal Group flow playback, radio/live sources и совместимость
   Content-Length профилей. Точность синхронизации HTTP-клиентов должна
   измеряться на устройствах; Universal Groups не доказывают её автоматически.
+- Pixel 8/MSX 0.1.165 evidence от 2026-10-11 относится к прежнему MA head
+  и не заменяет проверки сегодняшнего upstream или других платформ.
 
 ## Возможные дальнейшие функции
 

@@ -99,10 +99,11 @@ cd ma-server && python -m music_assistant --log-level debug
 | Параметр | По умолчанию | Описание |
 |----------|--------------|----------|
 | `http_port` | `8099` | Порт HTTP сервера |
-| `output_format` | `mp3` | Формат аудио для стриминга (`mp3`, `aac`, `flac`) |
 | `player_idle_timeout` | `30` | Таймаут неактивности плеера (минуты) |
 | `show_stop_notification` | `false` | Показывать уведомление при остановке из MA |
 | `group_stream_mode` | `redirect` | Расширенная настройка: MA Streamserver или локальный `independent` proxy |
+
+Кодек задаётся отдельно для каждого телевизора в **Настройки → Плееры → Output codec**. Для новых плееров используется MP3; сохранённые значения существующих плееров сохраняются. Глобальная настройка `output_format` удалена: фактически её перекрывала конфигурация конкретного TV.
 
 Для новых MSX-плееров HTTP profile в MA по умолчанию установлен в `chunked`; явно сохранённые профили существующих плееров сохраняются. Локальные MP3/AAC/FLAC потоки не объявляют расчётный Content-Length. В режиме `redirect` заголовками управляет MA Streamserver. Непрерывные потоки Universal Group не имеют конечной длины отдельного трека.
 
@@ -113,6 +114,8 @@ cd ma-server && python -m music_assistant --log-level debug
 - **Quick stop** — Кнопка на дашборде или `POST /api/quick-stop/{player_id}`
 
 ## HTTP Endpoints
+
+Для запуска альбома, плейлиста или результатов поиска используйте `/api/play`: воспроизведение идёт через очередь MA и `/msx/queue-playlist/{player_id}.json`. Пять старых маршрутов `/msx/playlist/...` удалены и возвращают 404. REST API для просмотра библиотеки сохранён.
 
 ### MSX Bootstrap
 
@@ -139,11 +142,6 @@ cd ma-server && python -m music_assistant --log-level debug
 
 | Метод | Путь | Описание |
 |-------|------|----------|
-| GET | `/msx/playlist/album/{id}.json` | Треки альбома как нативный MSX плейлист |
-| GET | `/msx/playlist/playlist/{id}.json` | Треки плейлиста как нативный MSX плейлист |
-| GET | `/msx/playlist/tracks.json` | Все треки как нативный MSX плейлист |
-| GET | `/msx/playlist/recently-played.json` | Недавно воспроизведённые как MSX плейлист |
-| GET | `/msx/playlist/search.json?q=...` | Результаты поиска как MSX плейлист |
 | GET | `/msx/queue-playlist/{player_id}.json` | Текущая очередь MA как MSX плейлист |
 
 ### Управление воспроизведением

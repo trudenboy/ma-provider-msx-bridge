@@ -46,16 +46,16 @@ Smart TV (MSX App) --HTTP--> MSXBridgeProvider (inside MA, port 8099) --internal
 4. Handles race conditions via `_pending_unregisters` events
 
 **Audio Playback (via MSX native player):**
-1. Track list items use `action: "playlist:/msx/playlist/album/{id}.json"` — MSX loads the playlist, auto-starts playback, tracks rotated so clicked track is first; native next/prev
-2. Each playlist item has `action: "audio:/msx/audio/{player_id}?uri=<uri>&from_playlist=1"`
-3. `GET /msx/audio/{player_id}?uri=...` → calls `mass.player_queues.play_media()` → waits for `MSXPlayer.wait_for_media()` (up to 10s)
+1. Track list items execute `/api/play` with a context URI and selected index. MA replaces its queue and starts playback; the bridge pushes `/msx/queue-playlist/{player_id}.json` through WebSocket.
+2. Each queue playlist item has an `audio:/msx/audio/{player_id}` action with URI, stream token, queue occurrence and playback identity. The playlist is rotated so the selected occurrence starts first.
+3. The audio request uses `queue_handshake.py` to select an existing queue occurrence through `play_index` if needed and waits for matching ready media. It does not create a separate library queue.
 4. Default delivery redirects to the MA Streamserver; the advanced independent fallback uses `mass.streams.get_stream()` → raw PCM → `get_ffmpeg_stream()` → encoded MP3/AAC/FLAC → TV
 5. The independent proxy optionally sets `Content-Length: duration * bytes_per_sec` for MP3/AAC; FLAC omits it
-6. **MA queue → MSX playlist:** `notify_play_playlist()` sends WS `{type:"playlist", url:"/msx/queue-playlist/{player_id}.json"}` — TV loads MA queue as MSX native playlist; same-queue track changes use `{type:"goto_index", index:N}` instead of resending
+6. **MA queue → MSX playlist:** `notify_play_playlist()` sends WS `{type:"playlist", url:"/msx/queue-playlist/{player_id}.json?start=N&queue_id=..."}`. Each queue selection reloads the native playlist, rotated so the selected item is at index 0. Native audio fetches suppress these notifications through the queue handshake.
 
 **WebSocket Push (bidirectional MA ↔ MSX):**
 1. Plugin connects to `/ws?device_id=...` on startup
-2. MA → TV message types: `play` (title/artist/image/duration/next_action/prev_action), `stop` (sent twice for instant close), `pause`, `resume`, `playlist` (url to load), `goto_index` (index in current playlist), `seek` (position_seconds)
+2. MA → TV message types: `play` (title/artist/image/duration/next_action/prev_action), `stop` (sent twice for instant close), `pause`, `resume`, `playlist` (url to load), `seek` (position_seconds), `clock_reset`, `state_sync`
 3. TV → MA message types: `position` (current playback seconds → `player.update_position()`), `pause` (with position), `resume` — bidirectional protocol
 4. `_skip_ws_notify` flag prevents echo-back when MSX initiates pause/resume
 5. WS position reports override wall-clock elapsed time for 10s (more accurate than polling)
@@ -117,7 +117,7 @@ python -c "from music_assistant.providers.msx_bridge import setup; print('OK')"
 `MSXBridgeProvider`, `MSXPlayer`, and `MSXHTTPServer` are implemented with:
 - Dynamic player registration (device ID or IP-based) with idle timeout cleanup
 - Multi-TV support (each TV gets its own player via device ID)
-- WebSocket push notifications — bidirectional: MA→TV (play/stop/pause/resume/playlist/goto_index/seek) and TV→MA (position/pause/resume)
+- WebSocket push notifications — bidirectional: MA→TV (play/stop/pause/resume/playlist/seek/clock_reset/state_sync) and TV→MA (position/pause/resume)
 - Player state management (play, pause, stop, seek, volume, poll)
 - Universal Group compatibility: MSX players are regular members and accept member-specific flow URLs
 - `ProviderFeature.REMOVE_PLAYER` — user can remove a player from MA UI
@@ -125,7 +125,7 @@ python -c "from music_assistant.providers.msx_bridge import setup; print('OK')"
 - MSX interaction plugin with device ID detection and WebSocket client
 - MSX native JSON content pages (`/msx/menu.json`, `/msx/albums.json`, `/msx/artists.json`, `/msx/playlists.json`, `/msx/tracks.json`, `/msx/recently-played.json`, `/msx/search.json`, `/msx/search-page.json`, `/msx/search-input.json`, `/msx/launcher.json`)
 - MSX detail pages (`/msx/albums/{id}/tracks.json`, `/msx/artists/{id}/albums.json`, `/msx/playlists/{id}/tracks.json`)
-- MSX native playlist endpoints (`/msx/playlist/album/{id}.json`, `/msx/playlist/playlist/{id}.json`, `/msx/playlist/tracks.json`, `/msx/playlist/recently-played.json`, `/msx/playlist/search.json`, `/msx/queue-playlist/{player_id}.json`)
+- MSX native playlist endpoint `/msx/queue-playlist/{player_id}.json`, sourced exclusively from the active MA queue
 - Audio playback endpoint (`/msx/audio/{player_id}`) via playlist action; local MP3/AAC proxy responses can include estimated Content-Length, while FLAC omits it
 - Stream proxy (`/stream/{player_id}`) with same PCM→ffmpeg chain
 - Library REST API (`/api/albums`, `/api/artists`, `/api/playlists`, `/api/tracks`, `/api/search`, `/api/recently-played`, plus detail sub-routes)
