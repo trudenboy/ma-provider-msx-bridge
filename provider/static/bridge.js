@@ -187,7 +187,7 @@
                         stopPositionTimer();
                         pausedAtPosition = msg.position;
                         positionStartValue = msg.position;
-                        positionStartTime = Date.now() / 1000;
+                        positionStartTime = 0;
                     } else if (samePlayback && msg.state === "playing") {
                         startPositionTimer(getCurrentPosition());
                     }

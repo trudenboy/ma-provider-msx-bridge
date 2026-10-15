@@ -94,7 +94,7 @@ assert.equal(timeouts.size, 0);
 // Opening Search loads a new page, so its bridge starts without any playback clock
 // and must adopt the running or paused decoder position from state_sync.
 function freshBridge() {
-  const page = {sockets: [], window: {location: browserWindow.location, addEventListener() {}}};
+  const page = {now: 1700000000000, sockets: [], window: {location: browserWindow.location, addEventListener() {}}};
   class PageSocket extends WebSocket {
     constructor(url) { super(url); page.sockets.push(this); }
   }
@@ -102,6 +102,7 @@ function freshBridge() {
     ...context,
     window: page.window,
     WebSocket: PageSocket,
+    Date: {now: () => page.now},
     tvx: {...context.tvx, InteractionPlugin: {...context.tvx.InteractionPlugin, setupHandler() {}}}
   };
   page.window.tvx = pageContext.tvx;
@@ -126,6 +127,9 @@ const paused = freshBridge();
 paused.ws.onmessage({data: JSON.stringify({type: 'state_sync', state: 'paused', position: 75, ...clock})});
 paused.handler.handleData({message: 'seek:-15'});
 assert.equal(paused.ws.sent.find(message => message.type === 'seek_request').position, 60);
+paused.now += 30000;
+paused.handler.handleEvent({event: 'video:pause'});
+assert.equal(paused.ws.sent.find(message => message.type === 'pause').position, 75);
 const idle = freshBridge();
 idle.ws.onmessage({data: JSON.stringify({type: 'state_sync', state: 'idle', position: null, ...clock, playback_id: null})});
 idle.handler.handleEvent({event: 'video:pause'});
