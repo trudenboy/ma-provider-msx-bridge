@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.4] - 2026-10-15
+
+### Fixed
+
+- Seeking with the remote or pausing after opening Search during playback now uses the current track position. Previously, a seek could jump relative to the start of the track, and a pause could report a wildly wrong position to Music Assistant.
+
 ## [1.6.3] - 2026-10-15
 
 ### Removed

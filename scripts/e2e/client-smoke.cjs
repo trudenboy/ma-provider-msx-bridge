@@ -90,4 +90,44 @@ events.pagehide();
 assert.equal(searchSocket.readyState, 3);
 assert.equal(intervals.size, 0);
 assert.equal(timeouts.size, 0);
-console.log('Client smoke passed: init/menu, WS open, queue playlist, native pause/resume/seek, seek echo suppression, pagehide cleanup.');
+
+// Opening Search loads a new page, so its bridge starts without any playback clock
+// and must adopt the running or paused decoder position from state_sync.
+function freshBridge() {
+  const page = {sockets: [], window: {location: browserWindow.location, addEventListener() {}}};
+  class PageSocket extends WebSocket {
+    constructor(url) { super(url); page.sockets.push(this); }
+  }
+  const pageContext = {
+    ...context,
+    window: page.window,
+    WebSocket: PageSocket,
+    tvx: {...context.tvx, InteractionPlugin: {...context.tvx.InteractionPlugin, setupHandler() {}}}
+  };
+  page.window.tvx = pageContext.tvx;
+  vm.runInNewContext(source, pageContext, {filename: process.argv[2]});
+  page.handler = new page.window.MSXBridgeHandler();
+  page.handler.handleRequest('init', null, () => {});
+  page.ws = page.sockets.at(-1);
+  page.ws.onopen();
+  return page;
+}
+const clock = {playback_id: 'p2', enabled: true, source_offset: 0, source_duration: 300, served_duration: 300};
+const playing = freshBridge();
+playing.ws.onmessage({data: JSON.stringify({type: 'state_sync', state: 'playing', position: 120, ...clock})});
+playing.handler.handleData({message: 'seek:10'});
+const seekRequest = playing.ws.sent.find(message => message.type === 'seek_request');
+assert(Math.abs(seekRequest.position - 130) < 2, `seek after Search handoff must start from 120s, got ${seekRequest.position}`);
+assert.equal(seekRequest.playback_id, 'p2');
+playing.handler.handleEvent({event: 'video:pause'});
+const handoffPause = playing.ws.sent.find(message => message.type === 'pause');
+assert(Math.abs(handoffPause.position - 120) < 2, `pause after Search handoff must report ~120s, got ${handoffPause.position}`);
+const paused = freshBridge();
+paused.ws.onmessage({data: JSON.stringify({type: 'state_sync', state: 'paused', position: 75, ...clock})});
+paused.handler.handleData({message: 'seek:-15'});
+assert.equal(paused.ws.sent.find(message => message.type === 'seek_request').position, 60);
+const idle = freshBridge();
+idle.ws.onmessage({data: JSON.stringify({type: 'state_sync', state: 'idle', position: null, ...clock, playback_id: null})});
+idle.handler.handleEvent({event: 'video:pause'});
+assert(idle.ws.sent.find(message => message.type === 'pause').position < 1e6, 'an unset clock must not report Unix-epoch seconds');
+console.log('Client smoke passed: init/menu, WS open, queue playlist, native pause/resume/seek, seek echo suppression, pagehide cleanup, Search clock handoff.');
