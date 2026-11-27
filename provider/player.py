@@ -9,19 +9,39 @@ from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any, cast
 from uuid import uuid4
 
+<<<<<<< provider
 from music_assistant_models.enums import PlaybackState, PlayerFeature, PlayerType
+||||||| upstream-base
+from music_assistant_models.enums import IdentifierType, PlaybackState, PlayerFeature, PlayerType
+=======
+from music_assistant_models.enums import (
+    ContentType,
+    IdentifierType,
+    PlaybackState,
+    PlayerFeature,
+    PlayerType,
+)
+>>>>>>> upstream-head
 from music_assistant_models.errors import PlayerUnavailableError
 from music_assistant_models.player import DeviceInfo
 
+<<<<<<< provider
 from music_assistant.constants import (
     CONF_ENTRY_HTTP_PROFILE_DEFAULT_1,
     CONF_ENTRY_OUTPUT_CODEC_DEFAULT_MP3,
 )
 from music_assistant.models.player import Player, PlayerMedia
+||||||| upstream-base
+from music_assistant.constants import CONF_ENTRY_OUTPUT_CODEC_DEFAULT_MP3
+from music_assistant.models.player import PlayerMedia
+from music_assistant.models.player_protocol import PlayerProtocol
+=======
+from music_assistant.constants import PlaybackQuality
+from music_assistant.models.player import PlayerMedia
+from music_assistant.models.player_protocol import PlayerProtocol
+>>>>>>> upstream-head
 
 if TYPE_CHECKING:
-    from music_assistant_models.config_entries import ConfigEntry
-
     from .provider import MSXBridgeProvider
 
 
@@ -86,9 +106,50 @@ class MSXPlayer(Player):
         """Return poll interval in seconds."""
         return 5 if self.playback_state == PlaybackState.PLAYING else 30
 
+<<<<<<< provider
     async def get_config_entries(self) -> list[ConfigEntry]:
         """Return per-player config entries — codec is configurable per TV."""
         return [CONF_ENTRY_OUTPUT_CODEC_DEFAULT_MP3, CONF_ENTRY_HTTP_PROFILE_DEFAULT_1]
+||||||| upstream-base
+    async def get_config_entries(self) -> list[ConfigEntry]:
+        """Return per-player config entries — codec is configurable per TV."""
+        return [CONF_ENTRY_OUTPUT_CODEC_DEFAULT_MP3]
+
+    async def on_detach(self) -> None:
+        """Report the TV idle until it plays again; stop it when its player is disabled."""
+        await super().on_detach()
+        self._reset_playback()
+        if not self.mass.players.wants_protocol(self.protocol_id):
+            cast("MSXBridgeProvider", self.provider).stop_tv(self.protocol_id)
+
+    async def on_remove(self) -> None:
+        """Stop the TV when its player is removed."""
+        cast("MSXBridgeProvider", self.provider).forget_player(self.protocol_id)
+=======
+    @property
+    def playback_quality_codecs(self) -> dict[PlaybackQuality, ContentType]:
+        """Return the codec for each playback quality level the TV can play."""
+        return {
+            PlaybackQuality.LOSSLESS_COMPRESSED: ContentType.FLAC,
+            PlaybackQuality.COMPRESSED: ContentType.MP3,
+        }
+
+    @property
+    def default_playback_quality(self) -> PlaybackQuality:
+        """Return the playback quality level to use when the user picked none."""
+        return PlaybackQuality.COMPRESSED
+
+    async def on_detach(self) -> None:
+        """Report the TV idle until it plays again; stop it when its player is disabled."""
+        await super().on_detach()
+        self._reset_playback()
+        if not self.mass.players.wants_protocol(self.protocol_id):
+            cast("MSXBridgeProvider", self.provider).stop_tv(self.protocol_id)
+
+    async def on_remove(self) -> None:
+        """Stop the TV when its player is removed."""
+        cast("MSXBridgeProvider", self.provider).forget_player(self.protocol_id)
+>>>>>>> upstream-head
 
     def mark_available(self) -> None:
         """Mark the player available after proof of life from the TV."""
