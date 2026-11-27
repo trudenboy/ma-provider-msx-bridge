@@ -12,10 +12,21 @@ from music_assistant_models.errors import PlayerUnavailableError
 from music_assistant_models.player import PlayerMedia
 from music_assistant_models.player_queue import PlayerQueue
 
+<<<<<<< provider
 from music_assistant.constants import CONF_HTTP_PROFILE
 from music_assistant.providers.msx_bridge.http_server import MSXHTTPServer
 from music_assistant.providers.msx_bridge.player import MSXPlayer
 from music_assistant.providers.msx_bridge.provider import MSXBridgeProvider
+||||||| upstream-base
+from music_assistant.constants import CONF_REQUIRES_FIXED_CONTENT_LENGTH
+from provider.http_server import MSXHTTPServer
+from provider.player import MSXPlayer
+from provider.provider import MSXBridgeProvider
+=======
+from provider.http_server import MSXHTTPServer
+from provider.player import MSXPlayer
+from provider.provider import MSXBridgeProvider
+>>>>>>> upstream-head
 from tests.providers.msx_bridge.factories import queue_item as make_queue_item
 
 # --- Initialization and properties ---
@@ -52,12 +63,26 @@ def test_init_custom_params(provider: Any) -> None:
     assert p._attr_name == "Living Room TV"
 
 
+<<<<<<< provider
 async def test_http_profile_defaults_to_chunked(player: MSXPlayer) -> None:
+||||||| upstream-base
+async def test_no_fixed_content_length_entry(player: MSXPlayer) -> None:
+=======
+def test_no_content_length_required(player: MSXPlayer) -> None:
+>>>>>>> upstream-head
     """Redirected streams must receive EOF without an estimated body length."""
+<<<<<<< provider
     entries = await player.get_config_entries()
 
     http_profile = next(entry for entry in entries if entry.key == CONF_HTTP_PROFILE)
     assert http_profile.default_value == "chunked"
+||||||| upstream-base
+    entries = await player.get_config_entries()
+
+    assert CONF_REQUIRES_FIXED_CONTENT_LENGTH not in {entry.key for entry in entries}
+=======
+    assert player.requires_content_length is False
+>>>>>>> upstream-head
 
 
 def test_needs_poll_always_true(player: MSXPlayer) -> None:
